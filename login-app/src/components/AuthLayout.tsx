@@ -154,15 +154,27 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
   useDarkMode();
 
   useEffect(() => {
-    // Per-theme brand colours as CSS vars: :root for light, .dark for dark (toggled by useDarkMode).
-    // Injected after the bundled CSS so it wins by source order — and because it's a stylesheet rule
-    // (not an inline set), the .dark block can override the light value, so a dark-mode primary /
-    // background / card colour can differ from its light counterpart.
+    // Per-theme brand colours as CSS vars, injected after the bundled CSS so they win by source order
+    // — and because they are stylesheet rules (not inline sets), a dark value can override its light
+    // counterpart.
+    //
+    // The light rule is scoped `:root:where(:not(.dark))`, and that scope is the whole point. `:root`
+    // and `.dark` carry the SAME specificity, so a light value injected here beat styles.css's `.dark`
+    // defaults on source order alone: a tenant that set lightBg/lightCardBg and left darkBg/darkCardBg
+    // null kept the LIGHT page and card in dark mode while every Tailwind `dark:` variant and
+    // `--auth-heading` flipped — white heading and white labels on a white card. `:where()` adds no
+    // specificity, so the scoped rule still ranks exactly as a bare `:root` and customCssUrl (injected
+    // after it) keeps winning, as docs/branding.md promises.
+    //
+    // Which bucket a field lands in follows its name: the `light*` fields are per-mode and stop at the
+    // light rule; `primaryColor` is the base colour for BOTH modes (darkPrimaryColor merely overrides
+    // it), so it sits at :root.
     const safe = (v?: string | null) => (v && isSafeCssColor(v) ? v : null);
+    const base: string[] = [];
     const light: string[] = [];
     const dark: string[] = [];
     const add = (arr: string[], name: string, v?: string | null) => { const s = safe(v); if (s) arr.push(`${name}:${s}`); };
-    add(light, '--brand-primary', branding.primaryColor);
+    add(base, '--brand-primary', branding.primaryColor);
     add(dark, '--brand-primary', branding.darkPrimaryColor);
     add(light, '--auth-bg', branding.lightBg);
     add(light, '--auth-card-bg', branding.lightCardBg);
@@ -172,11 +184,13 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
     add(dark, '--auth-logo-bg', branding.darkLogoBg);
 
     let styleEl: HTMLStyleElement | undefined;
-    if (light.length || dark.length) {
+    if (base.length || light.length || dark.length) {
       styleEl = document.createElement('style');
       styleEl.id = 'branding-theme-vars';
       styleEl.textContent =
-        (light.length ? `:root{${light.join(';')}}` : '') + (dark.length ? `.dark{${dark.join(';')}}` : '');
+        (base.length ? `:root{${base.join(';')}}` : '')
+        + (light.length ? `:root:where(:not(.dark)){${light.join(';')}}` : '')
+        + (dark.length ? `.dark{${dark.join(';')}}` : '');
       document.head.appendChild(styleEl);
     }
 

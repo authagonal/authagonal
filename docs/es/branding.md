@@ -63,7 +63,7 @@ Coloque un archivo `branding.json` en el directorio `wwwroot/` (o móntelo en el
 | `lightLogoBg` | `string \| null` | `null` | Fondo del chip del logotipo en modo claro (ver más abajo) |
 | `darkLogoBg` | `string \| null` | `null` | Fondo del chip del logotipo en modo oscuro (ver más abajo) |
 
-Los valores de color deben ser un color hexadecimal (`#rgb`, `#rrggbb`, `#rrggbbaa`) o una expresión `rgb()`/`rgba()`/`hsl()`/`hsla()`; cualquier otra cosa se ignora. Los colores por modo se inyectan como una regla `<style id="branding-theme-vars">` después de los estilos incluidos (los valores claros en `:root`, los oscuros en `.dark`), por lo que un valor oscuro puede diferir de su contraparte clara.
+Los valores de color deben ser un color hexadecimal (`#rgb`, `#rrggbb`, `#rrggbbaa`) o una expresión `rgb()`/`rgba()`/`hsl()`/`hsla()`; cualquier otra cosa se ignora. Los colores por modo se inyectan como una regla `<style id="branding-theme-vars">` después de los estilos incluidos: los valores `light*` en `:root:where(:not(.dark))`, para que nunca se apliquen en modo oscuro; los valores oscuros en `.dark`; y `primaryColor` en `:root`, porque es el color base de ambos modos. `:where()` no añade especificidad, así que `customCssUrl` sigue anulándolos todos.
 
 ### Chip de fondo del logotipo
 

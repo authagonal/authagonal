@@ -62,7 +62,7 @@ Place a `branding.json` file in the `wwwroot/` directory (or mount it into the D
 | `lightLogoBg` | `string \| null` | `null` | Logo chip background in light mode (see below) |
 | `darkLogoBg` | `string \| null` | `null` | Logo chip background in dark mode (see below) |
 
-Color values must be a hex color (`#rgb`, `#rrggbb`, `#rrggbbaa`) or an `rgb()`/`rgba()`/`hsl()`/`hsla()` expression; anything else is ignored. The per-mode colors are injected as a `<style id="branding-theme-vars">` rule after the bundled styles (light values at `:root`, dark values at `.dark`), so a dark value can differ from its light counterpart.
+Color values must be a hex color (`#rgb`, `#rrggbb`, `#rrggbbaa`) or an `rgb()`/`rgba()`/`hsl()`/`hsla()` expression; anything else is ignored. The per-mode colors are injected as a `<style id="branding-theme-vars">` rule after the bundled styles: the `light*` values at `:root:where(:not(.dark))`, so they never apply in dark mode; the dark values at `.dark`; and `primaryColor` at `:root`, since it is the base color for both modes. `:where()` adds no specificity, so `customCssUrl` still overrides them all.
 
 ### Logo Background Chip
 

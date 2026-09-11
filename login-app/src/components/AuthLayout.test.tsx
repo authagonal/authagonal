@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import AuthLayout from './AuthLayout';
@@ -154,5 +154,94 @@ describe('welcomeTitle and welcomeSubtitle', () => {
     // a heading to every existing deployment's login page.
     expect(document.querySelector('[data-auth="welcome-title"]')).toBeNull();
     expect(document.querySelector('[data-auth="welcome-subtitle"]')).toBeNull();
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+// The per-mode branding colours are injected as a stylesheet, and a stylesheet has a cascade.
+//
+// `:root` and `.dark` carry the SAME specificity, and the injected rule is appended to <head> AFTER
+// the bundled styles.css — so `:root{--auth-bg:<lightBg>}` beat `.dark{--auth-bg:#030712}` on source
+// order alone. Every tenant that branded its light surfaces and left the dark ones null therefore had
+// a broken dark mode: the page and card stayed LIGHT while `--auth-heading` and every Tailwind `dark:`
+// variant flipped, i.e. a white heading and white labels on a white card, with a dark input below
+// them. Nothing in the config said "light only"; the config said nothing about dark at all.
+//
+// So these assert the cascade itself — which injected rules match <html> in each theme — rather than
+// the text of the rule that produced it.
+// -------------------------------------------------------------------------------------------------
+
+/** The value `name` resolves to from the injected branding rules in the CURRENT theme, or undefined
+ *  when no injected rule that matches <html> declares it (i.e. styles.css's default stands). */
+function effective(name: string): string | undefined {
+  const sheet = (document.getElementById('branding-theme-vars') as HTMLStyleElement | null)?.sheet;
+  let value: string | undefined;
+  for (const rule of Array.from(sheet?.cssRules ?? []) as CSSStyleRule[]) {
+    if (!document.documentElement.matches(rule.selectorText)) continue;
+    // Equal specificity throughout this sheet, so the last matching declaration wins.
+    const v = rule.style.getPropertyValue(name).trim();
+    if (v) value = v;
+  }
+  return value || undefined;
+}
+
+function renderWith(config: Partial<BrandingConfig>) {
+  render(
+    <MemoryRouter>
+      <BrandingContext.Provider value={branding(config)}>
+        <AuthLayout><p>content</p></AuthLayout>
+      </BrandingContext.Provider>
+    </MemoryRouter>,
+  );
+}
+
+describe('per-mode branding colours', () => {
+  // useDarkMode writes the class onto <html> and the visitor's choice into localStorage; neither is
+  // unmounted by cleanup().
+  afterEach(() => {
+    localStorage.clear();
+    document.documentElement.classList.remove('dark');
+  });
+
+  const lightOnly = { primaryColor: '#2050C8', lightBg: '#EEF1F7', lightCardBg: '#FFFFFF' };
+
+  it('leaves the built-in dark surfaces alone when a tenant brands only the light ones', () => {
+    renderWith({ ...lightOnly, darkMode: 'force' });
+
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    // The regression: these resolved to the LIGHT values, so the card stayed white under dark text.
+    expect(effective('--auth-bg')).toBeUndefined();
+    expect(effective('--auth-card-bg')).toBeUndefined();
+    // primaryColor is not a per-mode field — it is the base colour, and dark mode keeps it unless
+    // darkPrimaryColor overrides it (docs/branding.md: "the light value (or darkPrimaryColor)").
+    expect(effective('--brand-primary')).toBe('#2050C8');
+  });
+
+  it('applies those same light surfaces in light mode', () => {
+    renderWith({ ...lightOnly, darkMode: 'off' });
+
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(effective('--auth-bg')).toBe('#EEF1F7');
+    expect(effective('--auth-card-bg')).toBe('#FFFFFF');
+    expect(effective('--brand-primary')).toBe('#2050C8');
+  });
+
+  it('lets a tenant\'s dark surfaces win in dark mode', () => {
+    renderWith({
+      ...lightOnly, darkMode: 'force',
+      darkBg: '#0B1220', darkCardBg: '#131C2E', darkPrimaryColor: '#8FA5E0',
+    });
+
+    expect(effective('--auth-bg')).toBe('#0B1220');
+    expect(effective('--auth-card-bg')).toBe('#131C2E');
+    expect(effective('--brand-primary')).toBe('#8FA5E0');
+  });
+
+  it('keeps a light-only logo chip out of dark mode', () => {
+    // docs/branding.md: "set only lightLogoBg to chip the logo in light mode and leave it bare in
+    // dark mode" — the same leak, on the variable that has no .dark default to be trampled.
+    renderWith({ logoUrl: '/branding/logo.svg', lightLogoBg: '#1c1e22', darkMode: 'force' });
+
+    expect(effective('--auth-logo-bg')).toBeUndefined();
   });
 });

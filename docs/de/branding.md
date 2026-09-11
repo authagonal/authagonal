@@ -63,7 +63,7 @@ Platzieren Sie eine `branding.json`-Datei im Verzeichnis `wwwroot/` (oder mounte
 | `lightLogoBg` | `string \| null` | `null` | Hintergrund des Logo-Chips im hellen Modus (siehe unten) |
 | `darkLogoBg` | `string \| null` | `null` | Hintergrund des Logo-Chips im Dark Mode (siehe unten) |
 
-Farbwerte müssen eine Hex-Farbe (`#rgb`, `#rrggbb`, `#rrggbbaa`) oder ein `rgb()`-/`rgba()`-/`hsl()`-/`hsla()`-Ausdruck sein; alles andere wird ignoriert. Die modusabhängigen Farben werden als `<style id="branding-theme-vars">`-Regel nach den gebündelten Stilen eingefügt (helle Werte bei `:root`, dunkle Werte bei `.dark`), sodass sich ein dunkler Wert von seinem hellen Gegenstück unterscheiden kann.
+Farbwerte müssen eine Hex-Farbe (`#rgb`, `#rrggbb`, `#rrggbbaa`) oder ein `rgb()`-/`rgba()`-/`hsl()`-/`hsla()`-Ausdruck sein; alles andere wird ignoriert. Die modusabhängigen Farben werden als `<style id="branding-theme-vars">`-Regel nach den gebündelten Stilen eingefügt: die `light*`-Werte bei `:root:where(:not(.dark))`, damit sie im Dunkelmodus nie greifen; die dunklen Werte bei `.dark`; und `primaryColor` bei `:root`, da sie die Basisfarbe für beide Modi ist. `:where()` erhöht die Spezifität nicht, sodass `customCssUrl` sie weiterhin alle überschreibt.
 
 ### Logo-Hintergrund-Chip
 

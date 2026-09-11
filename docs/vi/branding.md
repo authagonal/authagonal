@@ -63,7 +63,7 @@ Khi khởi động, SPA tải `/branding.json`. Nếu tệp không tồn tại h
 | `lightLogoBg` | `string \| null` | `null` | Nền chip logo ở chế độ sáng (xem bên dưới) |
 | `darkLogoBg` | `string \| null` | `null` | Nền chip logo ở chế độ tối (xem bên dưới) |
 
-Giá trị màu phải là một màu hex (`#rgb`, `#rrggbb`, `#rrggbbaa`) hoặc một biểu thức `rgb()`/`rgba()`/`hsl()`/`hsla()`; mọi thứ khác đều bị bỏ qua. Các màu theo từng chế độ được chèn vào dưới dạng một quy tắc `<style id="branding-theme-vars">` sau các style được đóng gói (giá trị sáng tại `:root`, giá trị tối tại `.dark`), nên một giá trị tối có thể khác với đối tác sáng của nó.
+Giá trị màu phải là một màu hex (`#rgb`, `#rrggbb`, `#rrggbbaa`) hoặc một biểu thức `rgb()`/`rgba()`/`hsl()`/`hsla()`; mọi thứ khác đều bị bỏ qua. Các màu theo từng chế độ được chèn vào dưới dạng một quy tắc `<style id="branding-theme-vars">` sau các style được đóng gói: các giá trị `light*` tại `:root:where(:not(.dark))`, nên chúng không bao giờ áp dụng ở chế độ tối; các giá trị tối tại `.dark`; và `primaryColor` tại `:root`, vì đó là màu nền tảng cho cả hai chế độ. `:where()` không làm tăng độ ưu tiên (specificity), nên `customCssUrl` vẫn ghi đè được tất cả.
 
 ### Chip nền logo
 

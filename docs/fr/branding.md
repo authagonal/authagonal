@@ -63,7 +63,7 @@ Placez un fichier `branding.json` dans le répertoire `wwwroot/` (ou montez-le d
 | `lightLogoBg` | `string \| null` | `null` | Arrière-plan de la pastille du logo en mode clair (voir ci-dessous) |
 | `darkLogoBg` | `string \| null` | `null` | Arrière-plan de la pastille du logo en mode sombre (voir ci-dessous) |
 
-Les valeurs de couleur doivent être une couleur hexadécimale (`#rgb`, `#rrggbb`, `#rrggbbaa`) ou une expression `rgb()`/`rgba()`/`hsl()`/`hsla()` ; tout le reste est ignoré. Les couleurs par mode sont injectées dans une règle `<style id="branding-theme-vars">` après les styles intégrés (valeurs claires sur `:root`, valeurs sombres sur `.dark`), de sorte qu'une valeur sombre peut différer de son homologue claire.
+Les valeurs de couleur doivent être une couleur hexadécimale (`#rgb`, `#rrggbb`, `#rrggbbaa`) ou une expression `rgb()`/`rgba()`/`hsl()`/`hsla()` ; tout le reste est ignoré. Les couleurs par mode sont injectées dans une règle `<style id="branding-theme-vars">` après les styles intégrés : les valeurs `light*` sur `:root:where(:not(.dark))`, afin qu'elles ne s'appliquent jamais en mode sombre ; les valeurs sombres sur `.dark` ; et `primaryColor` sur `:root`, car c'est la couleur de base des deux modes. `:where()` n'ajoute aucune spécificité, donc `customCssUrl` les remplace toujours toutes.
 
 ### Pastille d'arrière-plan du logo
 

@@ -63,7 +63,7 @@ locale: zh-Hans
 | `lightLogoBg` | `string \| null` | `null` | 浅色模式下的徽标贴片背景（见下文） |
 | `darkLogoBg` | `string \| null` | `null` | 深色模式下的徽标贴片背景（见下文） |
 
-颜色值必须是十六进制颜色（`#rgb`、`#rrggbb`、`#rrggbbaa`）或 `rgb()`/`rgba()`/`hsl()`/`hsla()` 表达式；其他任何内容都会被忽略。按模式的颜色会作为 `<style id="branding-theme-vars">` 规则注入在打包样式之后（浅色值位于 `:root`，深色值位于 `.dark`），因此深色值可以与其浅色对应值不同。
+颜色值必须是十六进制颜色（`#rgb`、`#rrggbb`、`#rrggbbaa`）或 `rgb()`/`rgba()`/`hsl()`/`hsla()` 表达式；其他任何内容都会被忽略。按模式的颜色会作为 `<style id="branding-theme-vars">` 规则注入在打包样式之后：`light*` 值位于 `:root:where(:not(.dark))`，因此在深色模式下永远不会生效；深色值位于 `.dark`；而 `primaryColor` 位于 `:root`，因为它是两种模式共用的基础颜色。`:where()` 不增加优先级（specificity），所以 `customCssUrl` 仍然可以覆盖它们。
 
 ### 徽标背景贴片
 
