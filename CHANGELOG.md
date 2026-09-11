@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.27.1], 2026-09-11
+
+### Fixed
+
+- **Dark mode no longer keeps the LIGHT page and card when a tenant brands only its light surfaces.**
+  `AuthLayout` injects the per-mode branding colours as a stylesheet appended after the bundled CSS,
+  with the light values at `:root` — and `:root` and `.dark` carry the same specificity, so those light
+  values beat styles.css's `.dark` defaults on source order alone. A tenant that set `lightBg` /
+  `lightCardBg` and left `darkBg` / `darkCardBg` null therefore got a white page and a white card in
+  dark mode while `--auth-heading` and every Tailwind `dark:` variant flipped: a white heading and
+  white labels on a white card, above a dark input. Nothing in the config said "light only" — the
+  config said nothing about dark at all. The light rule is now scoped `:root:where(:not(.dark))`, so it
+  simply does not apply in dark mode and the built-in dark surfaces stand; `:where()` contributes no
+  specificity, so the rule still ranks exactly as a bare `:root` and `customCssUrl` keeps overriding it.
+  `lightLogoBg` was leaking the same way, against its own documentation ("set only `lightLogoBg` to chip
+  the logo in light mode and leave it bare in dark mode"). `primaryColor` is unchanged and stays at
+  `:root`: it is the base colour for both modes, which `darkPrimaryColor` overrides.
+
 ## [0.27.0], 2026-09-05
 
 ### Added
