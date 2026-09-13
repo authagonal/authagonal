@@ -21,7 +21,10 @@ public static class ResolverTestSupport
         IScimGroupRoleMappingStore mappings,
         IClientStore clients,
         IOidcProviderStore? oidcProviders = null,
-        IUpstreamRefreshTokenStore? upstreamTokenStore = null) =>
+        IUpstreamRefreshTokenStore? upstreamTokenStore = null,
+        // Null leaves the resolver reading AuthUser.OrganizationId directly — the pre-organizations
+        // behaviour, and what every test that predates them expects.
+        OrganizationSelector? organizationSelector = null) =>
         new(
             users, groups, mappings, clients,
             oidcProviders ?? new InMemoryOidcProviderStore(),
@@ -32,7 +35,8 @@ public static class ResolverTestSupport
             new PlaintextSecretProvider(),
             new InertHttpClientFactory(),
             NullLogger<UserStoreOidcSubjectResolver>.Instance,
-            upstreamTokenStore);
+            upstreamTokenStore,
+            organizationSelector);
 
     private sealed class InertHttpClientFactory : IHttpClientFactory
     {

@@ -59,6 +59,26 @@ internal sealed class AuthorizeRequest
     public string[] Prompts { get; init; } = [];
 
     /// <summary>
+    /// The organisation this authorization request is for — an organisation slug or id. Non-standard,
+    /// and named <c>organization</c> to match the parameter Auth0, WorkOS and Clerk already use, so a
+    /// relying party porting from one of them changes an issuer and not its authorize call.
+    /// </summary>
+    /// <remarks>
+    /// <c>org_slug</c> and <c>org_id</c> are accepted as aliases, because both are in the wild and
+    /// silently ignoring the one this server did not choose is the failure mode every unread
+    /// parameter in this file has had. Supplying more than one with DIFFERENT values is refused
+    /// rather than resolved by precedence: the request means two things and the server cannot know
+    /// which one the relying party will believe it got.
+    /// </remarks>
+    public string? Organization { get; init; }
+
+    /// <summary>
+    /// Set by <see cref="Read"/> when the organisation aliases disagree, so
+    /// <see cref="AuthorizeRequestSupport.Validate"/> can refuse with a message naming them.
+    /// </summary>
+    public bool OrganizationAliasesConflict { get; init; }
+
+    /// <summary>
     /// RFC 9396 <c>authorization_details</c>, read only so it can be REFUSED here.
     /// </summary>
     /// <remarks>
@@ -98,7 +118,39 @@ internal sealed class AuthorizeRequest
         "client_id", "redirect_uri", "response_type", "scope", "state", "nonce",
         "code_challenge", "code_challenge_method", "prompt", "max_age", "request_uri",
         "authorization_details",
+        // The organisation selectors. Repeating one is the same ambiguity as repeating redirect_uri,
+        // and it decides whose data the issued token may reach — so it gets the same refusal rather
+        // than a first-wins read the intermediaries in front of this server may not agree with.
+        "organization", "org_slug", "org_id",
     ];
+
+    /// <summary>
+    /// The parameter names carrying an organisation. Order is the precedence used when a request sets
+    /// only one of them; setting two with different values is refused, not ranked.
+    /// </summary>
+    private static readonly string[] OrganizationParameters = ["organization", "org_slug", "org_id"];
+
+    /// <summary>
+    /// The single organisation value the request carries, or null, plus whether two aliases
+    /// disagreed.
+    /// </summary>
+    private static (string? Value, bool Conflict) ReadOrganization(IReadableRequestParameters source)
+    {
+        string? chosen = null;
+        var conflict = false;
+
+        foreach (var name in OrganizationParameters)
+        {
+            var value = source.Get(name);
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            value = value.Trim();
+
+            if (chosen is null) chosen = value;
+            else if (!string.Equals(chosen, value, StringComparison.Ordinal)) conflict = true;
+        }
+
+        return (chosen, conflict);
+    }
 
     /// <summary>
     /// The repeated-parameter scan over the QUERY STRING specifically, for the leg <see cref="Read"/>
@@ -118,8 +170,11 @@ internal sealed class AuthorizeRequest
     public static AuthorizeRequest Read(IReadableRequestParameters source)
     {
         var rawMaxAge = source.Get("max_age");
+        var (organization, organizationConflict) = ReadOrganization(source);
         return new AuthorizeRequest
         {
+            Organization = organization,
+            OrganizationAliasesConflict = organizationConflict,
             DuplicatedParameter = SingleValuedParameters.FirstOrDefault(p => source.GetAll(p).Count() > 1),
             RedirectUri = source.Get("redirect_uri"),
             ResponseType = source.Get("response_type"),
@@ -194,6 +249,13 @@ internal sealed class AuthorizeRequest
 internal static class AuthorizeRequestSupport
 {
     /// <summary>
+    /// Upper bound on the <c>organization</c> parameter, so an unbounded value cannot be pushed
+    /// through PAR storage or reflected into an error message. Slugs and ids are short by
+    /// construction; the same ceiling SCIM tokens put on their organization binding.
+    /// </summary>
+    private const int MaxOrganizationLength = 200;
+
+    /// <summary>
     /// Runs the redirect_uri → response_type → scope → resource → PKCE validation sequence.
     /// Returns an error result to short-circuit with, or null when the request is valid
     /// (in which case <see cref="AuthorizeRequest.RequestedScopes"/> is populated).
@@ -246,6 +308,19 @@ internal static class AuthorizeRequestSupport
                 "authorization_details is not accepted at the authorization endpoint; "
                 + "request rich authorization details on the token endpoint (RFC 8693 exchange)",
                 state, issuer);
+
+        // Two organisation selectors naming different organisations. Refused rather than ranked: the
+        // request asks for two different customers' data and whichever this server picked, the relying
+        // party would have been told the other. Shape only — whether the organisation EXISTS, is
+        // enabled, is permitted for this client and has this user as a member is decided later, by the
+        // subject resolver, which is the first point at which the user is known.
+        if (request.OrganizationAliasesConflict)
+            return BuildErrorRedirect(redirectUri, "invalid_request",
+                "organization, org_slug and org_id must not name different organizations", state, issuer);
+
+        if (request.Organization is { Length: > MaxOrganizationLength })
+            return BuildErrorRedirect(redirectUri, "invalid_request",
+                $"organization must be {MaxOrganizationLength} characters or fewer", state, issuer);
 
         // OIDC Core §3.1.2.1: "If this parameter contains none with any other value, an error is
         // returned." The combination is self-contradictory — none forbids UI, every other value asks

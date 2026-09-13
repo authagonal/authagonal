@@ -77,6 +77,15 @@ public sealed class ProtocolTokenService(
         // attribute could fill, given any scope in the tenant listing org_id in its UserClaims.
         "org_id",
 
+        // The other two organization claims, reserved for exactly the same reason and with a sharper
+        // edge: org_id is at least an opaque id, while org_slug is the stable human-readable key a
+        // relying party compares against the customer instance it is serving. A user-chosen custom
+        // attribute named org_slug, released by any scope listing it, would be that comparison's
+        // answer. org_name is presentation, but it is what a consent or account screen renders, so a
+        // self-asserted one is a phishing surface rather than an authorization one.
+        "org_slug",
+        "org_name",
+
         // The marker SAML/OIDC just-in-time provisioning writes to record that an account came from
         // a trusted upstream. Only the federation callbacks may assert it; from user-controlled
         // storage it is a forged provenance claim.
@@ -2183,6 +2192,16 @@ public sealed class ProtocolTokenService(
             // org_id describes the account's placement, so it travels with the profile set.
             if (!string.IsNullOrEmpty(subject.OrganizationId))
                 claims["org_id"] = subject.OrganizationId;
+
+            // The slug and the name ride the same gate, and only when the organization is a real
+            // record rather than the bare id an account carried before organizations existed — a
+            // relying party must be able to read "org_slug is absent" as "there is no slug", not as
+            // "the server declined to tell you".
+            if (!string.IsNullOrEmpty(subject.OrganizationSlug))
+                claims["org_slug"] = subject.OrganizationSlug;
+
+            if (!string.IsNullOrEmpty(subject.OrganizationName))
+                claims["org_name"] = subject.OrganizationName;
         }
 
         // §5.4 assigns the phone claims their own scope. They rode `profile` before, which is both the wrong

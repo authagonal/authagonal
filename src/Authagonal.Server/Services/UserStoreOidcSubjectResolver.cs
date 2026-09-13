@@ -29,7 +29,12 @@ public sealed class UserStoreOidcSubjectResolver(
     ISecretProvider secretProvider,
     IHttpClientFactory httpClientFactory,
     ILogger<UserStoreOidcSubjectResolver> logger,
-    IUpstreamRefreshTokenStore? upstreamTokenStore = null) : IOidcSubjectResolver
+    IUpstreamRefreshTokenStore? upstreamTokenStore = null,
+    // Trailing and optional so every existing construction — the DI registration, the device grant,
+    // the test helpers — keeps compiling. Null means organizations are not wired at all, and the
+    // subject's OrganizationId is read straight off the account exactly as it was before they
+    // existed. AddAuthagonalCore registers one, so on a real host this is never null.
+    OrganizationSelector? organizationSelector = null) : IOidcSubjectResolver
 {
     public async Task<OidcSubjectResult> ResolveAsync(
         ClaimsPrincipal authenticatedPrincipal,
@@ -89,10 +94,24 @@ public sealed class UserStoreOidcSubjectResolver(
                 upstreamRefreshToken = stored;
         }
 
-        var subject = await BuildSubjectAsync(
-            user, client, sessionMaxExpiresAt, sessionId, federationClaims,
-            upstreamRefreshToken, upstreamConnectionId, authTime, ct);
-        return OidcSubjectResult.Allow(subject);
+        try
+        {
+            var subject = await BuildSubjectAsync(
+                user, client, sessionMaxExpiresAt, sessionId, federationClaims,
+                upstreamRefreshToken, upstreamConnectionId, authTime, ct,
+                requestedOrganization: context.RequestedOrganization);
+            return OidcSubjectResult.Allow(subject);
+        }
+        catch (OrganizationAccessDeniedException ex)
+        {
+            // Refused rather than downgraded to a token with no organization: the relying party asked
+            // for one, and a token that silently names none would be read as "this user belongs
+            // nowhere" rather than "you may not have this".
+            logger.LogInformation(
+                "Refusing authorization for {SubjectId} on client {ClientId}: {Reason}",
+                subjectId, context.ClientId, ex.Message);
+            return OidcSubjectResult.Reject(ex.Rejection, ex.Message);
+        }
     }
 
     private const string FederationClaimPrefix = "federated:";
@@ -198,16 +217,46 @@ public sealed class UserStoreOidcSubjectResolver(
         // auth_time rides along for the same reason and one of its own: refreshing is not
         // authenticating, so the value must NOT advance. Bumping it here would let any client hold a
         // session open past every max_age its RPs demand simply by refreshing.
-        var subject = await BuildSubjectAsync(
-            user, client,
-            priorSubject.SessionMaxExpiresAt,
-            priorSubject.SessionId,
-            priorSubject.FederationClaims,
-            upstreamRefreshToken,
-            priorSubject.UpstreamConnectionId,
-            priorSubject.AuthTime,
-            ct);
-        return OidcSubjectResult.Allow(subject);
+        // The organization the grant was issued for, carried across the rotation — and the reason it
+        // has to be carried at all is that everything else here is rebuilt from the user store. Without
+        // it, a session that selected organization A through the `organization` parameter would
+        // silently revert to the account's own default on its FIRST refresh, roughly one access-token
+        // lifetime after login, and hand the relying party another customer's org_id with no error
+        // anywhere.
+        //
+        // Carried only for a selection the REQUEST made. One the account merely supplied is re-derived
+        // every rotation, which is what this resolver has always done and is what keeps an operator
+        // re-tagging an account taking effect instead of being pinned by a month-old refresh chain.
+        // The distinction cannot be recovered by comparing against the account's current value —
+        // after a re-tag the carried and current values differ in BOTH cases — so it rides the grant.
+        var carriedOrganization = priorSubject.OrganizationExplicitlySelected
+            ? priorSubject.OrganizationId
+            : null;
+
+        try
+        {
+            var subject = await BuildSubjectAsync(
+                user, client,
+                priorSubject.SessionMaxExpiresAt,
+                priorSubject.SessionId,
+                priorSubject.FederationClaims,
+                upstreamRefreshToken,
+                priorSubject.UpstreamConnectionId,
+                priorSubject.AuthTime,
+                ct,
+                requestedOrganization: carriedOrganization);
+            return OidcSubjectResult.Allow(subject);
+        }
+        catch (OrganizationAccessDeniedException ex)
+        {
+            // This is where revoking a membership, disabling an organization or narrowing a client's
+            // allowed organizations actually takes effect: rejecting here revokes the refresh chain,
+            // so the grant dies rather than re-minting for up to the absolute refresh lifetime.
+            logger.LogInformation(
+                "Refusing refresh for {SubjectId} on client {ClientId}: {Reason}",
+                priorSubject.SubjectId, context.ClientId, ex.Message);
+            return OidcSubjectResult.Reject(ex.Rejection, ex.Message);
+        }
     }
 
     private enum UpstreamRefreshOutcome { Valid, Revoked, Transient }
@@ -337,6 +386,19 @@ public sealed class UserStoreOidcSubjectResolver(
     /// device-code and admin token paths that already know the subject and don't go
     /// through the authorize endpoint.
     /// </summary>
+    /// <param name="requestedOrganization">
+    /// The organisation this request is for — the <c>organization</c> authorize parameter at
+    /// authorize, the organisation carried forward from the prior grant at refresh, and null on the
+    /// device and admin-mint paths, which name none and fall through to the client restriction and
+    /// then the account's own default. Trailing and after <paramref name="ct"/> deliberately, so every
+    /// existing positional caller keeps compiling — the same reason
+    /// <c>ProtocolTokenService.MintAccessTokenAsync</c> puts its forced-claims argument there.
+    /// </param>
+    /// <exception cref="OrganizationAccessDeniedException">
+    /// The organisation does not exist, is disabled, is not permitted for this client, or the user is
+    /// not an active member of it. Both resolver entry points turn this into an
+    /// <see cref="OidcSubjectResult.Rejected"/>; the device grant turns it into an OAuth error.
+    /// </exception>
     public async Task<OidcSubject> BuildSubjectAsync(
         AuthUser user,
         OAuthClient? client,
@@ -346,7 +408,8 @@ public sealed class UserStoreOidcSubjectResolver(
         string? upstreamRefreshToken = null,
         string? upstreamConnectionId = null,
         DateTimeOffset? authTime = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? requestedOrganization = null)
     {
         // SCIM group → role mappings (empty store = no-op). Fetch the user's groups once,
         // used for both the optional groups claim and effective-role resolution.
@@ -369,6 +432,12 @@ public sealed class UserStoreOidcSubjectResolver(
                     roles.Add(m.Role);
         }
 
+        // Which organization this token is for. With no selector wired — a host constructing this
+        // resolver by hand — the account's own field is the answer, which is what it has always been.
+        var organization = organizationSelector is null
+            ? new OrganizationSelection { OrganizationId = user.OrganizationId }
+            : await organizationSelector.SelectAsync(user, client, requestedOrganization, ct);
+
         return new OidcSubject
         {
             SubjectId = user.Id,
@@ -378,7 +447,10 @@ public sealed class UserStoreOidcSubjectResolver(
             FamilyName = user.LastName,
             Phone = user.Phone,
             Locale = user.Locale,
-            OrganizationId = user.OrganizationId,
+            OrganizationId = organization.OrganizationId,
+            OrganizationSlug = organization.Slug,
+            OrganizationName = organization.DisplayName,
+            OrganizationExplicitlySelected = organization.ExplicitlySelected,
             Roles = roles.Count > 0 ? roles.ToList() : null,
             Groups = groups,
             CustomAttributes = user.CustomAttributes.Count > 0

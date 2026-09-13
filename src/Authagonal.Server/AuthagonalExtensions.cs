@@ -471,6 +471,9 @@ public static class AuthagonalExtensions
         var allowInsecureHttp = configuration.GetValue("Auth:AllowInsecureHttp", false);
         services.AddAuthagonalProtocol(o => o.AllowInsecureHttp = allowInsecureHttp);
 
+        // Which organization a request is for, and whether the user and client may have it. Scoped
+        // because the stores it reads are (the cloud resolves them per tenant, per request).
+        services.AddScoped<OrganizationSelector>();
         // Subject resolver — maps ClaimsPrincipal / OidcSubject back to AuthUser via the user store.
         services.AddScoped<UserStoreOidcSubjectResolver>();
         services.AddScoped<IOidcSubjectResolver>(sp => sp.GetRequiredService<UserStoreOidcSubjectResolver>());

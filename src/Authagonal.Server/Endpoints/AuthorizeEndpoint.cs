@@ -485,7 +485,12 @@ public static class AuthorizeEndpoint
             // principal, and is the single place that maps identity → OidcSubject.
             var resolution = await subjectResolver.ResolveAsync(
                 httpContext.User,
-                new OidcSubjectResolutionContext(clientId, requestedScopes, request.Resources),
+                // The `organization` parameter reaches the resolver here and nowhere else. It survives
+                // the round trip through login because the whole authorize URL rides as returnUrl, and
+                // a PAR request carries it in the pushed payload rather than the query — so neither leg
+                // needed teaching about it.
+                new OidcSubjectResolutionContext(
+                    clientId, requestedScopes, request.Resources, request.Organization),
                 ct);
 
             if (resolution is OidcSubjectResult.Rejected rejected)

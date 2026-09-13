@@ -14,6 +14,49 @@
   hash — the same kind of attacker-influenced cost parameter every other imported format in this
   file already bounds — so a crafted `$s2$` blob with an oversized or non-power-of-two N, or r*p at
   or above 2^30, is refused before any derivation runs rather than after.
+- **Organizations: a customer inside a tenant, as a first-class record rather than a string on a user.**
+  `AuthUser.OrganizationId` has always been emitted as the `org_id` claim, but it was a bare label —
+  written by TCC provisioning or a SCIM token binding, with nowhere to say what the organization was,
+  who belonged to it, or whether it could be authenticated as at all. So an ISV serving many customers
+  from one tenant had no way to make "which customer is this token for" a question the authorization
+  server answered; every relying party routed it for itself, off data the token did not carry.
+  `Organization` (immutable opaque id, immutable tenant-unique slug, display name, enabled flag,
+  metadata bag, branding override) and `OrganizationMembership` (the record that actually authorises
+  issuing a token for one) are stored through the new `IOrganizationStore` and
+  `IOrganizationMembershipStore`. The shipped defaults are empty and read-only, registered by TryAdd,
+  so a deployment that never creates an organization behaves exactly as it did — nothing can be
+  selected, no gate engages, and a legacy `OrganizationId` keeps emitting `org_id` from the user
+  record. The writes refuse rather than accept into a process-local dictionary, because an
+  organization disabled on one node would otherwise keep minting tokens on every other.
+- **`organization` on `/connect/authorize`, and `org_id` / `org_slug` / `org_name` on the tokens.**
+  Named to match the parameter Auth0, WorkOS and Clerk already use, so a relying party porting from one
+  of them changes an issuer and not its authorize call; `org_slug` and `org_id` are accepted as
+  aliases, because both are in the wild and quietly ignoring the one this server did not choose is the
+  failure mode every unread parameter on this endpoint has had. Two of them naming DIFFERENT
+  organizations is refused rather than ranked — the request means two things, and whichever was picked
+  the client would have been told the other — and all three joined the single-valued list, so
+  repeating one is refused like a repeated `redirect_uri`. Neither PAR nor the login round trip needed
+  work: the PAR endpoint stores every field it is given, and the whole authorize URL already rides as
+  `returnUrl`. The three claims are gated on `profile` exactly as `org_id` was, and all three are
+  reserved — `org_slug` especially, since it is the stable key a relying party compares against the
+  customer instance it is serving, and a user-chosen custom attribute of that name would have been that
+  comparison's answer. Resolution order is the parameter, then a client registered against exactly one
+  organization, then the account's own — and the first two, being explicit, must satisfy membership
+  while the third need not, so creating an organization cannot retroactively lock out the users already
+  tagged with its id.
+- **The selected organization survives refresh rotation, and is re-checked on every one.** Everything
+  else on the subject is rebuilt from the user store at refresh, so an organization that lived only on
+  the subject would have reverted to the account default on the FIRST rotation — roughly one
+  access-token lifetime after login, handing the relying party another customer's `org_id` with no
+  error anywhere. It is carried on `OidcSubject.OrganizationExplicitlySelected` rather than inferred by
+  comparing the carried value against the account's current one, because after an operator re-tags an
+  account those two differ whether the organization was selected or merely inherited, and the inferred
+  version got it wrong in exactly that case. A grant that only inherited the account's organization is
+  still re-derived each rotation, so re-tagging keeps taking effect. Revoking a membership, disabling
+  an organization or narrowing a client's `RestrictedToOrganizationIds` therefore ends the refresh
+  chain at the next rotation rather than waiting out the absolute refresh lifetime. Not yet supported,
+  and listed in `docs/organizations.md`: the org picker, org-scoped SSO connections, org-scoped roles,
+  delegated org admin, per-org SCIM, invitations, org-aware userinfo and org on an exchanged token.
 
 ## [0.27.1], 2026-09-11
 

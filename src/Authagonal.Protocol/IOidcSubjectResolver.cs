@@ -41,7 +41,13 @@ public interface IOidcSubjectResolver
 public sealed record OidcSubjectResolutionContext(
     string ClientId,
     IReadOnlyList<string> RequestedScopes,
-    IReadOnlyList<string> RequestedResources);
+    IReadOnlyList<string> RequestedResources,
+    /// <summary>
+    /// The <c>organization</c> authorize parameter's value — an organisation slug or id — or null
+    /// when the request named none, which is every request a host that predates organisations sends.
+    /// Defaulted so existing three-argument construction keeps compiling.
+    /// </summary>
+    string? RequestedOrganization = null);
 
 public abstract record OidcSubjectResult
 {
@@ -103,6 +109,41 @@ public sealed record OidcSubject
     /// line. Hosts that don't use it can leave it null — nothing else reads it.
     /// </summary>
     public string? OrganizationId { get; init; }
+
+    /// <summary>
+    /// The organisation's tenant-unique slug, emitted as the <c>org_slug</c> claim under the same
+    /// scope gate as <see cref="OrganizationId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Null whenever <see cref="OrganizationId"/> is a bare string with no organisation record behind
+    /// it — the shape every account had before organisations were a first-class entity. A relying
+    /// party that wants a stable, human-readable key reads this; one that only needs identity reads
+    /// <see cref="OrganizationId"/>, which is present in both cases.
+    /// </remarks>
+    public string? OrganizationSlug { get; init; }
+
+    /// <summary>
+    /// The organisation's display name, emitted as the <c>org_name</c> claim under the same scope
+    /// gate as <see cref="OrganizationId"/>. Null for the same reason as
+    /// <see cref="OrganizationSlug"/>, and never anything an authorization decision should rest on —
+    /// it is mutable presentation, unlike the id and the slug.
+    /// </summary>
+    public string? OrganizationName { get; init; }
+
+    /// <summary>
+    /// True when the organisation was NAMED by the request — the <c>organization</c> parameter, or a
+    /// client registered against exactly one — rather than derived from the account's own stored
+    /// organisation. Never emitted as a claim.
+    /// </summary>
+    /// <remarks>
+    /// This is what has to survive a refresh rotation, and it is not derivable afterwards. A grant
+    /// that named its organisation must keep that organisation across every rotation and be re-checked
+    /// against membership on each one, while a grant that merely inherited the account's must be
+    /// re-derived so an operator re-tagging the account still takes effect. Comparing the carried
+    /// organisation against the account's CURRENT value cannot tell the two apart — after a re-tag they
+    /// differ in both cases — so the fact travels with the grant instead of being reconstructed.
+    /// </remarks>
+    public bool OrganizationExplicitlySelected { get; init; }
 
     /// <summary>Roles to emit as <c>roles</c> claims on access and id tokens.</summary>
     public IReadOnlyList<string>? Roles { get; init; }
