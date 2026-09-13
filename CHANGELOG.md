@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **`FileSystemBackupTarget`/`-Source` no longer let two table prefixes collide on the same backup
+  directory.** Every backupId-keyed path (data files, the manifest) was built from `backupId` alone —
+  `{root}/{backupId}/...` — and `backupId` is a bare `yyyyMMdd-HHmmss` timestamp, truncated to the
+  second, with no `--prefix` in it at all. Two DIFFERENT tenants' full backups landing in the same
+  wall-clock second therefore got the identical directory — tenant B's manifest and data files
+  landing on top of tenant A's, in a target whose whole documented purpose (`--prefix`) is running
+  more than one tenant into one place. The chain-root FILE that names "the full this incremental
+  applies onto" was already scoped per prefix correctly (`.lastfull-{scope}`, via the `scope`
+  parameter every watermark/chain-root method already took), so `BackupChainRootTests
+  .TheChainRootIsScopedPerPrefix` could still observe a tenant A incremental naming tenant B's full as
+  its parent whenever both landed in the same second and happened to share the (also unscoped) bare
+  id — the failure this test flagged intermittently before this fix. Fixed by giving
+  `FileSystemBackupTarget`/`FileSystemBackupSource` an optional constructor `tablePrefix`, nesting
+  every backupId-keyed path one level under it (`{root}/{prefix}/{backupId}/...`) exactly the way
+  `BlobBackupTarget` (Authagonal Cloud's target) already nests every path under its
+  constructor-supplied tenant slug — `--prefix` on `tools/Authagonal.Backup` now threads through to
+  it. `BackupId` itself is untouched: still the exact historical `yyyyMMdd-HHmmss[-incr]`, so every
+  existing archive, every consumer that compares or pattern-matches the id string (unaffected because
+  the string never changes), and `docs/backup-restore.md`'s documented id shape all keep working
+  unmodified — only unprefixed (single-tenant) runs keep the flat historical directory layout too;
+  prefixed runs gain the extra nesting level, documented alongside the existing example.
+
 ## [0.27.1], 2026-09-11
 
 ### Fixed

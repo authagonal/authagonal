@@ -103,12 +103,16 @@ clientOptions.Retry.MaxDelay = TimeSpan.FromSeconds(30);
 clientOptions.Retry.Mode = RetryMode.Exponential;
 
 var serviceClient = new TableServiceClient(connectionString, clientOptions);
-var target = new FileSystemBackupTarget(outputRoot);
+var normalizedPrefix = string.IsNullOrEmpty(prefix) ? null : prefix;
+// Nests this run's backups under {outputRoot}/{prefix}/ — see FileSystemBackupTarget's constructor
+// remarks. Without it, two --prefix values run against the same --output within the same
+// wall-clock second shared a directory (backupId alone named it, with one-second resolution).
+var target = new FileSystemBackupTarget(outputRoot, normalizedPrefix);
 
 var options = new BackupOptions
 {
     Tables = tableFilter,
-    TablePrefix = string.IsNullOrEmpty(prefix) ? null : prefix,
+    TablePrefix = normalizedPrefix,
     Incremental = incremental,
     Gzip = useGzip,
     DryRun = dryRun,
@@ -146,6 +150,12 @@ var manifest = await service.RunAsync();
 
 Console.WriteLine();
 Console.WriteLine($"Backup: {manifest.BackupId}");
+// Restore's --input wants the actual directory, which is nested under the prefix when one is set —
+// print it rather than making the operator reconstruct it from --prefix themselves.
+var backupDir = normalizedPrefix is null
+    ? Path.Combine(outputRoot, manifest.BackupId)
+    : Path.Combine(outputRoot, normalizedPrefix, manifest.BackupId);
+Console.WriteLine($"Location: {backupDir}");
 Console.WriteLine($"Mode: {manifest.Mode}");
 foreach (var (table, info) in manifest.Tables)
 {

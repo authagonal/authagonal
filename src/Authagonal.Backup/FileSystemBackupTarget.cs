@@ -2,7 +2,28 @@ using System.Text.Json;
 
 namespace Authagonal.Backup;
 
-public sealed class FileSystemBackupTarget(string rootDirectory) : IBackupTarget
+/// <param name="tablePrefix">
+/// The multi-tenant table prefix this instance writes backups for, or null for the common
+/// single-tenant case. Nests every backupId-keyed path (data files, the manifest) one directory
+/// level under it — <c>{rootDirectory}/{tablePrefix}/{backupId}/...</c> — mirroring how
+/// <c>BlobBackupTarget</c> already nests every path under its constructor-supplied tenant slug.
+/// <para>
+/// Without it, <c>backupId</c> alone named the directory: a bare <c>yyyyMMdd-HHmmss</c> timestamp
+/// with one-second resolution and no prefix in it. Two DIFFERENT prefixes writing into the same
+/// <c>rootDirectory</c> within the same wall-clock second — the documented purpose of
+/// <c>--prefix</c> is exactly running more than one tenant into one target — got the identical
+/// directory, so tenant B's manifest and data files could land on top of tenant A's.
+/// </para>
+/// <para>
+/// The watermark and chain-root files below are NOT nested under it: those already carry their own
+/// <c>scope</c> parameter (a digest of the prefix and table set, from
+/// <see cref="BackupOptions.WatermarkScope"/>), which has isolated them correctly since it was
+/// added. Only the backupId-keyed paths lacked an equivalent, since <see cref="IBackupTarget"/>
+/// has no scope parameter for those — the constructor is where <c>BlobBackupTarget</c> supplies it,
+/// so that is where this does too.
+/// </para>
+/// </param>
+public sealed class FileSystemBackupTarget(string rootDirectory, string? tablePrefix = null) : IBackupTarget
 {
     /// <summary>
     /// Owner-only, on both the directory and every file inside it.
@@ -22,6 +43,15 @@ public sealed class FileSystemBackupTarget(string rootDirectory) : IBackupTarget
 
     private const UnixFileMode OwnerOnlyDirectory =
         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+
+    /// <summary>
+    /// <see cref="rootDirectory"/>, nested one level under <see cref="tablePrefix"/> when one is set.
+    /// The base for every backupId-keyed path; unaffected watermark/chain-root paths use
+    /// <see cref="rootDirectory"/> directly (see the constructor's <c>tablePrefix</c> remarks).
+    /// </summary>
+    private string BackupRoot => string.IsNullOrEmpty(tablePrefix)
+        ? rootDirectory
+        : Path.Combine(rootDirectory, BackupPath.Safe(tablePrefix, nameof(tablePrefix)));
 
     private static string EnsureDirectory(string root, string backupId)
     {
@@ -52,14 +82,14 @@ public sealed class FileSystemBackupTarget(string rootDirectory) : IBackupTarget
 
     public Task<Stream> OpenWriteAsync(string backupId, string fileName, CancellationToken ct = default)
     {
-        var dir = EnsureDirectory(rootDirectory, backupId);
+        var dir = EnsureDirectory(BackupRoot, backupId);
         var stream = CreateFile(Path.Combine(dir, BackupPath.Safe(fileName, nameof(fileName))));
         return Task.FromResult(stream);
     }
 
     public async Task WriteManifestAsync(string backupId, BackupManifest manifest, CancellationToken ct = default)
     {
-        var dir = EnsureDirectory(rootDirectory, backupId);
+        var dir = EnsureDirectory(BackupRoot, backupId);
         var json = JsonSerializer.Serialize(manifest, BackupJsonContext.Default.BackupManifest);
 
         // Through the same owner-only create as the data files. The manifest carries the file hashes
