@@ -58,6 +58,10 @@ public static class ServiceCollectionExtensions
     private const string MfaWebAuthnIndexTable = "MfaWebAuthnIndex";
     private const string SamlReplayCacheTable = "SamlReplayCache";
     private const string OidcStateStoreTable = "OidcStateStore";
+    private const string OrganizationsTable = "Organizations";
+    private const string OrganizationSlugsTable = "OrganizationSlugs";
+    private const string OrganizationMembersTable = "OrganizationMembers";
+    private const string UserMembershipsTable = "UserMemberships";
 
     // Defaults for the transient SAML-replay / OIDC-state caches (the Azure path reads these from
     // CacheOptions, which lives in Authagonal.Server; for a single-tenant host these defaults match).
@@ -90,6 +94,7 @@ public static class ServiceCollectionExtensions
             ScimTokensTable, ScimGroupsTable, ScimGroupExternalIdsTable, ScimGroupRoleMappingsTable,
             MfaCredentialsTable, MfaChallengesTable, MfaWebAuthnIndexTable,
             SamlReplayCacheTable, OidcStateStoreTable, RateLimitCountersTable,
+            OrganizationsTable, OrganizationSlugsTable, OrganizationMembersTable, UserMembershipsTable,
         };
         if (nameIndexesEnabled) names.AddRange([UserFirstNamesTable, UserLastNamesTable]);
 
@@ -142,6 +147,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ISamlProviderStore>(new SqlSamlProviderStore(T(SamlProvidersTable), live, tombstones));
         services.TryAddSingleton<ISsoDomainStore>(new SqlSsoDomainStore(T(SsoDomainsTable), live, tombstones));
         services.TryAddSingleton<IScimTokenStore>(new SqlScimTokenStore(T(ScimTokensTable), live, tombstones));
+        services.TryAddSingleton<IOrganizationStore>(new SqlOrganizationStore(
+            T(OrganizationsTable), T(OrganizationSlugsTable), live, tombstones));
+        services.TryAddSingleton<IOrganizationMembershipStore>(new SqlOrganizationMembershipStore(
+            T(OrganizationMembersTable), T(UserMembershipsTable), live, tombstones));
         services.TryAddSingleton<IScimGroupStore>(new SqlScimGroupStore(
             T(ScimGroupsTable), T(ScimGroupExternalIdsTable), live, tombstones));
         services.TryAddSingleton<IScimGroupRoleMappingStore>(new SqlScimGroupRoleMappingStore(T(ScimGroupRoleMappingsTable), live, tombstones));

@@ -84,6 +84,23 @@
   token-issuance gate calls is a point read on the organization-partitioned row. Both stores take
   the optional `IChangeWriter` every other Dynamo store does, though no DynamoDB variant of the
   backup engine exists yet to read it (`BackupService`/`RestoreService` are Table-Storage-only).
+- **Self-hosted SQL provider for `IOrganizationStore` and `IOrganizationMembershipStore`.** Same
+  generic pk/sk/`attrs` table this provider uses everywhere, no EF Core and no migration files.
+  `SqlOrganizationStore` writes the organization as a full document to an `Organizations` table
+  (pk = `org`, sk = the organization id — the same shared-partition shape `SqlRoleStore` and
+  `SqlScopeStore` use) and keeps a separate `OrganizationSlugs` table (pk = `orgslug`, sk = the
+  slug, attrs = the owning organization id) so resolving the `organization` authorize parameter is
+  a point read, not a scan — matching `TableOrganizationStore` on Azure and `DynamoOrganizationStore`
+  on DynamoDB; it rejects an upsert whose slug is already held by a different organization id, and a
+  slug rename writes the new lookup row before dropping the stale one. `SqlOrganizationMembershipStore`
+  writes each membership as a full document to both `OrganizationMembers` (pk = `org|{orgId}`, for
+  the admin "who is a member" listing) and `UserMemberships` (pk = `user|{userId}`, for the
+  token-issuance path's "which organizations may this person authenticate as") — the same
+  forward/reverse shape `SqlScimTokenStore` uses — and the membership `GetAsync` the token-issuance
+  gate calls is a point read on the organization-partitioned row. Every lookup across both stores is
+  exact-key equality, so none of it depends on the byte-ordinal `COLLATE "C"` pin the range-scanning
+  SQL stores need; it is still verified against the same ICU-collated PostgreSQL fixture the rest of
+  the provider is tested on. Both stores take the optional `IChangeWriter` every other SQL store does.
 
 ## [0.27.1], 2026-09-11
 

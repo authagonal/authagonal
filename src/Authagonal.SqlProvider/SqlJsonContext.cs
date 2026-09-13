@@ -26,6 +26,8 @@ namespace Authagonal.SqlProvider;
 [JsonSerializable(typeof(ScimGroupRoleMapping))]
 [JsonSerializable(typeof(MfaCredential))]
 [JsonSerializable(typeof(MfaChallenge))]
+[JsonSerializable(typeof(Organization))]
+[JsonSerializable(typeof(OrganizationMembership))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 internal partial class SqlJsonContext : JsonSerializerContext;
