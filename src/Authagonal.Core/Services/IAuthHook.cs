@@ -92,11 +92,26 @@ public interface IAuthHook
     Task OnPasswordChangedAsync(string userId, string email, string changedVia, CancellationToken ct = default) => Task.CompletedTask;
 
     /// <summary>
-    /// Richer pre-mint gate than <see cref="OnTokenIssuedAsync"/>: fires with the resolved
-    /// subject, scope set, and requested authority once they are known (delegated exchanges
-    /// and agent client_credentials mints). Throw to reject the issuance. Default: no-op —
-    /// the three-argument <see cref="OnTokenIssuedAsync"/> keeps firing unchanged.
+    /// Richer pre-mint gate than <see cref="OnTokenIssuedAsync"/>: fires with the resolved subject,
+    /// scope set, organisation and requested authority once they are known. Throw to reject the
+    /// issuance. Default: no-op — the three-argument <see cref="OnTokenIssuedAsync"/> keeps firing
+    /// unchanged.
     /// </summary>
+    /// <remarks>
+    /// Fires from every interactive grant — <c>authorization_code</c>, <c>refresh_token</c> and
+    /// <c>device_code</c> — and from the two agentic mints (delegated token exchange, and
+    /// <c>client_credentials</c> for a client with an agent profile). The interactive paths are what
+    /// make this a per-(user, client, request) veto: <see cref="OnTokenIssuedAsync"/> is called from
+    /// the token endpoint with a null <c>subjectId</c>, by design, because it runs before the grant is
+    /// redeemed, so it can refuse a client but never a user.
+    /// <para>
+    /// On the interactive paths a plain exception becomes <c>access_denied</c> with its message as the
+    /// <c>error_description</c>; throwing <c>ProtocolTokenException</c> names your own OAuth error
+    /// instead. On the refresh path the gate runs BEFORE the rotation, so a refusal leaves the
+    /// presented refresh token unconsumed and the grant intact — this refuses an issuance, it does not
+    /// end a session.
+    /// </para>
+    /// </remarks>
     Task OnTokenIssuingAsync(TokenIssuanceContext context, CancellationToken ct = default) => Task.CompletedTask;
 
     /// <summary>Called after a delegated (composite-identity) token is minted via token
@@ -140,6 +155,21 @@ public sealed record TokenIssuanceContext(
     IReadOnlyList<string> Scopes,
     string? RequestedAuthorityJson)
 {
+    /// <summary>
+    /// The organisation this token is being minted for, or null when the request selected none.
+    /// </summary>
+    /// <remarks>
+    /// Init-only rather than positional so the existing five-argument construction keeps compiling.
+    /// A gate deciding "may this person have a token for this application" almost always needs the
+    /// third term — which customer they are acting for — and without it a host could only answer the
+    /// question tenant-wide. Populated on every mint path that has a subject.
+    /// </remarks>
+    public string? OrganizationId { get; init; }
+
+    /// <summary>The organisation's slug, when it resolves to an organisation record. Null for a bare
+    /// organisation id with no record behind it, exactly as the <c>org_slug</c> claim is.</summary>
+    public string? OrganizationSlug { get; init; }
+
     /// <summary>
     /// The authority that is actually about to be minted — the ceiling ∩ consent ∩ subject, after
     /// every narrowing. This is what a gate should decide on.

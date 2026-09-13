@@ -50,6 +50,75 @@ public static class AuthagonalExtensions
     /// Full single-tenant registration. Calls <see cref="AddAuthagonalCore"/> and adds
     /// singleton stores, KeyManager, background services, and other single-tenant infrastructure.
     /// </summary>
+    /// <remarks>
+    /// <b>Registration order: a storage provider goes BEFORE this call.</b> Registering
+    /// <c>AddAuthagonalPostgres</c>, <c>AddDynamoStorage</c> or your own <c>IUserStore</c> first is what
+    /// makes this method skip its built-in Azure Table Storage wiring — the check is for an existing
+    /// <c>IUserStore</c> registration. A provider registered afterwards loses every interface this
+    /// method has already filled, silently, because those use <c>TryAdd</c>.
+    /// <para>
+    /// Three interfaces are special-cased, and the reason is worth knowing if you are adding a fourth.
+    /// <c>IOrganizationStore</c>, <c>IOrganizationMembershipStore</c> and
+    /// <c>IScimGroupRoleMappingStore</c> have empty, read-only in-memory fallbacks in
+    /// <see cref="AddAuthagonalCore"/> so that DI resolves on a host wiring no store at all. Those
+    /// fallbacks are lifted out of the way before the storage provider registers and restored by
+    /// <c>TryAdd</c> afterwards, so the provider's durable store wins and the fallback still covers a
+    /// host with no provider. Without that dance <c>TryAdd</c> keeps the FIRST registration rather than
+    /// the best one, and the provider's never happens: the host resolves a store that answers empty
+    /// forever and refuses every write, with nothing logged.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// Interfaces whose only registration in <see cref="AddAuthagonalCore"/> is an empty, read-only
+    /// in-memory fallback: the last resort for a host that wires no durable store at all.
+    /// </summary>
+    /// <remarks>
+    /// They have to be lifted out of the way before a storage provider registers, and put back after.
+    /// Both sides use <c>TryAdd</c>, and <c>TryAdd</c> keeps the FIRST registration rather than the
+    /// best one — so with the fallback already in the collection the provider's own registration was
+    /// not merely losing, it never happened, and no amount of inspecting the collection afterwards
+    /// could tell that a durable store had been available. The effect on a batteries-included host was
+    /// that organizations could never be created and a SCIM group→role mapping could never be read:
+    /// the store resolved, answered empty forever and refused every write, with nothing logged.
+    /// </remarks>
+    private static readonly Type[] InMemoryFallbackServices =
+    [
+        typeof(IOrganizationStore),
+        typeof(IOrganizationMembershipStore),
+        typeof(IScimGroupRoleMappingStore),
+    ];
+
+    /// <summary>
+    /// Removes the fallback registrations so a storage provider's <c>TryAdd</c> actually takes effect.
+    /// Only removes a descriptor whose implementation is the known fallback type, so a host's own
+    /// deliberate store — registered before this call — is left exactly where it is.
+    /// </summary>
+    private static void LiftInMemoryFallbacks(IServiceCollection services)
+    {
+        foreach (var descriptor in services
+            .Where(d => InMemoryFallbackServices.Contains(d.ServiceType) && IsInMemoryFallback(d))
+            .ToList())
+        {
+            services.Remove(descriptor);
+        }
+
+        static bool IsInMemoryFallback(ServiceDescriptor d) =>
+            d.ImplementationType == typeof(InMemoryOrganizationStore)
+            || d.ImplementationType == typeof(InMemoryOrganizationMembershipStore)
+            || d.ImplementationType == typeof(InMemoryScimGroupRoleMappingStore);
+    }
+
+    /// <summary>
+    /// Puts the fallbacks back, by <c>TryAdd</c>, so they apply only where the provider supplied
+    /// nothing.
+    /// </summary>
+    private static void RestoreInMemoryFallbacks(IServiceCollection services)
+    {
+        services.TryAddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
+        services.TryAddSingleton<IOrganizationMembershipStore, InMemoryOrganizationMembershipStore>();
+        services.TryAddSingleton<IScimGroupRoleMappingStore, InMemoryScimGroupRoleMappingStore>();
+    }
+
     public static IServiceCollection AddAuthagonal(this IServiceCollection services, IConfiguration configuration, Action<ClusteringBuilder>? configureClustering = null)
     {
         services.AddAuthagonalCore(configuration, configureClustering);
@@ -70,6 +139,9 @@ public static class AuthagonalExtensions
         // the UserFirstNames / UserLastNames index writes (which use a single hot
         // partition and cap throughput at ~2k ops/sec at scale).
         var nameIndexesEnabled = configuration.GetValue("Storage:NameIndexesEnabled", true);
+        // Out of the way before the provider registers — see LiftInMemoryFallbacks for why "after"
+        // cannot work.
+        LiftInMemoryFallbacks(services);
         if (!services.Any(d => d.ServiceType == typeof(Authagonal.Core.Stores.IUserStore)))
         {
             if (!string.IsNullOrWhiteSpace(tableServiceUri))
@@ -85,6 +157,9 @@ public static class AuthagonalExtensions
                 throw new InvalidOperationException("Either Storage:ConnectionString or Storage:TableServiceUri must be configured");
             }
         }
+
+        // …and back afterwards, by TryAdd, so they apply only where the provider supplied nothing.
+        RestoreInMemoryFallbacks(services);
 
         // Data protection
         var dataProtection = services.AddDataProtection()
@@ -471,6 +546,9 @@ public static class AuthagonalExtensions
         var allowInsecureHttp = configuration.GetValue("Auth:AllowInsecureHttp", false);
         services.AddAuthagonalProtocol(o => o.AllowInsecureHttp = allowInsecureHttp);
 
+        // Which organization a request is for, and whether the user and client may have it. Scoped
+        // because the stores it reads are (the cloud resolves them per tenant, per request).
+        services.AddScoped<OrganizationSelector>();
         // Subject resolver — maps ClaimsPrincipal / OidcSubject back to AuthUser via the user store.
         services.AddScoped<UserStoreOidcSubjectResolver>();
         services.AddScoped<IOidcSubjectResolver>(sp => sp.GetRequiredService<UserStoreOidcSubjectResolver>());
@@ -498,6 +576,13 @@ public static class AuthagonalExtensions
         services.TryAddSingleton<IProvisioningAppQuota, UnlimitedProvisioningAppQuota>();
         // SCIM group → role mappings (empty default; the cloud registers a per-tenant store).
         services.TryAddSingleton<IScimGroupRoleMappingStore, InMemoryScimGroupRoleMappingStore>();
+        // Organizations (empty defaults; the cloud registers per-tenant stores). Empty here IS the
+        // pre-organizations behaviour and not a degraded one: nothing can select an organization, so
+        // no membership gate engages, and a legacy AuthUser.OrganizationId keeps emitting org_id from
+        // the user record exactly as before. Registered rather than left unresolvable because the
+        // subject resolver takes both and every host builds one.
+        services.TryAddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
+        services.TryAddSingleton<IOrganizationMembershipStore, InMemoryOrganizationMembershipStore>();
         // The store wins when there is one, because the ADMIN API writes to the store.
         //
         // This was TryAddScoped<IProvisioningAppProvider, ConfigProvisioningAppProvider>() and nothing else,

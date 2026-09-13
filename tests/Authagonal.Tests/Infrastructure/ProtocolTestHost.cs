@@ -171,6 +171,11 @@ public sealed class ProtocolTestHost : IAsyncDisposable
                 SubjectId = subjectId,
                 Email = authenticatedPrincipal.FindFirstValue(ClaimTypes.Email),
                 EmailVerified = true,
+                // Echoed so a test can prove the `organization` parameter actually REACHED the
+                // resolver on this host. It did not: the endpoint parsed and validated the parameter
+                // and then built a three-argument resolution context, dropping it. Null for every
+                // request that names no organization, which is every pre-existing test.
+                OrganizationId = context.RequestedOrganization,
             }));
         }
 

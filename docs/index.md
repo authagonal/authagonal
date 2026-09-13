@@ -57,6 +57,7 @@ Task-oriented guides for the flows teams build most often:
 - **[Federated Sessions](federated-sessions)** — revoke the local session when the upstream IdP does (`RevalidateOnRefresh`).
 - **[WebSocket Auth](websocket-auth)** — authenticate browser WebSockets through the BFF without exposing a token.
 - **[Agentic Auth](agentic-auth)** — delegate a user's authority to AI agents: registered agents, fine-grained RFC 9396 authority, composite delegation tokens (RFC 8693 `act`), standing consent, just-in-time approvals, capability tickets.
+- **[Organizations](organizations)** — serve many customers from one tenant: `Organization` and membership records, the `organization` authorize parameter, `org_id` / `org_slug` / `org_name` on the tokens, organization-scoped roles, and refusal of non-members.
 
 ## Architecture
 

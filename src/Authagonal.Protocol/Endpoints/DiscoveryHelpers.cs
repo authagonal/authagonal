@@ -29,7 +29,10 @@ internal static class DiscoveryHelpers
         "name", "given_name", "family_name",
         "phone_number",
         "roles", "groups",
-        "org_id",
+        // org_slug and org_name accompany org_id whenever the organization is a real record. Listed
+        // for the reason the remarks above give for org_id: an RP that builds its claim mapping from
+        // claims_supported, or validates received claims against it, must not meet them as a surprise.
+        "org_id", "org_slug", "org_name",
     ];
 
     /// <summary>

@@ -1,0 +1,136 @@
+using System.Collections.Concurrent;
+using Authagonal.Core.Models;
+using Authagonal.Core.Stores;
+
+namespace Authagonal.Tests.Infrastructure;
+
+/// <summary>
+/// Writable in-memory <see cref="IOrganizationStore"/> for tests. The shipped default
+/// (<c>InMemoryOrganizationStore</c>) deliberately refuses writes, so tests that need organizations
+/// to exist use this instead — the same split as <see cref="WritableScimGroupRoleMappingStore"/>.
+/// </summary>
+public sealed class WritableOrganizationStore : IOrganizationStore
+{
+    private readonly ConcurrentDictionary<string, Organization> _byId = new(StringComparer.Ordinal);
+
+    public Task<Organization?> GetAsync(string organizationId, CancellationToken ct = default) =>
+        Task.FromResult(_byId.TryGetValue(organizationId, out var org) ? org : null);
+
+    public Task<Organization?> GetBySlugAsync(string slug, CancellationToken ct = default) =>
+        Task.FromResult(_byId.Values.FirstOrDefault(o => string.Equals(o.Slug, slug, StringComparison.Ordinal)));
+
+    public Task<IReadOnlyList<Organization>> ListAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<Organization>>([.. _byId.Values]);
+
+    public Task UpsertAsync(Organization organization, CancellationToken ct = default)
+    {
+        OrganizationSlug.Validate(organization.Slug);
+
+        // Mirrors the uniqueness a durable store enforces on the slug index: two rows answering one
+        // slug would make the `organization` authorize parameter ambiguous.
+        var slugClash = _byId.Values.FirstOrDefault(o =>
+            string.Equals(o.Slug, organization.Slug, StringComparison.Ordinal) &&
+            !string.Equals(o.Id, organization.Id, StringComparison.Ordinal));
+        if (slugClash is not null)
+            throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by organization '{slugClash.Id}'.");
+
+        // The id and slug namespaces must not overlap, because the `organization` authorize parameter
+        // is resolved slug-first and then by id: a slug equal to some other organisation's id would
+        // make that parameter mean one organisation and every stored id mean another. The refusal is
+        // here rather than at the lookup so the ambiguity can never be written in the first place.
+        var crossClash = _byId.Values.FirstOrDefault(o =>
+            !string.Equals(o.Id, organization.Id, StringComparison.Ordinal) &&
+            (string.Equals(o.Id, organization.Slug, StringComparison.Ordinal) ||
+             string.Equals(o.Slug, organization.Id, StringComparison.Ordinal)));
+        if (crossClash is not null)
+            throw new InvalidOperationException(
+                $"Organization '{organization.Id}'/'{organization.Slug}' collides with the id or slug of "
+                + $"organization '{crossClash.Id}'; ids and slugs share one namespace.");
+
+        _byId[organization.Id] = organization;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(string organizationId, CancellationToken ct = default)
+    {
+        _byId.TryRemove(organizationId, out _);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Write a row WITHOUT the validation or the namespace check, for tests that must prove a lookup
+    /// is safe even against a row a current store would refuse — a legacy row, or one written before
+    /// the rule existed. Never use it to assert normal behaviour.
+    /// </summary>
+    public Task ForceAsync(Organization organization)
+    {
+        _byId[organization.Id] = organization;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Seed helper — creates an enabled, membership-gated organization.</summary>
+    public WritableOrganizationStore With(string id, string slug, string displayName, bool requireMembership = true, bool enabled = true)
+    {
+        _byId[id] = new Organization
+        {
+            Id = id,
+            Slug = slug,
+            DisplayName = displayName,
+            RequireMembershipForTokens = requireMembership,
+            Enabled = enabled,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        return this;
+    }
+}
+
+/// <summary>
+/// Writable in-memory <see cref="IOrganizationMembershipStore"/> for tests. Keyed the way the durable
+/// stores are — one entry per (organization, user) — so a test that asserts the gate is asserting the
+/// same lookup production performs.
+/// </summary>
+public sealed class WritableOrganizationMembershipStore : IOrganizationMembershipStore
+{
+    private readonly ConcurrentDictionary<string, OrganizationMembership> _rows = new(StringComparer.Ordinal);
+
+    private static string Key(string organizationId, string userId) => $"{organizationId}|{userId}";
+
+    public Task<OrganizationMembership?> GetAsync(string organizationId, string userId, CancellationToken ct = default) =>
+        Task.FromResult(_rows.TryGetValue(Key(organizationId, userId), out var m) ? m : null);
+
+    public Task<IReadOnlyList<OrganizationMembership>> ListByUserAsync(string userId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<OrganizationMembership>>(
+            [.. _rows.Values.Where(m => string.Equals(m.UserId, userId, StringComparison.Ordinal))]);
+
+    public Task<IReadOnlyList<OrganizationMembership>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<OrganizationMembership>>(
+            [.. _rows.Values.Where(m => string.Equals(m.OrganizationId, organizationId, StringComparison.Ordinal))]);
+
+    public Task UpsertAsync(OrganizationMembership membership, CancellationToken ct = default)
+    {
+        _rows[Key(membership.OrganizationId, membership.UserId)] = membership;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(string organizationId, string userId, CancellationToken ct = default)
+    {
+        _rows.TryRemove(Key(organizationId, userId), out _);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Seed helper — grants a membership in the given status (active by default).</summary>
+    public WritableOrganizationMembershipStore With(
+        string organizationId, string userId, string status = MembershipStatus.Active, params string[] roles)
+    {
+        _rows[Key(organizationId, userId)] = new OrganizationMembership
+        {
+            OrganizationId = organizationId,
+            UserId = userId,
+            Status = status,
+            Roles = [.. roles],
+            CreatedAt = DateTimeOffset.UtcNow,
+            JoinedAt = status == MembershipStatus.Active ? DateTimeOffset.UtcNow : null,
+        };
+        return this;
+    }
+}

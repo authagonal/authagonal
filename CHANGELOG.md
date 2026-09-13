@@ -52,6 +52,359 @@
   imported, skipped, updated and failed counts plus the first 20 failures as line number + reason.
   See `docs/migration.md` — "NDJSON user import" — for the full schema and CLI reference.
 
+### Added
+
+- **`PasswordHasher` now verifies legacy Scrypt.NET (`$s2$`) password hashes and rehashes them to
+  native PBKDF2 on first login** — the same accept-on-import, upgrade-on-login contract bcrypt and
+  ASP.NET Identity V3 already have. `$s2$<N>$<r>$<p>$<salt-b64>$<hash-b64>` is the format
+  Scrypt.NET's `ScryptEncoder` writes. `System.Security.Cryptography` ships PBKDF2 and HKDF but no
+  scrypt on either net9.0 or net10.0, so `Authagonal.Core.Services.Scrypt` is a from-scratch RFC
+  7914 implementation (Salsa20/8 core, BlockMix, ROMix, an outer PBKDF2-HMAC-SHA256), checked
+  against all four of the RFC's published test vectors. N, r and p are read out of the stored
+  hash — the same kind of attacker-influenced cost parameter every other imported format in this
+  file already bounds — so a crafted `$s2$` blob with an oversized or non-power-of-two N, or r*p at
+  or above 2^30, is refused before any derivation runs rather than after.
+- **Organizations: a customer inside a tenant, as a first-class record rather than a string on a user.**
+  `AuthUser.OrganizationId` has always been emitted as the `org_id` claim, but it was a bare label —
+  written by TCC provisioning or a SCIM token binding, with nowhere to say what the organization was,
+  who belonged to it, or whether it could be authenticated as at all. So an ISV serving many customers
+  from one tenant had no way to make "which customer is this token for" a question the authorization
+  server answered; every relying party routed it for itself, off data the token did not carry.
+  `Organization` (immutable opaque id, immutable tenant-unique slug, display name, enabled flag,
+  metadata bag, branding override) and `OrganizationMembership` (the record that actually authorises
+  issuing a token for one) are stored through the new `IOrganizationStore` and
+  `IOrganizationMembershipStore`. The shipped defaults are empty and read-only, registered by TryAdd,
+  so a deployment that never creates an organization behaves exactly as it did — nothing can be
+  selected, no gate engages, and a legacy `OrganizationId` keeps emitting `org_id` from the user
+  record. The writes refuse rather than accept into a process-local dictionary, because an
+  organization disabled on one node would otherwise keep minting tokens on every other.
+- **`organization` on `/connect/authorize`, and `org_id` / `org_slug` / `org_name` on the tokens.**
+  Named to match the parameter Auth0, WorkOS and Clerk already use, so a relying party porting from one
+  of them changes an issuer and not its authorize call; `org_slug` and `org_id` are accepted as
+  aliases, because both are in the wild and quietly ignoring the one this server did not choose is the
+  failure mode every unread parameter on this endpoint has had. Two of them naming DIFFERENT
+  organizations is refused rather than ranked — the request means two things, and whichever was picked
+  the client would have been told the other — and all three joined the single-valued list, so
+  repeating one is refused like a repeated `redirect_uri`. Neither PAR nor the login round trip needed
+  work: the PAR endpoint stores every field it is given, and the whole authorize URL already rides as
+  `returnUrl`. The three claims are gated on `profile` exactly as `org_id` was, and all three are
+  reserved — `org_slug` especially, since it is the stable key a relying party compares against the
+  customer instance it is serving, and a user-chosen custom attribute of that name would have been that
+  comparison's answer. Resolution order is the parameter, then a client registered against exactly one
+  organization, then the account's own — and the first two, being explicit, must satisfy membership
+  while the third need not, so creating an organization cannot retroactively lock out the users already
+  tagged with its id.
+- **The selected organization survives refresh rotation, and is re-checked on every one.** Everything
+  else on the subject is rebuilt from the user store at refresh, so an organization that lived only on
+  the subject would have reverted to the account default on the FIRST rotation — roughly one
+  access-token lifetime after login, handing the relying party another customer's `org_id` with no
+  error anywhere. It is carried on `OidcSubject.OrganizationExplicitlySelected` rather than inferred by
+  comparing the carried value against the account's current one, because after an operator re-tags an
+  account those two differ whether the organization was selected or merely inherited, and the inferred
+  version got it wrong in exactly that case. A grant that only inherited the account's organization is
+  still re-derived each rotation, so re-tagging keeps taking effect. Revoking a membership, disabling
+  an organization or narrowing a client's `RestrictedToOrganizationIds` therefore ends the refresh
+  chain at the next rotation rather than waiting out the absolute refresh lifetime. Not yet supported,
+  and listed in `docs/organizations.md`: the org picker, org-scoped SSO connections, delegated org
+  admin, per-org SCIM, invitations and org-scoped groups.
+- **Organization-scoped roles: `OrganizationMembership.Roles` now reaches the `roles` claim.** The
+  field was persisted from the start and read by nothing, so a tenant could record that someone was an
+  Auditor at one customer and a Site Manager at another, and every token said the same thing either
+  way. They are unioned with the directly-assigned and SCIM-group-granted sets under the same `roles`
+  scope gate, so a resource server does not have to know how a role was granted — but it does have to
+  read `org_id` alongside, because the same name now means "in THIS organization". Bounded three ways:
+  only an EXPLICITLY selected organization contributes (the same asymmetry the membership gate has, so
+  an organization merely inherited from the account grants nothing); only an `active` membership
+  contributes, because an invited-but-unaccepted or suspended member grants nothing exactly as they
+  authorise nothing; and the roles are read from the row keyed by the SELECTED organization, so a role
+  held in one can never reach a token issued for another. Re-read on every rotation, so changing them
+  reaches a live session at its next refresh. A request that selects no organization produces the role
+  set it produced before — the union is over an empty list.
+- **`IAuthHook.OnTokenIssuingAsync` now fires from the three interactive mints, so a host can veto a
+  token per (user, client, request).** There was no such gate. `OnTokenIssuedAsync` is documented
+  "Throw to reject the token issuance" but the token endpoint calls it with a NULL subject —
+  deliberately, since it runs before the grant is redeemed — so a host could refuse a client and never
+  a user, and the question an authorization server is asked most often ("may THIS person have a token
+  for THIS application right now") had nowhere to live. `OnTokenIssuingAsync` did carry the subject but
+  fired from exactly two agentic mints, so it was unreachable for `authorization_code`, `refresh_token`
+  and `device_code` — the three grants that issue tokens to people. No interface change: it is a
+  default interface member, every existing implementor that does not override it stays a no-op, and the
+  two agentic call sites keep firing on exactly their own conditions. Throwing yields `access_denied`
+  with the exception message as `error_description`; throwing a `ProtocolTokenException` names your own
+  error instead. On the refresh path the gate runs BEFORE the rotation, so a refusal leaves the
+  presented token unconsumed and the family intact — a host saying "not now" is not a host ending the
+  session. The device grant is handled outside `TokenGrantHandlers` and did not inherit its error
+  mapping, so it was taught to translate the refusal rather than surface a 500.
+- **Azure Table Storage provider for `IOrganizationStore` and `IOrganizationMembershipStore`.**
+  `TableOrganizationStore` writes the organization as a full document to `Organizations` and
+  maintains a separate `OrganizationSlugs` lookup table so resolving the `organization` authorize
+  parameter is a point read — the same separate-index-table shape `TableScimGroupStore` uses for its
+  external-id lookup — and rejects an upsert whose slug is already held by a different organization
+  id, matching the in-memory reference store. `TableOrganizationMembershipStore` writes each
+  membership as a full document to both `OrganizationMembers` (partitioned by organization, for the
+  admin "who is a member" listing) and `UserMemberships` (partitioned by user, for the token-issuance
+  path's "which organizations may this person authenticate as"), the same dual-full-document shape
+  `TableScimTokenStore` uses for its forward/reverse indexes. Both stores route every write through
+  `IChangeWriter` so incremental backups capture them, and all four tables are now in
+  `BackupDefaults.Tables` (and `ChangeLoggedTables`, since every write path logs unconditionally).
+- **DynamoDB provider for `IOrganizationStore` and `IOrganizationMembershipStore`.**
+  `DynamoOrganizationStore` writes the organization as a full document to an `Organizations` table
+  (pk = `org`, sk = the organization id) and maintains a separate `OrganizationSlugs` table
+  (pk = `orgslug`, sk = the slug, data = the owning organization id) so resolving the `organization`
+  authorize parameter is a `GetItem`, not a query — the same separate-table shape
+  `TableOrganizationStore` uses on Azure — and rejects an upsert whose slug is already held by a
+  different organization id, matching the in-memory reference store; a slug rename writes the new
+  lookup row before dropping the stale one. `DynamoOrganizationMembershipStore` writes each
+  membership as a full document to both `OrganizationMembers` (pk = `org|{orgId}`, for the admin
+  "who is a member" listing) and `UserMemberships` (pk = `user|{userId}`, for the token-issuance
+  path's "which organizations may this person authenticate as"), the same dual-full-document shape
+  `DynamoScimTokenStore` uses for its forward/reverse rows; the membership `GetAsync` the
+  token-issuance gate calls is a point read on the organization-partitioned row. Both stores take
+  the optional `IChangeWriter` every other Dynamo store does, though no DynamoDB variant of the
+  backup engine exists yet to read it (`BackupService`/`RestoreService` are Table-Storage-only).
+- **Self-hosted SQL provider for `IOrganizationStore` and `IOrganizationMembershipStore`.** Same
+  generic pk/sk/`attrs` table this provider uses everywhere, no EF Core and no migration files.
+  `SqlOrganizationStore` writes the organization as a full document to an `Organizations` table
+  (pk = `org`, sk = the organization id — the same shared-partition shape `SqlRoleStore` and
+  `SqlScopeStore` use) and keeps a separate `OrganizationSlugs` table (pk = `orgslug`, sk = the
+  slug, attrs = the owning organization id) so resolving the `organization` authorize parameter is
+  a point read, not a scan — matching `TableOrganizationStore` on Azure and `DynamoOrganizationStore`
+  on DynamoDB; it rejects an upsert whose slug is already held by a different organization id, and a
+  slug rename writes the new lookup row before dropping the stale one. `SqlOrganizationMembershipStore`
+  writes each membership as a full document to both `OrganizationMembers` (pk = `org|{orgId}`, for
+  the admin "who is a member" listing) and `UserMemberships` (pk = `user|{userId}`, for the
+  token-issuance path's "which organizations may this person authenticate as") — the same
+  forward/reverse shape `SqlScimTokenStore` uses — and the membership `GetAsync` the token-issuance
+  gate calls is a point read on the organization-partitioned row. Every lookup across both stores is
+  exact-key equality, so none of it depends on the byte-ordinal `COLLATE "C"` pin the range-scanning
+  SQL stores need; it is still verified against the same ICU-collated PostgreSQL fixture the rest of
+  the provider is tested on. Both stores take the optional `IChangeWriter` every other SQL store does.
+
+### Fixed
+
+- **`org_id` and `org_slug` are no longer gated on the `profile` scope.** They are authorization
+  context, not profile data: they say which customer a token may act for, which is the first thing a
+  multi-customer resource server checks — before it has decided whether it cares about a name, and
+  often on a token that requested no profile at all. Under the gate an API-only client asking for
+  `openid` alone got a token with no organization on it, which reads as "belongs to nobody": the
+  resource server either refuses a legitimate caller or, silently and much worse, treats the token as
+  unscoped and serves every customer's data from it. The same gate also broke the exchange restriction
+  added last slice — a resource-server token carried no `org_id`, so a client exchanging its OWN token
+  for its OWN organization was refused as unattributed. `org_name` keeps the gate, because it is
+  presentation and nothing should authorize on it. Ungating discloses nothing the client had not
+  already established: it chose the organization, or it is restricted to one, and both names are
+  reserved so no scope's `UserClaims` and no custom attribute can forge them. An account with no
+  organization still emits none of the three. Applies to the access token, the ID token, both userinfo
+  endpoints and introspection.
+- **A mixed-case `organization` parameter resolves by id only.** Slugs are lowercase-only by the store
+  rule, so a value carrying any uppercase character cannot be one — and lowercasing it to ask the slug
+  index anyway asked "is some organization's slug the lowercased form of this id?". Where one was, a
+  caller naming an id was handed a different customer. An all-lowercase value still resolves slug-first
+  and then by id, which the store's cross-namespace rule keeps unambiguous.
+- **`OAuthClient.RestrictedToOrganizationIds` is normalized and validated at the admin API.** The
+  model's `= []` initializer does not survive JSON binding, so a body carrying an explicit
+  `"restrictedToOrganizationIds": null` left the property null and every later `.Count` on it — on the
+  authorize and exchange paths — was a NullReferenceException: one malformed admin call turned every
+  subsequent token request for that client into a 500. Null is now normalized to empty on both the
+  create and update paths, entries must match the organization id shape `^[A-Za-z0-9._~-]{1,200}$` or
+  the request is `400 invalid_request`, and the token paths carry their own `?? []` guard so neither
+  half has to trust the other. An id outside that shape is one no `organization` parameter can send, so
+  a restriction listing it matches nothing — and a restriction that matches nothing refuses every
+  request, which is a lockout written by a typo.
+- **The two agentic mints pass the organization to `IAuthHook.OnTokenIssuingAsync`.** The delegated
+  token exchange is the mint a gate most needs it for — it mints USER authority for an agent, and
+  "which customer" is half of that decision. `client_credentials` passes none and cannot: it has no
+  subject at all, and its context-binding seam runs after this gate by design, so a host vetoing on a
+  machine token's bound context does it inside that transformer.
+
+- **Organization ids are resolved as ids.** The organization carried across a refresh rotation, the
+  account's own `OrganizationId` tag and a client's `RestrictedToOrganizationIds` entries were all
+  resolved slug-first and then by id. All three hold ids this server minted, so the slug attempt was
+  both a wasted round trip and a correctness hole: the moment any organization took the slug `a1`, a
+  live grant issued for the organization whose ID is `a1` re-pointed at the newcomer on its next
+  refresh, and every account tagged `a1` followed it. Only the `organization` authorize parameter is
+  ambiguous, because only it comes from the caller, and only it keeps the slug-then-id order. A
+  legacy-tagged account on a deployment with no organizations now costs one point read per mint
+  instead of two misses. Ids and slugs are additionally refused as one namespace at the store: an
+  upsert whose slug equals another organization's id, or whose id equals another's slug, is rejected
+  rather than written.
+- **The Azure Table client store now persists `OAuthClient.RestrictedToOrganizationIds`.** `ClientEntity`
+  had no column for it, so on the Table-backed host — which is the batteries-included default — an
+  operator who restricted a client to an organization saw the restriction vanish on the next read, with
+  no error. The SQL and Dynamo stores serialise the whole record and were unaffected, which is how it
+  passed review of those two. A row written before the column exists reads back as unrestricted rather
+  than null. `ClientSeedService` maps the field too, so a per-customer deployment can name its client's
+  organization in configuration.
+- **The storage provider's organization and SCIM group→role stores are reachable from DI again.**
+  `AddAuthagonalCore` registers empty in-memory fallbacks and `AddTableStorage` registers the durable
+  stores, in that order, and both use `TryAdd` — which keeps the FIRST registration, not the best one.
+  So the provider's registration never happened at all, and the batteries-included host resolved a
+  store that answered empty forever and refused every write, silently. `IScimGroupRoleMappingStore` had
+  the same bug and had had it since it shipped. The fallbacks are now lifted out of the way before the
+  provider registers and restored by `TryAdd` afterwards, so they still apply to a host that wires no
+  provider, and a host's own deliberate store is never removed.
+- **An organization membership can no longer grant tenant- or platform-scoped authority.** Membership
+  roles were unioned into the `roles` claim verbatim, so a row listing `tenant:admin` minted it. A
+  membership is customer-scoped data — written by a customer's own administrator once delegated
+  administration exists, and by whatever provisioning connector a customer points at the tenant before
+  then — so that was an escalation from "may manage my own organization" to "may administer the
+  tenant". Roles matching `ReservedRolePrefixes` (`tenant:`, `platform:`, case-insensitively) are
+  dropped at the union and logged at Warning. Directly-assigned roles and SCIM group→role mappings are
+  untouched: those come from an operator through an authenticated admin surface.
+- **Token exchange enforces the exchanging client's organization restriction.** `org_id` was copied off
+  the subject token without consulting `RestrictedToOrganizationIds`, so a client registered to serve
+  one customer could be handed any user's token for another and exchange it into a token that still
+  named that other customer — the restriction never consulted, because no `organization` parameter was
+  involved. A token carrying no organization is refused for a restricted client too: unattributed is
+  not permission to act for anyone. Refusals are `invalid_target`, like every other target-policy
+  refusal on that path.
+- **The embedded `Authagonal.Protocol` host honours the `organization` parameter.** It shares
+  `AuthorizeRequest.Read`, so it parsed the parameter and refused a malformed one — and then built a
+  three-argument resolution context and dropped the value, issuing a token for whatever organization
+  the subject already carried. It was validating a parameter it did not act on.
+- **The `organization` parameter has a charset, and slugs have a shape.** A length cap is not a
+  charset: the value is a storage lookup key and was reflected into `error_description`, so a path
+  separator, a fragment marker or a control character in it meant one thing to this server and another
+  to whatever read it next. It must now match `^[A-Za-z0-9._~-]{1,200}$` (RFC 3986 unreserved) or the
+  request is `invalid_request`. The slug attempt is lowercased so `organization=Acme` resolves the slug
+  `acme`; the id attempt stays exact, because lowercasing an opaque id names a different organization.
+  `Organization.Slug` itself must match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`, enforced by every
+  store — an uppercase slug would otherwise be a stored value no request could ever resolve.
+- **A caller-supplied organization value is no longer echoed to the relying party or logged at
+  Information.** `error_description` travels to the RP, into its logs and often onto a screen, so
+  echoing an attacker-chosen string there made the authorize endpoint a reflection surface for no
+  diagnostic gain. The refusal is now a fixed message; the value is logged at Debug, and the
+  Information line records the refusal without it.
+- **`TokenIssuanceContext` carries the organization.** A gate answering "may this person have a token
+  for this application" almost always needs the third term — which customer they are acting for — and
+  without it a host could only decide tenant-wide. `OrganizationId` and `OrganizationSlug` are
+  init-only, so existing five-argument construction is unaffected.
+
+- **`/connect/userinfo` answers `org_id`, `org_slug`, `org_name` and `roles` from the presented token
+  rather than re-reading the user record.** The record carries one default organization while the
+  token names the one the grant was issued for, so on a multi-organization account the two disagree by
+  construction: a user signed in to organization B was told `org_id` A by the same server that had just
+  put B in their ID token, and handed A's roles with it. Re-tagging an account no longer changes what
+  userinfo says about a token already issued. Profile fields (`email`, `name`, `phone_number`) stay
+  live, because those are the subject's current details and that is what userinfo is for; these are
+  authorization context, which belongs to the grant. The `Authagonal.Protocol` host already answered
+  from the token and needed only the two new claim names.
+- **RFC 8693 token exchange keeps the organization; `/connect/introspect` reports it.** The exchange
+  rebuilds its subject from the subject token's claims and skips every reserved name — and all three
+  organization claims are reserved — so a downscoped token came out naming no organization at all while
+  the token it was derived from named one. An exchange is a projection of an existing session, and a
+  projection that drops the customer it was acting for is not narrower, it is unattributed: a resource
+  server gating on `org_id` read it as belonging nowhere. A host's `ITokenExchangeSubjectTransformer`
+  may still re-bind deliberately, which is what context-bound exchanges are for, but it now has to say
+  so rather than inherit silence. Introspection emits `org_id`/`org_slug` when present, so a resource
+  server that introspects instead of validating the JWT itself gets the same answer as one that does.
+- **`TableOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
+  validates the slug pattern.** A slug rename used to write the new lookup row and drop the stale one
+  under a plain read-then-write — a relying party hard-codes the slug into the `organization`
+  authorize parameter, so a rename is now refused outright (`InvalidOperationException`) rather than
+  supported unsafely. Two concurrent creates racing on the same brand-new slug could both pass the
+  read-then-write uniqueness check and both write, so a new organization's slug row is now created
+  with the table's own insert-only primitive (`AddEntityAsync`), and the loser's 409 is what rejects
+  it — not a check that ran too early. An id and a slug can also no longer resolve to two different
+  organizations (an incoming slug matching another organization's id, or vice versa, is refused), and
+  `UpsertAsync` now validates the slug against `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing
+  anything. `TableOrganizationMembershipStore.DeleteAsync` already deleted both rows and wrote both
+  tombstones unconditionally — confirmed with a test for the orphan-repair case (only the reverse row
+  present) rather than changed.
+- **`DynamoOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
+  validates the slug pattern; both organization stores now log upserts as well as deletes, and
+  membership delete no longer skips the reverse row.** A slug rename used to write the new lookup
+  row and drop the stale one under a plain read-then-write — a relying party hard-codes the slug
+  into the `organization` authorize parameter, so a rename is now refused outright
+  (`InvalidOperationException`) rather than supported unsafely. Two concurrent creates racing on the
+  same brand-new slug could both pass the read-then-write uniqueness check and both write, so a new
+  organization's slug row is now claimed with `DynamoTable.PutIfAbsentAsync`
+  (`attribute_not_exists(pk)`), and the loser's `ConditionalCheckFailedException` is what rejects
+  it, not a check that ran too early. An id and a slug can also no longer resolve to two different
+  organizations (an incoming slug matching another organization's id, or vice versa, is refused with
+  a `GetItem` point read each way), and `UpsertAsync` now validates the slug against
+  `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing anything. Both `DynamoOrganizationStore`
+  and `DynamoOrganizationMembershipStore` had mirrored `DynamoScimTokenStore`'s tombstone-on-delete-
+  only pattern, which was the wrong sibling to copy — `DynamoUserStore`/`DynamoProvisioningAppStore`/
+  `DynamoAgentProfileStore` all log an upsert too, so an incremental backup window that only ever saw
+  upserts would have carried nothing for either store. `DynamoOrganizationMembershipStore.DeleteAsync`
+  checked the forward row first and returned early when it was missing, so a membership left
+  inconsistent by an earlier partial write (one row present, the other not) could never be cleaned up
+  by a delete that only ever looked at the row it was about to skip; it now deletes and tombstones
+  both rows unconditionally.
+- **`SqlOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
+  validates the slug pattern; `SqlOrganizationMembershipStore.DeleteAsync` no longer skips the
+  reverse row.** A slug rename used to write the new lookup row and drop the stale one under a plain
+  read-then-write — a relying party hard-codes the slug into the `organization` authorize parameter,
+  so a rename is now refused outright (`InvalidOperationException`) rather than supported unsafely.
+  Two concurrent creates racing on the same brand-new slug could both pass the read-then-write
+  uniqueness check and both write, so a new organization's slug row is now claimed with
+  `SqlTable.PutIfAbsentAsync` (`INSERT ... ON CONFLICT (pk, sk) DO NOTHING`), and the loser's `false`
+  return is what rejects it — not a check that ran too early. An id and a slug can also no longer
+  resolve to two different organizations (an incoming slug matching another organization's id, or
+  vice versa, is refused with a point read each way), and `UpsertAsync` now validates the slug
+  against `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing anything, matching
+  `TableOrganizationStore` and `DynamoOrganizationStore`. `SqlOrganizationMembershipStore.DeleteAsync`
+  checked the forward (`OrganizationMembers`) row first and let its absence skip the reverse
+  (`UserMemberships`) row's deletion and tombstone entirely, so a membership left inconsistent by an
+  earlier partial write (one row present, the other missing) could never be fully cleaned up; each
+  side is now checked-and-removed independently with `SqlTable.DeleteIfExistsReturningAsync`, so
+  whichever row actually exists is deleted and tombstoned regardless of the other's state.
+- **`SqlOrganizationStore.UpsertAsync` self-heals a crash between the slug insert and the
+  organization write, and shares the slug rule with every other store.** Slug-first ordering (see
+  above) means a process that died right after `SqlTable.PutIfAbsentAsync` claimed the slug row but
+  before the organization document itself was written leaves a slug row owned by an id with no
+  organization row behind it — and a retry of that exact create used to read its own earlier claim
+  back as "held by another organization," permanently. `UpsertAsync` now checks the pre-existing
+  slug row's owner on that path: the same id means self-heal (finish the write), a different id
+  means the genuine conflict it always was. The slug pattern is no longer a copy of the regex kept
+  in `Organization.Slug`'s remarks — it now calls `OrganizationSlug.Validate` (`Authagonal.Core`),
+  the one place the rule lives for every store to share.
+- **`DynamoOrganizationStore.UpsertAsync` self-heals a crash between the slug insert and the
+  organization write, shares the slug rule with every other store, and
+  `DynamoOrganizationMembershipStore.DeleteAsync` now tombstones only the row it actually
+  removed.** Slug-first ordering (see above) means a process that died right after
+  `DynamoTable.PutIfAbsentAsync` claimed the slug row but before the organization item itself was
+  written leaves a slug row owned by an id with no organization item behind it — and a retry of that
+  exact create used to read its own earlier claim back as "already held by another organization,"
+  permanently. `UpsertAsync` now checks the pre-existing slug row's owner on that path: the same id
+  means self-heal (finish the write), a different id means the genuine conflict it always was. The
+  slug pattern is no longer a copy of the regex kept in `Organization.Slug`'s remarks — it now calls
+  `OrganizationSlug.Validate` (`Authagonal.Core`), the one place the rule lives for every store to
+  share. Separately, `DeleteAsync` wrote a tombstone for both membership rows unconditionally, even
+  when one (or both) never existed, so deleting an already-gone or partially-orphaned membership
+  fabricated change-log entries for rows nothing had actually removed; it now deletes each side with
+  `DynamoTable.DeleteIfExistsReturningAsync` (`ReturnValues=ALL_OLD`) independently and tombstones
+  only the row that came back non-null.
+
+### Changed
+
+- **Registration order is documented, not changed: a storage provider goes BEFORE `AddAuthagonal()`.**
+  That existing `IUserStore` registration is what makes `AddAuthagonal()` skip its built-in Azure Table
+  wiring, and a provider registered afterwards loses every interface already filled by `TryAdd`.
+  `IOrganizationStore`, `IOrganizationMembershipStore` and `IScimGroupRoleMappingStore` are the three
+  special cases — their empty in-memory fallbacks are lifted before the provider registers and restored
+  by `TryAdd` after — and that is now stated on `AddAuthagonal` and in `docs/installation.md`.
+- **`Organization.Id` has a documented shape.** It must match `^[A-Za-z0-9._~-]{1,200}$`, the same as
+  the `organization` parameter, so every id can always be sent as one. It SHOULD also carry at least
+  one character a slug may not (uppercase, `.`, `_`, `~`) so it can never collide with the slug
+  namespace; `org_7f3a9c` is the recommended shape, since `_` is not slug-legal. Advisory, not
+  enforced — stores already refuse an actual collision. The values already in the field are arbitrary:
+  they come from a downstream app's TCC `/try` response or an operator's `ScimToken.OrganizationId`
+  binding.
+
+- **`OidcSubjectResolutionContext` has a fourth positional parameter, `RequestedOrganization`.** It is
+  defaulted, so every existing three-argument CONSTRUCTION keeps compiling — but the record's
+  positional arity is now four, so a positional pattern match or an explicit `Deconstruct` into three
+  variables does not. Nothing in this repository did either; a host that does will see a compile error
+  rather than a silent behaviour change.
+- **Documentation correction, no behaviour change: a revoked membership or a disabled organization
+  REFUSES each refresh rather than revoking the chain.** `Organization.Enabled`,
+  `IOidcSubjectResolver.ResolveRefreshAsync` and `docs/organizations.md` all said the chain was
+  revoked. It is not: the presented refresh token is left unconsumed and the grant intact, so the
+  chain stays refusable while the condition holds and resumes when it stops — the same semantics as a
+  deactivated user. Ending a session is grant revocation, which these gates are not.
+
 ## [0.27.1], 2026-09-11
 
 ### Fixed

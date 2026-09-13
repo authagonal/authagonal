@@ -93,6 +93,10 @@ Reference the Authagonal packages in your own ASP.NET Core project:
 
 The storage provider package is pluggable: `Authagonal.AzureProvider` for Azure Table Storage (the default `AddAuthagonal()` wiring), `Authagonal.SqlProvider` for self-hosted PostgreSQL or SQLite (see [SQL backend](#sql-backend)), or `Authagonal.AwsProvider` for DynamoDB / S3 / Secrets Manager (see [AWS backend](#aws-backend)).
 
+> **Registration order matters.** A storage provider must be registered **before** `AddAuthagonal()`. That existing `IUserStore` registration is what makes `AddAuthagonal()` skip its built-in Azure Table Storage wiring; a provider registered afterwards loses every interface `AddAuthagonal()` has already filled, silently, because those registrations use `TryAdd`.
+>
+> Three interfaces — `IOrganizationStore`, `IOrganizationMembershipStore` and `IScimGroupRoleMappingStore` — have empty, read-only in-memory fallbacks so DI resolves on a host that wires no store for them at all. `AddAuthagonal()` lifts those fallbacks out of the way before the storage provider registers and restores them by `TryAdd` afterwards, so a provider's durable store always wins and the fallback still covers a host without one. If you register your own implementation of any of the three, register it before `AddAuthagonal()` like any other store.
+
 Then compose it into your `Program.cs`:
 
 ```csharp

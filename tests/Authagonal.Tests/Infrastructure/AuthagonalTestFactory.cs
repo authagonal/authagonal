@@ -91,6 +91,8 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     public InMemoryScopeStore ScopeStore { get; } = new();
     public InMemoryRevokedTokenStore RevokedTokenStore { get; } = new();
     public InMemoryAgentProfileStore AgentProfileStore { get; } = new();
+    public WritableOrganizationStore OrganizationStore { get; } = new();
+    public WritableOrganizationMembershipStore OrganizationMembershipStore { get; } = new();
     public TestEmailService EmailService { get; } = new();
     public TestAuthHook AuthHook { get; } = new();
     public RecordingAuditLogger AuditLog { get; } = new();
@@ -350,6 +352,11 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
         services.AddSingleton<IScopeStore>(ScopeStore);
         services.AddSingleton<IRevokedTokenStore>(RevokedTokenStore);
         services.AddSingleton<IAgentProfileStore>(AgentProfileStore);
+        // Writable, unlike the shipped in-memory defaults, so a test can create organizations and
+        // memberships. Empty by default, which is what makes every pre-existing test see exactly the
+        // pre-organizations behaviour.
+        services.AddSingleton<IOrganizationStore>(OrganizationStore);
+        services.AddSingleton<IOrganizationMembershipStore>(OrganizationMembershipStore);
 
         // Tenant context
         services.AddSingleton<Authagonal.Core.Services.ITenantContext>(

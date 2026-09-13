@@ -68,6 +68,25 @@ public sealed record OAuthClient
     public List<string> ProvisioningApps { get; set; } = [];
     public MfaPolicy MfaPolicy { get; set; } = MfaPolicy.Disabled;
 
+    /// <summary>
+    /// The organisations (<see cref="Organization.Id"/>) this client may be used with. Empty — the
+    /// default, and what every existing client carries — means unrestricted: the client works for any
+    /// organisation, and for a request that selects none at all.
+    /// </summary>
+    /// <remarks>
+    /// Two effects, both at <c>/connect/authorize</c> and again on every refresh. A request whose
+    /// selected organisation is not in this list is refused with <c>access_denied</c> rather than
+    /// quietly downgraded to no organisation. And a list holding exactly ONE entry selects that
+    /// organisation for a request that named none — which is how a per-customer application gets
+    /// <c>org_id</c> on its tokens without the relying party sending a parameter at all.
+    /// <para>
+    /// A list with several entries does not select: the client is limited to those organisations but
+    /// must still be told which one, by the <c>organization</c> parameter or by the user's own
+    /// default. Choosing for it would be guessing at whose data the token may reach.
+    /// </para>
+    /// </remarks>
+    public List<string> RestrictedToOrganizationIds { get; set; } = [];
+
     /// <summary>Inline JWKS document (RFC 7517) holding the client's public signing keys.
     /// Setting this (or <see cref="JwksUri"/>) enables <c>private_key_jwt</c> client
     /// authentication (RFC 7523) — the right credential for agent workloads, where a shared

@@ -62,6 +62,9 @@ public sealed class ClientEntity : ITableEntity
     public int RefreshTokenUsage { get; set; }
     public int RefreshTokenExpiration { get; set; }
     public string ProvisioningAppsJson { get; set; } = "[]";
+    // Defaulted rather than nullable, like every other list column: a row written before this existed
+    // deserialises as an empty list, which is exactly what "unrestricted" means for this field.
+    public string RestrictedToOrganizationIdsJson { get; set; } = "[]";
     public int MfaPolicy { get; set; }
     // Nullable so pre-existing rows read as "no JWKS" (secret-only client) without a migration.
     public string? JwksJson { get; set; }
@@ -106,6 +109,7 @@ public sealed class ClientEntity : ITableEntity
         RefreshTokenUsage = (int)client.RefreshTokenUsage,
         RefreshTokenExpiration = (int)client.RefreshTokenExpiration,
         ProvisioningAppsJson = JsonSerializer.Serialize(client.ProvisioningApps, AzureJsonContext.Default.ListString),
+        RestrictedToOrganizationIdsJson = JsonSerializer.Serialize(client.RestrictedToOrganizationIds, AzureJsonContext.Default.ListString),
         MfaPolicy = (int)client.MfaPolicy,
         JwksJson = client.JwksJson,
         JwksUri = client.JwksUri,
@@ -156,6 +160,7 @@ public sealed class ClientEntity : ITableEntity
         RefreshTokenUsage = (RefreshTokenUsage)RefreshTokenUsage,
         RefreshTokenExpiration = (RefreshTokenExpiration)RefreshTokenExpiration,
         ProvisioningApps = JsonSerializer.Deserialize(ProvisioningAppsJson, AzureJsonContext.Default.ListString) ?? [],
+        RestrictedToOrganizationIds = JsonSerializer.Deserialize(RestrictedToOrganizationIdsJson, AzureJsonContext.Default.ListString) ?? [],
         MfaPolicy = (MfaPolicy)MfaPolicy,
         JwksJson = JwksJson,
         JwksUri = JwksUri,

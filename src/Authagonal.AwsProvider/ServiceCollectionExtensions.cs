@@ -54,6 +54,10 @@ public static class ServiceCollectionExtensions
     private const string MfaWebAuthnIndexTable = "MfaWebAuthnIndex";
     private const string SamlReplayCacheTable = "SamlReplayCache";
     private const string OidcStateStoreTable = "OidcStateStore";
+    private const string OrganizationsTable = "Organizations";
+    private const string OrganizationSlugsTable = "OrganizationSlugs";
+    private const string OrganizationMembersTable = "OrganizationMembers";
+    private const string UserMembershipsTable = "UserMemberships";
 
     // Default TTLs for the transient SAML-replay / OIDC-state caches (the Azure path reads these from
     // CacheOptions, which lives in Authagonal.Server; for the single-tenant AWS host these defaults match).
@@ -72,7 +76,8 @@ public static class ServiceCollectionExtensions
     /// <remarks>
     /// Implements the full <c>Authagonal.Core.Stores</c> surface: tombstone writer, client,
     /// signing-key, grant, user, role, scope, revoked-token, provisioning-app, user-provision,
-    /// OIDC/SAML provider, SSO-domain, SCIM token/group/role-mapping, and MFA stores.
+    /// OIDC/SAML provider, SSO-domain, SCIM token/group/role-mapping, organization/organization-membership,
+    /// and MFA stores.
     /// </remarks>
     public static IServiceCollection AddDynamoStorage(this IServiceCollection services, IAmazonDynamoDB db, bool nameIndexesEnabled = true)
     {
@@ -86,6 +91,7 @@ public static class ServiceCollectionExtensions
             ScimTokensTable, ScimGroupsTable, ScimGroupExternalIdsTable, ScimGroupRoleMappingsTable,
             MfaCredentialsTable, MfaChallengesTable, MfaWebAuthnIndexTable,
             SamlReplayCacheTable, OidcStateStoreTable, RateLimitCountersTable,
+            OrganizationsTable, OrganizationSlugsTable, OrganizationMembersTable, UserMembershipsTable,
         };
         if (nameIndexesEnabled) tables.AddRange([UserFirstNamesTable, UserLastNamesTable]);
 
@@ -141,6 +147,10 @@ public static class ServiceCollectionExtensions
             sp.GetService<IIndexTokenizer>()));
         services.TryAddSingleton<IRoleStore>(new DynamoRoleStore(new DynamoTable(db, RolesTable), live, tombstones));
         services.TryAddSingleton<IScopeStore>(new DynamoScopeStore(new DynamoTable(db, ScopesTable), live, tombstones));
+        services.TryAddSingleton<IOrganizationStore>(new DynamoOrganizationStore(
+            new DynamoTable(db, OrganizationsTable), new DynamoTable(db, OrganizationSlugsTable), live, tombstones));
+        services.TryAddSingleton<IOrganizationMembershipStore>(new DynamoOrganizationMembershipStore(
+            new DynamoTable(db, OrganizationMembersTable), new DynamoTable(db, UserMembershipsTable), live, tombstones));
         services.TryAddSingleton<IRevokedTokenStore>(new DynamoRevokedTokenStore(new DynamoTable(db, RevokedTokensTable), live));
         services.TryAddSingleton<IProvisioningAppStore>(sp => new DynamoProvisioningAppStore(
             new DynamoTable(db, ProvisioningAppsTable), live, tombstones, sp.GetService<IFieldCipher>()));

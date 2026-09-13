@@ -49,6 +49,10 @@ public static class ServiceCollectionExtensions
     private const string RevokedTokensTableName = "RevokedTokens";
     private const string ProvisioningAppsTableName = "ProvisioningApps";
     private const string AgentProfilesTableName = "AgentProfiles";
+    private const string OrganizationsTableName = "Organizations";
+    private const string OrganizationSlugsTableName = "OrganizationSlugs";
+    private const string OrganizationMembersTableName = "OrganizationMembers";
+    private const string UserMembershipsTableName = "UserMemberships";
 
     public static IServiceCollection AddTableStorage(this IServiceCollection services, string connectionString, bool nameIndexesEnabled = true)
     {
@@ -122,6 +126,10 @@ public static class ServiceCollectionExtensions
         var upstreamRefreshTokens = EnsureTable(serviceClient, UpstreamRefreshTokensTableName);
         var tombstones = EnsureTable(serviceClient, TombstonesTableName);
         var rateLimitCounters = EnsureTable(serviceClient, RateLimitCountersTableName);
+        var organizations = EnsureTable(serviceClient, OrganizationsTableName);
+        var organizationSlugs = EnsureTable(serviceClient, OrganizationSlugsTableName);
+        var organizationMembers = EnsureTable(serviceClient, OrganizationMembersTableName);
+        var userMemberships = EnsureTable(serviceClient, UserMembershipsTableName);
 
         // Register store implementations as singletons.
         // TryAdd allows multi-tenant hosts to register scoped stores first.
@@ -178,6 +186,8 @@ public static class ServiceCollectionExtensions
             new TableProvisioningAppStore(provisioningApps, live, changeWriter, sp.GetService<IFieldCipher>()));
         services.TryAddSingleton<IAgentProfileStore>(new TableAgentProfileStore(agentProfiles, live, changeWriter));
         services.TryAddSingleton<IUpstreamRefreshTokenStore>(sp => new TableUpstreamRefreshTokenStore(upstreamRefreshTokens, live, sp.GetService<IFieldCipher>()));
+        services.TryAddSingleton<IOrganizationStore>(new TableOrganizationStore(organizations, organizationSlugs, live, changeWriter));
+        services.TryAddSingleton<IOrganizationMembershipStore>(new TableOrganizationMembershipStore(organizationMembers, userMemberships, live, changeWriter));
 
         // Register grant table clients as keyed singletons for the reconciliation service.
         services.AddKeyedSingleton("Grants", grants);

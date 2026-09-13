@@ -30,18 +30,36 @@ public interface IOidcSubjectResolver
     /// Re-resolve the subject when a refresh token is redeemed. Hosts should re-check
     /// that the identity is still valid (user not deactivated, share link not revoked,
     /// etc.) and return a fresh <see cref="OidcSubject"/>. Returning
-    /// <see cref="OidcRejection.AccessDenied"/> revokes the refresh chain.
+    /// <see cref="OidcRejection.AccessDenied"/> REFUSES THIS REFRESH; it does not revoke the grant.
     /// </summary>
+    /// <remarks>
+    /// The distinction matters and used to be stated the other way round here. A rejection fails the
+    /// one request: the presented refresh token is left unconsumed and the family is left intact, so
+    /// the chain stays refusable for as long as the condition holds and resumes the moment it stops
+    /// holding — restoring a revoked membership, or re-enabling an organisation, brings the session
+    /// back without a fresh sign-in. The grant still dies on its own absolute lifetime. This is the
+    /// same shape as a deactivated user, whose refreshes are refused while <c>IsActive</c> is false.
+    /// To actually end a session, revoke the grant (<c>/connect/revocation</c>, or
+    /// <c>GrantRevocation</c> on the host side).
+    /// </remarks>
     Task<OidcSubjectResult> ResolveRefreshAsync(
         OidcSubject priorSubject,
         OidcSubjectResolutionContext context,
         CancellationToken ct = default);
 }
 
+/// <param name="RequestedOrganization">
+/// The <c>organization</c> authorize parameter's value — an organisation slug or id — or null when
+/// the request named none, which is every request a host that predates organisations sends.
+/// Defaulted so existing three-argument CONSTRUCTION keeps compiling; note that the positional arity
+/// is now four, so a positional pattern or an explicit <c>Deconstruct</c> into three variables does
+/// not.
+/// </param>
 public sealed record OidcSubjectResolutionContext(
     string ClientId,
     IReadOnlyList<string> RequestedScopes,
-    IReadOnlyList<string> RequestedResources);
+    IReadOnlyList<string> RequestedResources,
+    string? RequestedOrganization = null);
 
 public abstract record OidcSubjectResult
 {
@@ -103,6 +121,41 @@ public sealed record OidcSubject
     /// line. Hosts that don't use it can leave it null — nothing else reads it.
     /// </summary>
     public string? OrganizationId { get; init; }
+
+    /// <summary>
+    /// The organisation's tenant-unique slug, emitted as the <c>org_slug</c> claim under the same
+    /// scope gate as <see cref="OrganizationId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Null whenever <see cref="OrganizationId"/> is a bare string with no organisation record behind
+    /// it — the shape every account had before organisations were a first-class entity. A relying
+    /// party that wants a stable, human-readable key reads this; one that only needs identity reads
+    /// <see cref="OrganizationId"/>, which is present in both cases.
+    /// </remarks>
+    public string? OrganizationSlug { get; init; }
+
+    /// <summary>
+    /// The organisation's display name, emitted as the <c>org_name</c> claim under the same scope
+    /// gate as <see cref="OrganizationId"/>. Null for the same reason as
+    /// <see cref="OrganizationSlug"/>, and never anything an authorization decision should rest on —
+    /// it is mutable presentation, unlike the id and the slug.
+    /// </summary>
+    public string? OrganizationName { get; init; }
+
+    /// <summary>
+    /// True when the organisation was NAMED by the request — the <c>organization</c> parameter, or a
+    /// client registered against exactly one — rather than derived from the account's own stored
+    /// organisation. Never emitted as a claim.
+    /// </summary>
+    /// <remarks>
+    /// This is what has to survive a refresh rotation, and it is not derivable afterwards. A grant
+    /// that named its organisation must keep that organisation across every rotation and be re-checked
+    /// against membership on each one, while a grant that merely inherited the account's must be
+    /// re-derived so an operator re-tagging the account still takes effect. Comparing the carried
+    /// organisation against the account's CURRENT value cannot tell the two apart — after a re-tag they
+    /// differ in both cases — so the fact travels with the grant instead of being reconstructed.
+    /// </remarks>
+    public bool OrganizationExplicitlySelected { get; init; }
 
     /// <summary>Roles to emit as <c>roles</c> claims on access and id tokens.</summary>
     public IReadOnlyList<string>? Roles { get; init; }

@@ -4,6 +4,7 @@ using Authagonal.Core.Constants;
 using Authagonal.Core.Models;
 using Authagonal.Core.Services;
 using Authagonal.Core.Stores;
+using Authagonal.Protocol;
 using Authagonal.Protocol.Endpoints;
 using Authagonal.Protocol.Services;
 using Authagonal.Server.Services;
@@ -170,14 +171,41 @@ public static class TokenEndpoint
         // The upstream refresh token is not among these: IUpstreamRefreshTokenStore holds it keyed on
         // (subject, connection, sid), and ResolveRefreshAsync prefers the store over the subject's copy — so
         // the connection id and the sid are enough, without a second copy of a live upstream credential.
-        var subject = await subjectResolver.BuildSubjectAsync(
-            user, client,
-            sessionMaxExpiresAt: data.SessionMaxExpiresAt,
-            sessionId: data.SessionId,
-            upstreamConnectionId: data.UpstreamConnectionId,
-            authTime: data.AuthTime,
-            ct: ct);
-        var response = await tokenService.HandleDeviceCodeAsync(subject, client, data.Scopes, ct);
+        //
+        // No organization is named here and none can be: the device grant has no authorize request to
+        // carry the parameter. It falls through to the client's own restriction (a per-customer device
+        // client names its organization once, in registration) and then to the account's default —
+        // and is refused outright if neither answers for a client that serves several organizations.
+        OidcSubject subject;
+        try
+        {
+            subject = await subjectResolver.BuildSubjectAsync(
+                user, client,
+                sessionMaxExpiresAt: data.SessionMaxExpiresAt,
+                sessionId: data.SessionId,
+                upstreamConnectionId: data.UpstreamConnectionId,
+                authTime: data.AuthTime,
+                ct: ct);
+        }
+        catch (OrganizationAccessDeniedException ex)
+        {
+            return TokenGrantHandlers.TokenError("access_denied", ex.Message);
+        }
+
+        TokenResponse response;
+        try
+        {
+            response = await tokenService.HandleDeviceCodeAsync(subject, client, data.Scopes, ct);
+        }
+        // This grant is handled outside TokenGrantHandlers, so it does not inherit the mapping the
+        // other four have — and the issuance gate now throws one of these from the mint. Without this
+        // a host hook refusing a device token surfaced as a 500 rather than the access_denied the two
+        // other interactive grants return for the identical refusal.
+        catch (ProtocolTokenException ex)
+        {
+            return TokenGrantHandlers.TokenError(ex.Error, ex.Description);
+        }
+
         // Through TokenSuccess, not Results.Ok: this is the one grant handled outside
         // TokenGrantHandlers, so it was the one token set leaving /connect/token with no
         // Cache-Control: no-store — RFC 6749 §5.1 makes that a MUST, and the body carries an access

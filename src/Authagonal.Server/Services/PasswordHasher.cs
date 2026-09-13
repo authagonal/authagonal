@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using Authagonal.Core.Services;
 using Microsoft.Extensions.Options;
 
@@ -72,6 +74,13 @@ public sealed class PasswordHasher
     // ASP.NET Identity V3 format marker
     private const byte IdentityV3Marker = 0x01;
 
+    // Scrypt.NET ScryptEncoder format: $s2$<N>$<r>$<p>$<salt-b64>$<hash-b64>, both salt and
+    // derived key fixed at 32 bytes. Legacy USER password import only — never a client secret
+    // format, so unlike bcrypt this has exactly one consumer and stays private to this class.
+    private const string ScryptPrefix = "$s2$";
+    private const int ScryptSaltSize = 32;
+    private const int ScryptKeySize = 32;
+
     /// <remarks>
     /// The configured cost is used as given. The <see cref="AuthOptions.MinimumPbkdf2Iterations"/>
     /// floor is enforced where configuration is bound (see <c>AuthagonalExtensions</c>) rather than
@@ -118,6 +127,7 @@ public sealed class PasswordHasher
     /// <item>PBKDF2v1$ — Authagonal native format (PBKDF2-SHA256, 100k iterations)</item>
     /// <item>ASP.NET Identity V3 — base64 blob starting with 0x01 (PBKDF2-SHA256/384/512, variable iterations)</item>
     /// <item>BCrypt — hashes starting with $2a$, $2b$, $2x$, $2y$</item>
+    /// <item>Scrypt.NET — hashes starting with $s2$ (see <see cref="Authagonal.Core.Services.Scrypt"/>)</item>
     /// </list>
     /// Non-native formats return <see cref="PasswordVerifyResult.SuccessRehashNeeded"/>
     /// so the caller can upgrade the stored hash.
@@ -140,6 +150,12 @@ public sealed class PasswordHasher
 
         if (hash.StartsWith(Pbkdf2Prefix, StringComparison.Ordinal))
             return VerifyPbkdf2(password, hash);
+
+        // Same prefix-routing rationale as bcrypt above: an $s2$-prefixed blob is scrypt's problem
+        // even when malformed, so it must not fall through to the unprefixed ASP.NET Identity
+        // branch where the cost parameters come from the blob itself.
+        if (hash.StartsWith(ScryptPrefix, StringComparison.Ordinal))
+            return VerifyScrypt(password, hash);
 
         // Tagged unsalted digests — Duende-migrated client secrets only (see Sha256Prefix note).
         if (hash.StartsWith(Sha256Prefix, StringComparison.Ordinal))
@@ -211,6 +227,73 @@ public sealed class PasswordHasher
         }
 
         return PasswordVerifyResult.Failed;
+    }
+
+    /// <summary>
+    /// Verifies a legacy Scrypt.NET <c>ScryptEncoder</c> hash
+    /// (<c>$s2$&lt;N&gt;$&lt;r&gt;$&lt;p&gt;$&lt;salt-b64&gt;$&lt;hash-b64&gt;</c>) by re-deriving the key with
+    /// <see cref="Authagonal.Core.Services.Scrypt.DeriveKey"/> and comparing in constant time.
+    /// </summary>
+    private static PasswordVerifyResult VerifyScrypt(string password, string hash)
+    {
+        if (!TryParseScryptHash(hash, out var n, out var r, out var p, out var salt, out var storedKey))
+            return PasswordVerifyResult.Failed;
+
+        byte[] computedKey;
+        try
+        {
+            computedKey = Authagonal.Core.Services.Scrypt.DeriveKey(
+                Encoding.UTF8.GetBytes(password), salt, n, r, p, ScryptKeySize);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // TryParseScryptHash already checked AreParametersValid, but re-guard here: this is the
+            // same defence-in-depth the bcrypt path applies (catch broadly rather than trust a
+            // structural pre-check to anticipate everything the derivation itself might reject).
+            return PasswordVerifyResult.Failed;
+        }
+
+        return CryptographicOperations.FixedTimeEquals(computedKey, storedKey)
+            ? PasswordVerifyResult.SuccessRehashNeeded
+            : PasswordVerifyResult.Failed;
+    }
+
+    /// <summary>
+    /// Parses and bounds-checks a <c>$s2$</c> hash. Rejects a wrong segment count, a non-numeric or
+    /// out-of-bound N/r/p (see <see cref="Authagonal.Core.Services.Scrypt.AreParametersValid"/> — the
+    /// same CPU/memory ceiling every other imported cost parameter in this file is held to), malformed
+    /// base64, or a salt/key that decodes to anything but the 32 bytes Scrypt.NET always produces.
+    /// </summary>
+    private static bool TryParseScryptHash(
+        string hash, out int n, out int r, out int p, out byte[] salt, out byte[] key)
+    {
+        n = r = p = 0;
+        salt = key = [];
+
+        // "$s2$16384$8$1$<salt>$<key>".Split('$') = ["", "s2", "16384", "8", "1", salt, key] — 7 parts.
+        var parts = hash.Split('$');
+        if (parts.Length != 7 || parts[1] != "s2")
+            return false;
+
+        if (!int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out n)
+            || !int.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out r)
+            || !int.TryParse(parts[4], NumberStyles.None, CultureInfo.InvariantCulture, out p))
+            return false;
+
+        if (!Authagonal.Core.Services.Scrypt.AreParametersValid(n, r, p))
+            return false;
+
+        try
+        {
+            salt = Convert.FromBase64String(parts[5]);
+            key = Convert.FromBase64String(parts[6]);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        return salt.Length == ScryptSaltSize && key.Length == ScryptKeySize;
     }
 
     private PasswordVerifyResult VerifyPbkdf2(string password, string hash)

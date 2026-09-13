@@ -118,6 +118,10 @@ public sealed class ClientSeedService(
             client.SlidingRefreshTokenLifetimeSeconds = seed.SlidingRefreshTokenLifetimeSeconds ?? existing?.SlidingRefreshTokenLifetimeSeconds ?? 1296000;
             client.RefreshTokenUsage = seed.RefreshTokenUsage ?? existing?.RefreshTokenUsage ?? RefreshTokenUsage.OneTime;
             client.MfaPolicy = seed.MfaPolicy ?? existing?.MfaPolicy ?? MfaPolicy.Disabled;
+            // Seeded config is how a per-customer deployment names the organization its client serves,
+            // and a single entry also SELECTS it, so a relying party there never sends the parameter.
+            client.RestrictedToOrganizationIds =
+                seed.RestrictedToOrganizationIds ?? existing?.RestrictedToOrganizationIds ?? [];
             client.BackChannelLogoutUri = seed.BackChannelLogoutUri ?? existing?.BackChannelLogoutUri;
             // Continue-to-app affordances: without these bound, config-seeded tenants have an
             // empty /apps and every post-auth continuation collapses to '/' on the auth host.
@@ -181,6 +185,10 @@ public sealed class ClientSeedService(
         public int? SlidingRefreshTokenLifetimeSeconds { get; set; }
         public RefreshTokenUsage? RefreshTokenUsage { get; set; }
         public MfaPolicy? MfaPolicy { get; set; }
+
+        /// <summary>Organization ids this client may be used with. Empty or absent = unrestricted; a
+        /// single entry also selects that organization for a request that names none.</summary>
+        public List<string>? RestrictedToOrganizationIds { get; set; }
 
         // Continue-to-app affordances (the /apps allow-list + the login SPA's continue button).
         public string? InitiateLoginUri { get; set; }

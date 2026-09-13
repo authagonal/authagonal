@@ -145,11 +145,36 @@ public static class UserinfoEndpoint
             // no scope gate whatsoever — three lines below a comment citing §5.3.2 for the claims
             // that were gated. Group membership in particular is an organisational graph fetched live
             // from the group store and handed to any client holding any access token.
-            if (hasProfile && !string.IsNullOrWhiteSpace(user.OrganizationId))
-                claims["org_id"] = user.OrganizationId;
+            //
+            // These two now come from the PRESENTED TOKEN rather than being re-read from the user
+            // record, which is the only source that can be right once a user may belong to several
+            // organizations. The account carries one default organization; the token names the one
+            // this grant was actually issued for, and its roles are the ones that organization's
+            // membership granted. Re-reading the record answered for the default instead — so a user
+            // signed in to organization B was told org_id A by the same server that had just put B in
+            // their ID token, and handed A's roles with it. Profile fields (email, name, phone) stay
+            // live, because those are the subject's current details and that is what userinfo is for;
+            // these are authorization context, which belongs to the grant.
+            // org_id and org_slug are returned whenever the token carries them, with no scope gate:
+            // they say which customer this token acts for, which a multi-customer resource server has
+            // to know before it has decided whether it cares about a name. Only org_name is profile
+            // data — it is presentation, and nothing should authorise on it.
+            CopyStringFromToken("org_id");
+            CopyStringFromToken("org_slug");
+            if (hasProfile)
+                CopyStringFromToken("org_name");
 
-            if (scopes.Contains(StandardScopes.Roles, StringComparer.Ordinal) && user.Roles.Count > 0)
-                claims["roles"] = user.Roles;
+            if (scopes.Contains(StandardScopes.Roles, StringComparer.Ordinal)
+                && ReadStringArray(result.Claims, "roles") is { Count: > 0 } tokenRoles)
+            {
+                claims["roles"] = tokenRoles;
+            }
+
+            void CopyStringFromToken(string name)
+            {
+                if (result.Claims.TryGetValue(name, out var value) && value is string { Length: > 0 } text)
+                    claims[name] = text;
+            }
 
             if (scopes.Contains(StandardScopes.Groups, StringComparer.Ordinal))
             {
@@ -183,6 +208,33 @@ public static class UserinfoEndpoint
     /// of those would report on state the caller has not proved it may know.
     /// </remarks>
     private static IResult UnauthorizedWithChallenge() => new BearerChallenge();
+
+    /// <summary>
+    /// A claim the token carries as a JSON array of strings, normalised to a list.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="JsonWebTokenHandler"/> surfaces a multi-valued claim as a collection but a
+    /// single-valued one as a bare string, so reading it as one shape silently drops the other. A
+    /// one-role token reporting no roles at userinfo while its own <c>roles</c> claim says otherwise is
+    /// the exact inconsistency this endpoint is being changed to remove.
+    /// </remarks>
+    private static IReadOnlyList<string>? ReadStringArray(
+        IDictionary<string, object> tokenClaims, string name)
+    {
+        if (!tokenClaims.TryGetValue(name, out var value) || value is null)
+            return null;
+
+        return value switch
+        {
+            string single => [single],
+            IEnumerable<string> many => [.. many],
+            System.Collections.IEnumerable many => [.. many.Cast<object?>()
+                .Select(v => v?.ToString())
+                .Where(v => !string.IsNullOrEmpty(v))
+                .Select(v => v!)],
+            _ => null,
+        };
+    }
 
     private sealed class BearerChallenge : IResult
     {

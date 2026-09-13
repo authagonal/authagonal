@@ -86,6 +86,30 @@ public sealed class TestAuthHook : IAuthHook
         return Task.CompletedTask;
     }
 
+    /// <summary>Every pre-mint gate invocation, in order — with the subject id, unlike
+    /// <see cref="TokenIssuances"/>, which the token endpoint always calls with null.</summary>
+    public List<TokenIssuanceContext> IssuanceGateCalls { get; } = [];
+
+    /// <summary>
+    /// Set to refuse an issuance: returning a non-null string throws it as the refusal reason, which
+    /// the mint turns into <c>access_denied</c>. Returning null allows.
+    /// </summary>
+    public Func<TokenIssuanceContext, string?>? RefuseIssuance { get; set; }
+
+    /// <summary>Set to refuse with a named OAuth error instead, which the mint passes through
+    /// verbatim rather than flattening to access_denied.</summary>
+    public (string Error, string Description)? ThrowProtocolError { get; set; }
+
+    public Task OnTokenIssuingAsync(TokenIssuanceContext context, CancellationToken ct = default)
+    {
+        IssuanceGateCalls.Add(context);
+        if (ThrowProtocolError is { } named)
+            throw new Authagonal.Protocol.ProtocolTokenException(named.Error, named.Description);
+        if (RefuseIssuance?.Invoke(context) is { } reason)
+            throw new InvalidOperationException(reason);
+        return Task.CompletedTask;
+    }
+
     public Task<MfaPolicy> ResolveMfaPolicyAsync(string userId, string email, MfaPolicy clientPolicy, string clientId, CancellationToken ct = default)
     {
         var result = MfaPolicyOverride?.Invoke(userId, email, clientPolicy, clientId) ?? clientPolicy;
