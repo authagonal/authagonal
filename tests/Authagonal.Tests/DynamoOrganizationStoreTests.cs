@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Amazon.DynamoDBv2;
+using Amazon.DynamoDBv2.Model;
 using Authagonal.AwsProvider.Dynamo;
 using Authagonal.AwsProvider.Stores;
 using Authagonal.Core.Models;
@@ -9,9 +11,11 @@ namespace Authagonal.Tests;
 
 /// <summary>
 /// DynamoOrganizationStore / DynamoOrganizationMembershipStore behavior against real DynamoDB
-/// semantics (DynamoDB Local): the organization document round-trip, the slug lookup's point-read
-/// shape (including a rename and a same-slug conflict), the membership dual-index kept in sync
-/// through upsert/delete, both membership listings, change-log tombstones, and env-partitioned
+/// semantics (DynamoDB Local): the organization document round-trip, the immutable-slug contract
+/// (rejecting a change, a cross-namespace collision with an existing id/slug, and an invalid slug
+/// format), the insert-only atomicity that lets exactly one concurrent creator of a brand-new slug
+/// win, the membership dual-index kept in sync through upsert/delete (including an orphaned-row
+/// delete), both membership listings, change-log tombstones on upsert AND delete, and env-partitioned
 /// isolation — the same coverage shape as <see cref="DynamoUserStoreTests"/> and
 /// <see cref="DynamoStoreSmokeTests"/> for their stores.
 /// </summary>
@@ -31,6 +35,14 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
 
     private async Task<DynamoOrganizationMembershipStore> NewMembershipStoreAsync(string prefix, EnvPartitioner? partitioner = null, IChangeWriter? tombstones = null) =>
         new(await T($"{prefix}OrgMembers"), await T($"{prefix}UserMemberships"), partitioner ?? EnvPartitioner.Live, tombstones);
+
+    private static async Task<bool> SawOp(DynamoTable log, string table, string op)
+    {
+        var saw = false;
+        await foreach (var item in log.QueryAsync(table))
+            saw |= item["op"].S == op;
+        return saw;
+    }
 
     // ----- IOrganizationStore ------------------------------------------------------
 
@@ -66,7 +78,7 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
         Assert.Equal(created, read.CreatedAt);
         Assert.Null(read.UpdatedAt);
 
-        // Upsert replaces in place.
+        // Upsert replaces in place (slug unchanged).
         org.DisplayName = "Acme Corp v2";
         org.UpdatedAt = DateTimeOffset.UtcNow;
         await store.UpsertAsync(org);
@@ -95,35 +107,125 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.UpsertAsync(new Organization { Id = "org-2", Slug = "acme", DisplayName = "Other Acme", CreatedAt = DateTimeOffset.UtcNow }));
         Assert.Contains("acme", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("org-1", ex.Message, StringComparison.Ordinal);
 
         // The original organization and the rejected id are both untouched by the refused write.
         Assert.Equal("Acme", (await store.GetAsync("org-1"))?.DisplayName);
         Assert.Null(await store.GetAsync("org-2"));
 
-        // Re-upserting org-1 itself under the same slug is not a conflict.
+        // Re-upserting org-1 itself under its own (unchanged) slug is not a conflict.
         await store.UpsertAsync(new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme Renamed", CreatedAt = DateTimeOffset.UtcNow });
         Assert.Equal("Acme Renamed", (await store.GetAsync("org-1"))?.DisplayName);
     }
 
+    /// F11: the slug is immutable once an organization exists. A rename is refused outright, and the
+    /// refusal changes nothing — no new slug row is claimed and the original document is untouched.
     [Fact]
-    public async Task OrganizationStore_SlugChange_RemovesTheStaleLookupRow_AndFreesItForReuse()
+    public async Task OrganizationStore_UpsertRejects_SlugChange_ForExistingOrganization()
     {
-        var store = await NewOrgStoreAsync("rename");
+        var store = await NewOrgStoreAsync("immutable");
         var org = new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow };
         await store.UpsertAsync(org);
-        Assert.Equal("org-1", (await store.GetBySlugAsync("acme"))?.Id);
 
         org.Slug = "acme-corp";
-        await store.UpsertAsync(org);
+        org.DisplayName = "Acme Renamed"; // paired with an otherwise-valid field change
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.UpsertAsync(org));
+        Assert.Contains("acme", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("acme-corp", ex.Message, StringComparison.Ordinal);
 
-        Assert.Null(await store.GetBySlugAsync("acme")); // stale row dropped
-        Assert.Equal("org-1", (await store.GetBySlugAsync("acme-corp"))?.Id); // new row resolves
-        Assert.Equal("acme-corp", (await store.GetAsync("org-1"))?.Slug);
+        var unchanged = await store.GetAsync("org-1");
+        Assert.Equal("acme", unchanged?.Slug);
+        Assert.Equal("Acme", unchanged?.DisplayName); // the paired field change did not apply either
+        Assert.Equal("org-1", (await store.GetBySlugAsync("acme"))?.Id);
+        Assert.Null(await store.GetBySlugAsync("acme-corp")); // never claimed
+    }
 
-        // The freed slug can now be claimed by a different organization.
-        await store.UpsertAsync(new Organization { Id = "org-2", Slug = "acme", DisplayName = "New Acme", CreatedAt = DateTimeOffset.UtcNow });
-        Assert.Equal("org-2", (await store.GetBySlugAsync("acme"))?.Id);
+    /// F4: the slug row for a brand-new organization is claimed with an insert-only conditional
+    /// write, not a read-then-write — so of several concurrent creators of the same new slug, exactly
+    /// one may win, against real DynamoDB semantics.
+    [Fact]
+    public async Task OrganizationStore_ConcurrentUpsert_SameNewSlug_ExactlyOneSucceeds()
+    {
+        var store = await NewOrgStoreAsync("race");
+
+        var attempts = Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+        {
+            try
+            {
+                await store.UpsertAsync(new Organization
+                {
+                    Id = $"org-{i}", Slug = "acme", DisplayName = $"Org {i}", CreatedAt = DateTimeOffset.UtcNow,
+                });
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }));
+
+        var results = await Task.WhenAll(attempts);
+        Assert.Equal(1, results.Count(r => r));
+        Assert.Single(await store.ListAsync());
+        Assert.NotNull(await store.GetBySlugAsync("acme"));
+    }
+
+    /// Cross-namespace rule, direction 1: a NEW organization's slug must not equal another
+    /// organization's id.
+    [Fact]
+    public async Task OrganizationStore_UpsertRejects_SlugEqualToAnExistingOrganizationsId()
+    {
+        var store = await NewOrgStoreAsync("xns1");
+        await store.UpsertAsync(new Organization { Id = "acme", Slug = "acme-inc", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.UpsertAsync(new Organization { Id = "org-2", Slug = "acme", DisplayName = "Impostor", CreatedAt = DateTimeOffset.UtcNow }));
+        Assert.Contains("acme", ex.Message, StringComparison.Ordinal);
+
+        Assert.Null(await store.GetAsync("org-2"));
+        Assert.Null(await store.GetBySlugAsync("acme")); // the slug was never claimed
+    }
+
+    /// Cross-namespace rule, direction 2: a NEW organization's id must not equal another
+    /// organization's slug.
+    [Fact]
+    public async Task OrganizationStore_UpsertRejects_IdEqualToAnExistingOrganizationsSlug()
+    {
+        var store = await NewOrgStoreAsync("xns2");
+        await store.UpsertAsync(new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.UpsertAsync(new Organization { Id = "acme", Slug = "impostor", DisplayName = "Impostor", CreatedAt = DateTimeOffset.UtcNow }));
+        Assert.Contains("acme", ex.Message, StringComparison.Ordinal);
+
+        Assert.Null(await store.GetAsync("acme"));
+        Assert.Null(await store.GetBySlugAsync("impostor")); // never claimed
+    }
+
+    [Theory]
+    [InlineData("fmt1", "")]
+    [InlineData("fmt2", "Acme")]        // uppercase
+    [InlineData("fmt3", "-acme")]       // leading hyphen
+    [InlineData("fmt4", "acme-")]       // trailing hyphen
+    [InlineData("fmt5", "ac me")]       // space
+    [InlineData("fmt6", "acme_corp")]   // underscore
+    public async Task OrganizationStore_UpsertRejects_InvalidSlugFormat(string prefix, string invalidSlug)
+    {
+        var store = await NewOrgStoreAsync(prefix);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            store.UpsertAsync(new Organization { Id = "org-1", Slug = invalidSlug, DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow }));
+
+        Assert.Null(await store.GetAsync("org-1")); // nothing written
+    }
+
+    [Fact]
+    public async Task OrganizationStore_UpsertAccepts_ValidBoundarySlugs()
+    {
+        var store = await NewOrgStoreAsync("fmtok");
+        await store.UpsertAsync(new Organization { Id = "org-1", Slug = "a", DisplayName = "Single char", CreatedAt = DateTimeOffset.UtcNow });
+        await store.UpsertAsync(new Organization { Id = "org-2", Slug = "acme-corp-2", DisplayName = "Hyphenated", CreatedAt = DateTimeOffset.UtcNow });
+
+        Assert.Equal("org-1", (await store.GetBySlugAsync("a"))?.Id);
+        Assert.Equal("org-2", (await store.GetBySlugAsync("acme-corp-2"))?.Id);
     }
 
     [Fact]
@@ -196,15 +298,34 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
         await store.UpsertAsync(new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow });
         await store.DeleteAsync("org-1");
 
-        var sawOrgDelete = false;
-        await foreach (var item in log.QueryAsync("Organizations"))
-            sawOrgDelete |= item["op"].S == "D";
-        Assert.True(sawOrgDelete);
+        Assert.True(await SawOp(log, "Organizations", "D"));
+        Assert.True(await SawOp(log, "OrganizationSlugs", "D"));
+    }
 
-        var sawSlugDelete = false;
-        await foreach (var item in log.QueryAsync("OrganizationSlugs"))
-            sawSlugDelete |= item["op"].S == "D";
-        Assert.True(sawSlugDelete);
+    /// F12: upsert records a change for both the organization row and the slug row on creation, and
+    /// keeps recording one for the organization row on every subsequent update.
+    [Fact]
+    public async Task OrganizationStore_Upsert_RecordsChangeForBothRows()
+    {
+        var log = await T("orgUpsertTombstones");
+        var writer = new DynamoChangeWriter(log);
+        var store = await NewOrgStoreAsync("upsertTomb", tombstones: writer);
+
+        await store.UpsertAsync(new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow });
+        Assert.True(await SawOp(log, "Organizations", "U"));
+        Assert.True(await SawOp(log, "OrganizationSlugs", "U"));
+
+        // The change log holds one entry per row (keyed by table + pk + sk), so a same-row upsert
+        // overwrites rather than appends — delete flips the entry to "D", and a fresh upsert must
+        // flip it back to "U", which only happens if UpsertAsync itself writes the change record
+        // (rather than the first "U" being a leftover that a plain update never touches again).
+        await store.DeleteAsync("org-1");
+        Assert.True(await SawOp(log, "Organizations", "D"));
+        Assert.True(await SawOp(log, "OrganizationSlugs", "D"));
+
+        await store.UpsertAsync(new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme reborn", CreatedAt = DateTimeOffset.UtcNow });
+        Assert.True(await SawOp(log, "Organizations", "U"));
+        Assert.True(await SawOp(log, "OrganizationSlugs", "U"));
     }
 
     // ----- IOrganizationMembershipStore --------------------------------------------
@@ -289,6 +410,41 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
         await store.DeleteAsync("org-none", "u-none"); // never existed — no-op
     }
 
+    /// F18: delete must not early-return just because the forward row happens to be missing — it
+    /// still removes (and tombstones) whichever row IS present, so a membership left inconsistent by
+    /// an earlier partial write is fully cleaned up rather than left half-orphaned forever.
+    [Fact]
+    public async Task MembershipStore_Delete_RemovesBothRows_EvenWhenForwardItemIsMissing()
+    {
+        var orgMembersTable = await T("orphanOrgMembers");
+        var userMembershipsTable = await T("orphanUserMemberships");
+        var log = await T("orphanTombstones");
+        var writer = new DynamoChangeWriter(log);
+        var store = new DynamoOrganizationMembershipStore(orgMembersTable, userMembershipsTable, EnvPartitioner.Live, writer);
+
+        // Simulate a partially-written membership: only the reverse (user) row exists, as if a crash
+        // landed between the two Puts inside UpsertAsync. The forward (org) row was never written.
+        var membershipJson = JsonSerializer.Serialize(
+            new OrganizationMembership { OrganizationId = "org-1", UserId = "u1" },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var reverseItem = new Dictionary<string, AttributeValue>
+        {
+            ["pk"] = new AttributeValue { S = EnvPartitioner.Live.PK("user|u1") },
+            ["sk"] = new AttributeValue { S = "org-1" },
+            ["data"] = new AttributeValue { S = membershipJson },
+        };
+        await userMembershipsTable.PutAsync(reverseItem);
+
+        Assert.Null(await store.GetAsync("org-1", "u1")); // forward row absent — GetAsync is a point read on it
+        Assert.Single(await store.ListByUserAsync("u1")); // the reverse row is there
+
+        await store.DeleteAsync("org-1", "u1"); // must not early-return because the forward row is missing
+
+        Assert.Empty(await store.ListByUserAsync("u1")); // the orphaned reverse row is now gone
+        Assert.True(await SawOp(log, "OrganizationMembers", "D"));
+        Assert.True(await SawOp(log, "UserMemberships", "D"));
+    }
+
     [Fact]
     public async Task MembershipStore_Delete_RecordsTombstonesForBothRows()
     {
@@ -299,15 +455,22 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
         await store.UpsertAsync(new OrganizationMembership { OrganizationId = "org-1", UserId = "u1" });
         await store.DeleteAsync("org-1", "u1");
 
-        var sawOrgMemberDelete = false;
-        await foreach (var item in log.QueryAsync("OrganizationMembers"))
-            sawOrgMemberDelete |= item["op"].S == "D";
-        Assert.True(sawOrgMemberDelete);
+        Assert.True(await SawOp(log, "OrganizationMembers", "D"));
+        Assert.True(await SawOp(log, "UserMemberships", "D"));
+    }
 
-        var sawUserMembershipDelete = false;
-        await foreach (var item in log.QueryAsync("UserMemberships"))
-            sawUserMembershipDelete |= item["op"].S == "D";
-        Assert.True(sawUserMembershipDelete);
+    /// F12: upsert records a change for both the forward and reverse rows.
+    [Fact]
+    public async Task MembershipStore_Upsert_RecordsChangeForBothRows()
+    {
+        var log = await T("membershipUpsertTombstones");
+        var writer = new DynamoChangeWriter(log);
+        var store = await NewMembershipStoreAsync("upsertTomb", tombstones: writer);
+
+        await store.UpsertAsync(new OrganizationMembership { OrganizationId = "org-1", UserId = "u1" });
+
+        Assert.True(await SawOp(log, "OrganizationMembers", "U"));
+        Assert.True(await SawOp(log, "UserMemberships", "U"));
     }
 
     [Fact]

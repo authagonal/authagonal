@@ -7,11 +7,13 @@ using Authagonal.Core.Stores;
 
 namespace Authagonal.AwsProvider.Stores;
 
-/// <summary>DynamoDB <see cref="IOrganizationMembershipStore"/>. Dual index, the same shape as
-/// <see cref="DynamoScimTokenStore"/>: a forward row (pk = "org|{orgId}", sk = userId) answers the
-/// point-read <see cref="GetAsync"/> and the <see cref="ListByOrganizationAsync"/> query; a reverse
-/// row (pk = "user|{userId}", sk = orgId) answers <see cref="ListByUserAsync"/>. Both rows carry the
-/// full membership document and are kept in sync.</summary>
+/// <summary>DynamoDB <see cref="IOrganizationMembershipStore"/>. Dual index: a forward row
+/// (pk = "org|{orgId}", sk = userId) answers the point-read <see cref="GetAsync"/> and the
+/// <see cref="ListByOrganizationAsync"/> query; a reverse row (pk = "user|{userId}", sk = orgId)
+/// answers <see cref="ListByUserAsync"/>. Both rows carry the full membership document and are kept
+/// in sync. <see cref="DeleteAsync"/> removes both unconditionally — it does not check either row's
+/// existence first, so a membership left inconsistent by an earlier partial write (one row present,
+/// the other missing) is still fully cleaned up rather than left half-orphaned forever.</summary>
 public sealed class DynamoOrganizationMembershipStore(
     DynamoTable orgMembers,
     DynamoTable userMemberships,
@@ -46,23 +48,34 @@ public sealed class DynamoOrganizationMembershipStore(
     public async Task UpsertAsync(OrganizationMembership membership, CancellationToken ct = default)
     {
         var json = JsonSerializer.Serialize(membership, AwsJsonContext.Default.OrganizationMembership);
+        var orgPk = OrgPk(membership.OrganizationId);
+        var userPk = UserPk(membership.UserId);
 
-        var forward = Dyn.Item(OrgPk(membership.OrganizationId), membership.UserId);
+        var forward = Dyn.Item(orgPk, membership.UserId);
         forward.PutS("data", json);
-        var reverse = Dyn.Item(UserPk(membership.UserId), membership.OrganizationId);
+        var reverse = Dyn.Item(userPk, membership.OrganizationId);
         reverse.PutS("data", json);
 
         await orgMembers.PutAsync(forward, ct).ConfigureAwait(false);
         await userMemberships.PutAsync(reverse, ct).ConfigureAwait(false);
+
+        if (tombstones is not null)
+        {
+            await tombstones.WriteUpsertAsync("OrganizationMembers", orgPk, membership.UserId, ct).ConfigureAwait(false);
+            await tombstones.WriteUpsertAsync("UserMemberships", userPk, membership.OrganizationId, ct).ConfigureAwait(false);
+        }
     }
 
     public async Task DeleteAsync(string organizationId, string userId, CancellationToken ct = default)
     {
         var orgPk = OrgPk(organizationId);
-        var existing = await orgMembers.GetAsync(orgPk, userId, ct).ConfigureAwait(false);
-        if (existing is null) return; // already gone — no-op
-
         var userPk = UserPk(userId);
+
+        // Unconditional on both sides — no existence check, and deliberately so. DynamoTable.DeleteAsync
+        // already succeeds when a row is gone; checking the forward row first (as the dual-index token
+        // store does) would leave a reverse row stranded forever if the two ever fell out of sync (a
+        // crashed upsert, a hand-edited row), because the store would see "forward missing" and return
+        // before ever touching the reverse table.
         await orgMembers.DeleteAsync(orgPk, userId, ct).ConfigureAwait(false);
         await userMemberships.DeleteAsync(userPk, organizationId, ct).ConfigureAwait(false);
 

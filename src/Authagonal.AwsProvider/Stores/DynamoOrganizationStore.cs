@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Amazon.DynamoDBv2.Model;
 using Authagonal.AwsProvider.Dynamo;
 using Authagonal.Core.Models;
@@ -10,10 +11,13 @@ namespace Authagonal.AwsProvider.Stores;
 /// <summary>DynamoDB <see cref="IOrganizationStore"/>. Two tables: the organization document
 /// (pk = "org", sk = organizationId, data = the full document) and a slug lookup (pk = "orgslug",
 /// sk = slug, data = the owning organization id) so <see cref="GetBySlugAsync"/> is a point read
-/// rather than a scan. <see cref="UpsertAsync"/> writes the organization row then the new slug row,
-/// dropping the stale slug row last when the slug changed; a slug already held by a different
-/// organization is refused.</summary>
-public sealed class DynamoOrganizationStore(
+/// rather than a scan. The slug is immutable once an organization exists — <see cref="UpsertAsync"/>
+/// refuses to change it — and ids/slugs share no namespace, so a new organization is also refused
+/// when its slug reads as an existing organization's id or its id reads as an existing organization's
+/// slug. A brand-new slug is claimed with an insert-only conditional write before the organization
+/// document itself is written, so two concurrent creates for the same new slug cannot both
+/// succeed.</summary>
+public sealed partial class DynamoOrganizationStore(
     DynamoTable organizations,
     DynamoTable slugs,
     EnvPartitioner partitioner,
@@ -21,6 +25,9 @@ public sealed class DynamoOrganizationStore(
 {
     private const string OrgPartition = "org";
     private const string SlugPartition = "orgslug";
+
+    [GeneratedRegex("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")]
+    private static partial Regex SlugFormat();
 
     public async Task<Organization?> GetAsync(string organizationId, CancellationToken ct = default)
     {
@@ -44,37 +51,62 @@ public sealed class DynamoOrganizationStore(
 
     public async Task UpsertAsync(Organization organization, CancellationToken ct = default)
     {
+        if (!SlugFormat().IsMatch(organization.Slug))
+        {
+            throw new ArgumentException(
+                $"Slug '{organization.Slug}' is invalid; slugs must match ^[a-z0-9](?:[a-z0-9-]{{0,62}}[a-z0-9])?$.",
+                nameof(organization));
+        }
+
         var orgPk = partitioner.PK(OrgPartition);
         var slugPk = partitioner.PK(SlugPartition);
 
-        // A slug already answering for a different organization would make the `organization`
-        // authorize parameter ambiguous — refuse rather than let the new row shadow it.
-        var clash = await slugs.GetAsync(slugPk, organization.Slug, ct).ConfigureAwait(false);
-        if (clash is not null && !string.Equals(clash.GetStr("data"), organization.Id, StringComparison.Ordinal))
+        var existingItem = await organizations.GetAsync(orgPk, organization.Id, ct).ConfigureAwait(false);
+        if (existingItem is not null)
         {
-            throw new InvalidOperationException(
-                $"Slug '{organization.Slug}' is already held by organization '{clash.GetStr("data")}'.");
+            // The slug is immutable once set: it is the value a relying party hard-codes (as the
+            // `organization` authorize parameter), and changing what it resolves to under the same
+            // string is a silent redirect to a different customer, not an update.
+            var existing = Read(existingItem);
+            if (!string.Equals(existing.Slug, organization.Slug, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Organization '{organization.Id}' slug is immutable; cannot change '{existing.Slug}' to '{organization.Slug}'.");
+            }
+
+            await organizations.PutAsync(OrgItem(orgPk, organization), ct).ConfigureAwait(false);
+            if (tombstones is not null)
+                await tombstones.WriteUpsertAsync("Organizations", orgPk, organization.Id, ct).ConfigureAwait(false);
+            return;
         }
 
-        var existing = await organizations.GetAsync(orgPk, organization.Id, ct).ConfigureAwait(false);
-        var previousSlug = existing is null ? null : Read(existing).Slug;
+        // New organization. Ids and slugs share no namespace: a slug that reads as another
+        // organization's id, or an id that reads as another organization's slug, would make "which
+        // one did the caller mean" ambiguous wherever a bare string is accepted as either.
+        var idClash = await organizations.GetAsync(orgPk, organization.Slug, ct).ConfigureAwait(false);
+        if (idClash is not null)
+            throw new InvalidOperationException($"Slug '{organization.Slug}' is already in use as another organization's id.");
 
-        var orgItem = Dyn.Item(orgPk, organization.Id);
-        orgItem.PutS("data", JsonSerializer.Serialize(organization, AwsJsonContext.Default.Organization));
-        await organizations.PutAsync(orgItem, ct).ConfigureAwait(false);
+        var slugClash = await slugs.GetAsync(slugPk, organization.Id, ct).ConfigureAwait(false);
+        if (slugClash is not null)
+        {
+            var owner = slugClash.GetStr("data");
+            throw new InvalidOperationException($"Id '{organization.Id}' is already held by organization '{owner}' as its slug.");
+        }
 
+        // Insert-only: exactly one concurrent creator of the same brand-new slug wins. This is the
+        // real uniqueness guarantee — the reads above are a fast, friendlier rejection for the
+        // common (non-racing) case, not a substitute for it.
         var slugItem = Dyn.Item(slugPk, organization.Slug);
         slugItem.PutS("data", organization.Id);
-        await slugs.PutAsync(slugItem, ct).ConfigureAwait(false);
+        if (!await slugs.PutIfAbsentAsync(slugItem, ct).ConfigureAwait(false))
+            throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by another organization.");
+        if (tombstones is not null)
+            await tombstones.WriteUpsertAsync("OrganizationSlugs", slugPk, organization.Slug, ct).ConfigureAwait(false);
 
-        // Slug change: the new row above already resolves lookups for the new slug, so only now is
-        // it safe to drop the stale one.
-        if (previousSlug is not null && !string.Equals(previousSlug, organization.Slug, StringComparison.Ordinal))
-        {
-            await slugs.DeleteAsync(slugPk, previousSlug, ct).ConfigureAwait(false);
-            if (tombstones is not null)
-                await tombstones.WriteAsync("OrganizationSlugs", slugPk, previousSlug, ct).ConfigureAwait(false);
-        }
+        await organizations.PutAsync(OrgItem(orgPk, organization), ct).ConfigureAwait(false);
+        if (tombstones is not null)
+            await tombstones.WriteUpsertAsync("Organizations", orgPk, organization.Id, ct).ConfigureAwait(false);
     }
 
     public async Task DeleteAsync(string organizationId, CancellationToken ct = default)
@@ -91,6 +123,13 @@ public sealed class DynamoOrganizationStore(
         await slugs.DeleteAsync(slugPk, slug, ct).ConfigureAwait(false);
         if (tombstones is not null)
             await tombstones.WriteAsync("OrganizationSlugs", slugPk, slug, ct).ConfigureAwait(false);
+    }
+
+    private static Dictionary<string, AttributeValue> OrgItem(string orgPk, Organization organization)
+    {
+        var item = Dyn.Item(orgPk, organization.Id);
+        item.PutS("data", JsonSerializer.Serialize(organization, AwsJsonContext.Default.Organization));
+        return item;
     }
 
     private static Organization Read(Dictionary<string, AttributeValue> item)

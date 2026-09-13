@@ -150,6 +150,19 @@
   may still re-bind deliberately, which is what context-bound exchanges are for, but it now has to say
   so rather than inherit silence. Introspection emits `org_id`/`org_slug` when present, so a resource
   server that introspects instead of validating the JWT itself gets the same answer as one that does.
+- **`TableOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
+  validates the slug pattern.** A slug rename used to write the new lookup row and drop the stale one
+  under a plain read-then-write — a relying party hard-codes the slug into the `organization`
+  authorize parameter, so a rename is now refused outright (`InvalidOperationException`) rather than
+  supported unsafely. Two concurrent creates racing on the same brand-new slug could both pass the
+  read-then-write uniqueness check and both write, so a new organization's slug row is now created
+  with the table's own insert-only primitive (`AddEntityAsync`), and the loser's 409 is what rejects
+  it — not a check that ran too early. An id and a slug can also no longer resolve to two different
+  organizations (an incoming slug matching another organization's id, or vice versa, is refused), and
+  `UpsertAsync` now validates the slug against `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing
+  anything. `TableOrganizationMembershipStore.DeleteAsync` already deleted both rows and wrote both
+  tombstones unconditionally — confirmed with a test for the orphan-repair case (only the reverse row
+  present) rather than changed.
 - **`DynamoOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
   validates the slug pattern; both organization stores now log upserts as well as deletes, and
   membership delete no longer skips the reverse row.** A slug rename used to write the new lookup
@@ -171,6 +184,24 @@
   inconsistent by an earlier partial write (one row present, the other not) could never be cleaned up
   by a delete that only ever looked at the row it was about to skip; it now deletes and tombstones
   both rows unconditionally.
+- **`SqlOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
+  validates the slug pattern; `SqlOrganizationMembershipStore.DeleteAsync` no longer skips the
+  reverse row.** A slug rename used to write the new lookup row and drop the stale one under a plain
+  read-then-write — a relying party hard-codes the slug into the `organization` authorize parameter,
+  so a rename is now refused outright (`InvalidOperationException`) rather than supported unsafely.
+  Two concurrent creates racing on the same brand-new slug could both pass the read-then-write
+  uniqueness check and both write, so a new organization's slug row is now claimed with
+  `SqlTable.PutIfAbsentAsync` (`INSERT ... ON CONFLICT (pk, sk) DO NOTHING`), and the loser's `false`
+  return is what rejects it — not a check that ran too early. An id and a slug can also no longer
+  resolve to two different organizations (an incoming slug matching another organization's id, or
+  vice versa, is refused with a point read each way), and `UpsertAsync` now validates the slug
+  against `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing anything, matching
+  `TableOrganizationStore` and `DynamoOrganizationStore`. `SqlOrganizationMembershipStore.DeleteAsync`
+  checked the forward (`OrganizationMembers`) row first and let its absence skip the reverse
+  (`UserMemberships`) row's deletion and tombstone entirely, so a membership left inconsistent by an
+  earlier partial write (one row present, the other missing) could never be fully cleaned up; each
+  side is now checked-and-removed independently with `SqlTable.DeleteIfExistsReturningAsync`, so
+  whichever row actually exists is deleted and tombstoned regardless of the other's state.
 
 ## [0.27.1], 2026-09-11
 

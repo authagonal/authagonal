@@ -257,7 +257,7 @@ public class DynamoStoreParityTests(DynamoFixture dynamo)
     // ----- DynamoOrganizationStore ------------------------------------------------
 
     [Fact]
-    public async Task OrganizationStore_CrudSlugLookup_SlugChange_AndConflict()
+    public async Task OrganizationStore_CrudSlugLookup_ImmutableSlug_AndConflict()
     {
         var store = new DynamoOrganizationStore(await T("pcOrgs"), await T("pcOrgSlugs"), EnvPartitioner.Live);
 
@@ -274,26 +274,23 @@ public class DynamoStoreParityTests(DynamoFixture dynamo)
 
         Assert.Equal(2, (await store.ListAsync()).Count);
 
-        // A slug already held by a different organization is refused.
+        // A slug already held by a different organization is refused, atomically (F4) — nothing is
+        // written for the rejected id.
         var clash = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.UpsertAsync(new Organization { Id = "org-3", Slug = "acme", DisplayName = "Impostor", CreatedAt = DateTimeOffset.UtcNow }));
-        Assert.Contains("org-1", clash.Message, StringComparison.Ordinal);
+        Assert.Contains("acme", clash.Message, StringComparison.Ordinal);
+        Assert.Null(await store.GetAsync("org-3"));
 
-        // Renaming the slug drops the stale lookup row and the new one resolves.
+        // The slug is immutable once set (F11): a rename is refused and changes nothing.
         acme.Slug = "acme-corp";
-        acme.UpdatedAt = DateTimeOffset.UtcNow;
-        await store.UpsertAsync(acme);
-        Assert.Null(await store.GetBySlugAsync("acme"));
-        Assert.Equal("org-1", (await store.GetBySlugAsync("acme-corp"))?.Id);
-
-        // The old slug is free again for a different organization.
-        await store.UpsertAsync(new Organization { Id = "org-4", Slug = "acme", DisplayName = "New Acme", CreatedAt = DateTimeOffset.UtcNow });
-        Assert.Equal("org-4", (await store.GetBySlugAsync("acme"))?.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.UpsertAsync(acme));
+        Assert.Equal("org-1", (await store.GetBySlugAsync("acme"))?.Id);
+        Assert.Null(await store.GetBySlugAsync("acme-corp"));
 
         await store.DeleteAsync("org-1");
         Assert.Null(await store.GetAsync("org-1"));
-        Assert.Null(await store.GetBySlugAsync("acme-corp"));
-        Assert.Equal(2, (await store.ListAsync()).Count);
+        Assert.Null(await store.GetBySlugAsync("acme"));
+        Assert.Single(await store.ListAsync());
         await store.DeleteAsync("org-1"); // already gone — no-op
     }
 
