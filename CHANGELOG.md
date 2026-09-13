@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`PasswordHasher` now verifies legacy Scrypt.NET (`$s2$`) password hashes and rehashes them to
+  native PBKDF2 on first login** — the same accept-on-import, upgrade-on-login contract bcrypt and
+  ASP.NET Identity V3 already have. `$s2$<N>$<r>$<p>$<salt-b64>$<hash-b64>` is the format
+  Scrypt.NET's `ScryptEncoder` writes. `System.Security.Cryptography` ships PBKDF2 and HKDF but no
+  scrypt on either net9.0 or net10.0, so `Authagonal.Core.Services.Scrypt` is a from-scratch RFC
+  7914 implementation (Salsa20/8 core, BlockMix, ROMix, an outer PBKDF2-HMAC-SHA256), checked
+  against all four of the RFC's published test vectors. N, r and p are read out of the stored
+  hash — the same kind of attacker-influenced cost parameter every other imported format in this
+  file already bounds — so a crafted `$s2$` blob with an oversized or non-power-of-two N, or r*p at
+  or above 2^30, is refused before any derivation runs rather than after.
+
 ## [0.27.1], 2026-09-11
 
 ### Fixed
