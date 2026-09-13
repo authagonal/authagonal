@@ -28,7 +28,14 @@ namespace Authagonal.Migration;
 /// earlier version — <c>{"UsersCreated":5}</c> — still deserializes into the same report.
 /// </para>
 /// </remarks>
+/// <remarks>
+/// <see cref="NdjsonUserRecord"/> was added for the NDJSON user-import source: every line is
+/// deserialized in <see cref="NdjsonUserImportReader"/>, which runs inside this same trimmable package,
+/// so it goes through this context rather than the reflection-based resolver for the same reason the
+/// two types above do.
+/// </remarks>
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 [JsonSerializable(typeof(DuendeMigrationReport))]
 [JsonSerializable(typeof(MigrationStatusResponse))]
+[JsonSerializable(typeof(NdjsonUserRecord))]
 internal sealed partial class MigrationJsonContext : JsonSerializerContext;

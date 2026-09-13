@@ -134,3 +134,100 @@ users registered since. Existing records are skipped (or updated under `Upsert`)
 4. Bump `Version` for the final delta sweep, then repoint clients/BFFs to Authagonal. **Expect one
    forced re-login** — see below.
 5. Monitor; rollback = repoint to the untouched Duende deployment.
+
+## NDJSON user import
+
+A second, independent import source in the same `Authagonal.Migration` package: a flat NDJSON file
+(one JSON object per line) instead of a live database connection, and users only — no clients, roles,
+scopes or federation config. Built for migrating a legacy app's own user table (a hand-rolled
+ASP.NET Identity store, a Rails/Devise table exported to bcrypt, a Node app on scrypt, ...) so people
+keep logging in with their old password while it is transparently rehashed to native PBKDF2 on their
+next successful login — the same lazy-rehash path the Duende importer above relies on.
+
+### Record schema
+
+One JSON object per line. `email` is the only required field; every other field is optional. **Unknown
+top-level fields fail that line** (strict by default) unless `--AllowUnknownFields true` is passed.
+
+| Field | Type | Notes |
+|---|---|---|
+| `email` | string | Required. Must be a plausible email address. Case-insensitive duplicate key. |
+| `username` | string | No dedicated `AuthUser` column — stored in `CustomAttributes["username"]`. |
+| `givenName` | string | → `AuthUser.FirstName` |
+| `familyName` | string | → `AuthUser.LastName` |
+| `displayName` | string | No dedicated column — stored in `CustomAttributes["displayName"]`. |
+| `emailVerified` | bool | → `AuthUser.EmailConfirmed`. Defaults to `false` when absent. |
+| `passwordHash` | string | → `AuthUser.PasswordHash`, stored **verbatim**. Any format `PasswordHasher` recognises on login (bcrypt `$2a$`/`$2b$`/`$2x$`/`$2y$`, ASP.NET Identity V3, scrypt `$s2$`) verifies unchanged and upgrades to native PBKDF2 from there. Not inspected beyond non-empty — a malformed hash simply fails to verify at login, same as it would outside migration. Omit for SSO-only / passwordless users. |
+| `roles` | string[] | → `AuthUser.Roles` |
+| `organizationId` | string | → `AuthUser.OrganizationId` |
+| `attributes` | object (string→string) | Merged into `AuthUser.CustomAttributes` |
+| `phoneNumber` | string | → `AuthUser.Phone` |
+| `disabled` | bool | → `AuthUser.IsActive = !disabled`. Defaults to active when absent. |
+| `createdAt` | string (ISO 8601) | → `AuthUser.CreatedAt`. Defaults to import time when absent. |
+| `externalId` | string | → `AuthUser.ExternalId` — the same field the Duende importer occupies with the source database's user id. |
+
+Example file (5 lines):
+
+```ndjson
+{"email":"ada.lovelace@legacy.example.com","givenName":"Ada","familyName":"Lovelace","passwordHash":"$2b$12$KIXQ8N6Qe0m6b6b6b6b6bOQe0m6b6b6b6b6b6b6b6b6b6b6b6b6b6","roles":["admin"],"organizationId":"org-legacy-1","externalId":"42"}
+{"email":"bob@legacy.example.com","emailVerified":true,"attributes":{"dept":"eng"},"createdAt":"2019-03-04T00:00:00Z"}
+{"email":"carol@legacy.example.com","disabled":true,"phoneNumber":"+61400000000"}
+{"email":"dave@legacy.example.com","username":"dave1998","displayName":"Dave K."}
+{"email":"erin@legacy.example.com"}
+```
+
+### CLI
+
+```bash
+dotnet run --project tools/Authagonal.Migration.Cli -- import-ndjson-users \
+    --Input ./users.ndjson \
+    --Target:ConnectionString "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;TableEndpoint=https://..." \
+    --DryRun true \
+    --OnDuplicate skip \
+    --BatchSize 500 \
+    --AllowUnknownFields false \
+    --ContinueOnError false \
+    --AllowPlaintextPii true
+```
+
+Same target (Azure Table Storage) and PII-plaintext gate as the Duende CLI above — this source writes
+`AuthUser` rows straight to Table Storage with no host-registered `IFieldCipher`/`IIndexTokenizer`, so
+it refuses to run unless `--AllowPlaintextPii true` confirms the target has neither configured (or you
+wire `NdjsonUserImportEngine` into the host's own DI container instead, where those seams do resolve).
+Unlike the Duende CLI there is no `--AllowPlaintextSecrets` gate: this source never writes MFA TOTP
+seeds or OAuth client secrets, only user profile fields and a password hash stored verbatim.
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `--Input` | *(required)* | Path to the NDJSON file |
+| `--Target:ConnectionString` | *(required)* | Azure Table Storage connection string |
+| `--DryRun` | `false` | Parse + validate every line, resolve duplicates against the target, and produce the full report — write nothing |
+| `--OnDuplicate` | `skip` | How to treat a line whose email (case-insensitive) already matches an existing user: `skip` (leave it untouched, idempotent), `update` (merge the line's present fields onto the existing user), or `fail` (abort the run outright) |
+| `--BatchSize` | `500` | How many lines between progress log lines. Not a write-batching mechanism — `IUserStore` has no bulk API, so every import/update is still one store call |
+| `--AllowUnknownFields` | `false` | Accept and ignore top-level JSON properties outside the schema above, instead of failing the line |
+| `--ContinueOnError` | `false` | Exit 0 even if one or more lines failed to parse/validate. Does not apply to `--OnDuplicate fail`, which always aborts the run regardless of this flag |
+
+### Summary output & exit codes
+
+The report is printed as JSON: `TotalLines`, `Imported`, `Updated`, `Skipped`, `Failed`, and the first
+20 `Failures` (`LineNumber` + `Reason`). Blank lines are not counted anywhere. Exit codes:
+
+- `0` — success (or `--ContinueOnError true` with one or more failed lines)
+- `1` — one or more lines failed to parse/validate, and `--ContinueOnError` was not set
+- `2` — the run aborted: `--OnDuplicate fail` hit an existing email, or a required option was missing
+
+### Idempotency
+
+The default `--OnDuplicate skip` makes re-running with an unchanged file a no-op the second time:
+every line whose email already exists is counted as skipped and nothing is written. `update` is safe to
+re-run too (it always re-applies the same fields); `fail` is for a one-shot import that should never
+silently collide with existing accounts.
+
+### What is NOT imported
+
+- **Roles, scopes, OAuth clients, federation config.** This source is users only — see the Duende
+  importer above if you also need those.
+- **MFA credentials, external logins.** Not part of the schema; add them through the standard MFA
+  setup / SSO flows after import.
