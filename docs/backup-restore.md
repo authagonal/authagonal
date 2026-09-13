@@ -47,6 +47,14 @@ backups/
     _manifest.json
 ```
 
+With `--prefix`, backups are nested one level deeper, under the prefix: `backups/acmecorp/20260329-120000/`.
+This is what keeps two tenants' full backups landing in the same `--output` directory in the same
+second from colliding — the backup id itself is still a bare `yyyyMMdd-HHmmss[-incr]` timestamp with
+one-second resolution and no prefix in it, so without the nesting, two prefixes backed up within the
+same second would get the identical id and therefore the identical directory. Point `--input` at the
+nested directory to restore from it (`--input backups/acmecorp/20260329-120000`); unprefixed runs are
+unaffected and keep the flat layout shown above.
+
 Each `.jsonl` file contains one JSON object per line (one per table entity). With `--gzip`, files are compressed as `.jsonl.gz`. The `_manifest.json` records the backup id, timestamp, mode (`full` or `incremental`), compression, the incremental watermark, per-table entity counts, the tombstone count, which tables (if any) were read via the change-log (`ChangeLogTables`, null means full scan coverage), and SHA-256 file hashes for integrity verification.
 
 Incremental backups also write a `_tombstones.jsonl(.gz)` file recording deletes since the watermark: one line per deleted row with `Table`, `PartitionKey`, `RowKey`, and `DeletedAt`. Restore replays these so deleted rows are not resurrected (see [Tombstone replay](#tombstone-replay)).

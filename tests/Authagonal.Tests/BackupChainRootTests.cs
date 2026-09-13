@@ -50,9 +50,11 @@ public class BackupChainRootTests(AzuriteFixture azurite)
             var afterFirst = await RunAsync(dir, prefix, incremental: true);
             Assert.Equal(first.BackupId, afterFirst.ParentBackupId);
 
-            // backupId is "yyyyMMdd-HHmmss" — one-second resolution, so two runs inside the same second
-            // share an id (and, since the prefix is not part of the output path, a directory). Waiting
-            // keeps this test about re-rooting rather than about that.
+            // backupId is "yyyyMMdd-HHmmss" — one-second resolution, so two runs of the SAME prefix
+            // inside the same second still share an id (and directory: FileSystemBackupTarget nests
+            // by prefix, not by run, so same-prefix collisions are a separate concern from the
+            // cross-prefix one TheChainRootIsScopedPerPrefix covers below). Waiting keeps this test
+            // about re-rooting rather than about that.
             await Task.Delay(1100);
             var second = await RunAsync(dir, prefix, incremental: false);
             var afterSecond = await RunAsync(dir, prefix, incremental: true);
@@ -70,6 +72,14 @@ public class BackupChainRootTests(AzuriteFixture azurite)
     /// One value per output directory would name tenant A's full as tenant B's parent — the same defect
     /// the watermark's <c>scope</c> parameter was added for, and for the same documented reason: the
     /// stated purpose of <c>--prefix</c> is running more than one tenant into one target.
+    /// <para>
+    /// Run back-to-back, deliberately with no delay between the two full backups: the chain-root FILE
+    /// (<c>.lastfull-{scope}</c>) has always been scoped per prefix, correctly, via <c>scope</c> — this
+    /// asserts that mechanism, not the id's timing. The bare <c>yyyyMMdd-HHmmss</c> id itself can
+    /// legitimately still collide as a STRING between two prefixes taken in the same second — that is
+    /// harmless now (see <see cref="TwoPrefixesWritingTheSameBackupIdDoNotCollideOnDisk"/>) precisely
+    /// because it is no longer also the STORAGE PATH, so this test does not assert the ids differ.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task TheChainRootIsScopedPerPrefix()
@@ -80,13 +90,51 @@ public class BackupChainRootTests(AzuriteFixture azurite)
         try
         {
             var fullA = await RunAsync(dir, prefixA, incremental: false);
-            await Task.Delay(1100); // distinct backupId — see the note in the re-rooting test
             var fullB = await RunAsync(dir, prefixB, incremental: false);
 
             var incrA = await RunAsync(dir, prefixA, incremental: true);
 
             Assert.Equal(fullA.BackupId, incrA.ParentBackupId);
-            Assert.NotEqual(fullB.BackupId, incrA.ParentBackupId);
+        }
+        finally { Cleanup(dir); }
+    }
+
+    /// <summary>
+    /// The actual defect and its fix, proven directly and deterministically (no clock, no delay): two
+    /// prefixes writing the SAME literal backup id into the SAME output root must not clobber each
+    /// other's manifest.
+    /// </summary>
+    /// <remarks>
+    /// Before the fix, <c>FileSystemBackupTarget</c>/<c>-Source</c> keyed every backupId-scoped path
+    /// (data files, the manifest) off <c>backupId</c> ALONE — <c>{root}/{backupId}/...</c> — with no
+    /// prefix in the path at all. <c>backupId</c> is a bare <c>yyyyMMdd-HHmmss</c> timestamp with
+    /// one-second resolution, so two DIFFERENT prefixes' full backups landing in the same wall-clock
+    /// second got the identical directory: tenant B's manifest overwrote tenant A's, in a target whose
+    /// documented purpose (<c>--prefix</c>) is running more than one tenant into one place. Forcing the
+    /// SAME id here reproduces that deterministically rather than racing the clock. The fix nests
+    /// backupId-scoped paths one level under the table prefix — <c>{root}/{prefix}/{backupId}/...</c> —
+    /// mirroring how <c>BlobBackupTarget</c> (Authagonal Cloud's target) already nests every path under
+    /// its constructor-supplied tenant slug; unprefixed (single-tenant) runs are unaffected.
+    /// </remarks>
+    [Fact]
+    public async Task TwoPrefixesWritingTheSameBackupIdDoNotCollideOnDisk()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"tb{Guid.NewGuid():N}");
+        var prefixA = $"tb{Guid.NewGuid():N}"[..12];
+        var prefixB = $"tb{Guid.NewGuid():N}"[..12];
+        const string sharedId = "20260101-000000";
+        try
+        {
+            await new FileSystemBackupTarget(dir, prefixA).WriteManifestAsync(
+                sharedId, new BackupManifest { BackupId = sharedId, Mode = "full", TotalEntities = 111 });
+            await new FileSystemBackupTarget(dir, prefixB).WriteManifestAsync(
+                sharedId, new BackupManifest { BackupId = sharedId, Mode = "full", TotalEntities = 222 });
+
+            var readBackA = await new FileSystemBackupSource(dir, prefixA).ReadManifestAsync(sharedId);
+            var readBackB = await new FileSystemBackupSource(dir, prefixB).ReadManifestAsync(sharedId);
+
+            Assert.Equal(111, readBackA?.TotalEntities);
+            Assert.Equal(222, readBackB?.TotalEntities);
         }
         finally { Cleanup(dir); }
     }
@@ -173,7 +221,9 @@ public class BackupChainRootTests(AzuriteFixture azurite)
 
     private Task<BackupManifest> RunAsync(
         string dir, string prefix, bool incremental, bool dryRun = false)
-        => new BackupService(_svc, new FileSystemBackupTarget(dir), new BackupOptions
+        // Nested by prefix, exactly as tools/Authagonal.Backup now constructs it — see
+        // FileSystemBackupTarget's constructor remarks for why.
+        => new BackupService(_svc, new FileSystemBackupTarget(dir, prefix), new BackupOptions
         {
             TablePrefix = prefix,
             Incremental = incremental,
