@@ -132,6 +132,41 @@
 
 ### Fixed
 
+- **`org_id` and `org_slug` are no longer gated on the `profile` scope.** They are authorization
+  context, not profile data: they say which customer a token may act for, which is the first thing a
+  multi-customer resource server checks — before it has decided whether it cares about a name, and
+  often on a token that requested no profile at all. Under the gate an API-only client asking for
+  `openid` alone got a token with no organization on it, which reads as "belongs to nobody": the
+  resource server either refuses a legitimate caller or, silently and much worse, treats the token as
+  unscoped and serves every customer's data from it. The same gate also broke the exchange restriction
+  added last slice — a resource-server token carried no `org_id`, so a client exchanging its OWN token
+  for its OWN organization was refused as unattributed. `org_name` keeps the gate, because it is
+  presentation and nothing should authorize on it. Ungating discloses nothing the client had not
+  already established: it chose the organization, or it is restricted to one, and both names are
+  reserved so no scope's `UserClaims` and no custom attribute can forge them. An account with no
+  organization still emits none of the three. Applies to the access token, the ID token, both userinfo
+  endpoints and introspection.
+- **A mixed-case `organization` parameter resolves by id only.** Slugs are lowercase-only by the store
+  rule, so a value carrying any uppercase character cannot be one — and lowercasing it to ask the slug
+  index anyway asked "is some organization's slug the lowercased form of this id?". Where one was, a
+  caller naming an id was handed a different customer. An all-lowercase value still resolves slug-first
+  and then by id, which the store's cross-namespace rule keeps unambiguous.
+- **`OAuthClient.RestrictedToOrganizationIds` is normalized and validated at the admin API.** The
+  model's `= []` initializer does not survive JSON binding, so a body carrying an explicit
+  `"restrictedToOrganizationIds": null` left the property null and every later `.Count` on it — on the
+  authorize and exchange paths — was a NullReferenceException: one malformed admin call turned every
+  subsequent token request for that client into a 500. Null is now normalized to empty on both the
+  create and update paths, entries must match the organization id shape `^[A-Za-z0-9._~-]{1,200}$` or
+  the request is `400 invalid_request`, and the token paths carry their own `?? []` guard so neither
+  half has to trust the other. An id outside that shape is one no `organization` parameter can send, so
+  a restriction listing it matches nothing — and a restriction that matches nothing refuses every
+  request, which is a lockout written by a typo.
+- **The two agentic mints pass the organization to `IAuthHook.OnTokenIssuingAsync`.** The delegated
+  token exchange is the mint a gate most needs it for — it mints USER authority for an agent, and
+  "which customer" is half of that decision. `client_credentials` passes none and cannot: it has no
+  subject at all, and its context-binding seam runs after this gate by design, so a host vetoing on a
+  machine token's bound context does it inside that transformer.
+
 - **Organization ids are resolved as ids.** The organization carried across a refresh rotation, the
   account's own `OrganizationId` tag and a client's `RestrictedToOrganizationIds` entries were all
   resolved slug-first and then by id. All three hold ids this server minted, so the slug attempt was
@@ -293,6 +328,20 @@
   only the row that came back non-null.
 
 ### Changed
+
+- **Registration order is documented, not changed: a storage provider goes BEFORE `AddAuthagonal()`.**
+  That existing `IUserStore` registration is what makes `AddAuthagonal()` skip its built-in Azure Table
+  wiring, and a provider registered afterwards loses every interface already filled by `TryAdd`.
+  `IOrganizationStore`, `IOrganizationMembershipStore` and `IScimGroupRoleMappingStore` are the three
+  special cases — their empty in-memory fallbacks are lifted before the provider registers and restored
+  by `TryAdd` after — and that is now stated on `AddAuthagonal` and in `docs/installation.md`.
+- **`Organization.Id` has a documented shape.** It must match `^[A-Za-z0-9._~-]{1,200}$`, the same as
+  the `organization` parameter, so every id can always be sent as one. It SHOULD also carry at least
+  one character a slug may not (uppercase, `.`, `_`, `~`) so it can never collide with the slug
+  namespace; `org_7f3a9c` is the recommended shape, since `_` is not slug-legal. Advisory, not
+  enforced — stores already refuse an actual collision. The values already in the field are arbitrary:
+  they come from a downstream app's TCC `/try` response or an operator's `ScimToken.OrganizationId`
+  binding.
 
 - **`OidcSubjectResolutionContext` has a fourth positional parameter, `RequestedOrganization`.** It is
   defaulted, so every existing three-argument CONSTRUCTION keeps compiling — but the record's

@@ -256,13 +256,39 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
         Assert.Equal("org-a", ReadJwt(body.GetProperty("access_token").GetString()!)["org_id"]);
     }
 
-    /// A restricted client cannot launder an unattributed token either: no organization on the subject
-    /// token is not the same as permission to act for any.
+    /// The reason org_id had to leave the profile gate. A resource-server token requesting `openid`
+    /// alone carried no org_id, so this check saw an unattributed token and refused a client exchanging
+    /// its OWN token for its OWN organization — the restriction rejecting exactly the traffic it exists
+    /// to permit.
+    [Fact]
+    public async Task Exchange_RestrictedClient_AcceptsItsOwnTokenWithoutProfileScope()
+    {
+        await SeedExchangeClientAsync(restrictedTo: ["org-a"]);
+        var tokens = await AuthorizeAndRedeemAsync("organization=acme", "openid");
+
+        var exchanged = await ExchangeAsync(tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, exchanged.StatusCode);
+
+        var body = await exchanged.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("org-a", ReadJwt(body.GetProperty("access_token").GetString()!)["org_id"]);
+    }
+
+    /// A restricted client still cannot launder a genuinely unattributed token: no organization is not
+    /// permission to act for any. Seeded from a user with no organization at all, so the absence is the
+    /// subject's and not an artefact of the scopes requested.
     [Fact]
     public async Task Exchange_RestrictedClient_RefusesATokenWithNoOrganization()
     {
         await SeedExchangeClientAsync(restrictedTo: ["org-a"]);
+
+        // A second account belonging to no organization — _user is a member of both org-a and org-b.
+        var orgless = await _factory.SeedTestUserAsync("orgless@example.com");
+        Assert.Null(orgless.OrganizationId);
+        await _client.PostAsJsonAsync("/api/auth/logout", new { });
+        await LoginAsAsync("orgless@example.com");
+
         var tokens = await AuthorizeAndRedeemAsync(null, "openid profile");
+        Assert.False(ReadJwt(tokens.AccessToken).ContainsKey("org_id"));
 
         var exchanged = await ExchangeAsync(tokens.AccessToken);
 
@@ -290,17 +316,46 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
         Assert.Equal("invalid_request", query["error"]);
     }
 
-    /// Slugs are stored lowercase, so the parameter is lowercased before the slug lookup — otherwise
-    /// `Acme` would be a value no stored slug could ever answer.
+    /// An all-lowercase value could be either, so it resolves slug-first — which is what a relying
+    /// party sends.
     [Fact]
-    public async Task Organization_IsLowercasedForTheSlugLookup()
+    public async Task Organization_LowercaseValue_ResolvesBySlug()
     {
-        var tokens = await AuthorizeAndRedeemAsync("organization=ACME", "openid profile");
+        var tokens = await AuthorizeAndRedeemAsync("organization=acme", "openid profile");
         Assert.Equal("org-a", ReadJwt(tokens.AccessToken)["org_id"]);
     }
 
-    /// Ids stay exact-match: lowercasing an opaque id would resolve a different organisation from the
-    /// one named, or none at all.
+    /// A value with any uppercase character CANNOT be a slug — slugs are lowercase-only by the store
+    /// rule — so it resolves by id, exactly, and the slug index is never consulted. The organisation
+    /// whose SLUG is the lowercased form must not be reachable this way, or a caller naming an id would
+    /// be handed a different customer.
+    [Fact]
+    public async Task Organization_MixedCaseValue_ResolvesByIdOnly()
+    {
+        _factory.OrganizationStore.With("AbC123", "p-org", "Org P");
+        _factory.OrganizationStore.With("q-org-id", "abc123", "Org Q");
+        _factory.OrganizationMembershipStore.With("AbC123", _user.Id);
+        _factory.OrganizationMembershipStore.With("q-org-id", _user.Id);
+
+        var tokens = await AuthorizeAndRedeemAsync("organization=AbC123", "openid profile");
+
+        // P, whose ID is the value — not Q, whose SLUG is its lowercased form.
+        Assert.Equal("AbC123", ReadJwt(tokens.AccessToken)["org_id"]);
+        Assert.Equal("p-org", ReadJwt(tokens.AccessToken)["org_slug"]);
+    }
+
+    /// And a mixed-case value that matches no id resolves to nothing, rather than falling back to the
+    /// lowercased slug.
+    [Fact]
+    public async Task Organization_MixedCaseValue_DoesNotFallBackToTheSlug()
+    {
+        var response = await _client.GetAsync(AuthorizeUrl("organization=ACME", "openid"));
+
+        var query = HttpUtility.ParseQueryString(new Uri(response.Headers.Location!.ToString()).Query);
+        Assert.Equal("access_denied", query["error"]);
+    }
+
+    /// Ids are exact: a lowercase value never reaches a mixed-case id.
     [Fact]
     public async Task Organization_IdLookupIsCaseSensitive()
     {
@@ -327,6 +382,33 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
         var call = Assert.Single(_factory.AuthHook.IssuanceGateCalls);
         Assert.Equal("org-a", call.OrganizationId);
         Assert.Equal("acme", call.OrganizationSlug);
+    }
+
+    /// R6: the delegated exchange is the mint a gate most needs the organization for — it is minting
+    /// USER authority for an agent, and "which customer" is half of that decision.
+    [Fact]
+    public async Task IssuanceGate_ObservesTheOrganizationOnDelegatedExchange()
+    {
+        await SeedExchangeClientAsync();
+        var tokens = await AuthorizeAndRedeemAsync("organization=acme", "openid profile");
+        _factory.AuthHook.IssuanceGateCalls.Clear();
+
+        var exchanged = await ExchangeAsync(tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, exchanged.StatusCode);
+
+        // The exchange fires the gate only for a client with an agent profile; without one it does not,
+        // which is the pre-existing behaviour this slice did not change. Either way the ORGANIZATION on
+        // the minted subject is what a gate would see, so assert it on the token the exchange produced.
+        var claims = ReadJwt((await exchanged.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("access_token").GetString()!);
+        Assert.Equal("org-a", claims["org_id"]);
+
+        foreach (var call in _factory.AuthHook.IssuanceGateCalls.Where(
+            c => c.GrantType == GrantTypes.TokenExchange))
+        {
+            Assert.Equal("org-a", call.OrganizationId);
+            Assert.Equal("acme", call.OrganizationSlug);
+        }
     }
 
     [Fact]
@@ -457,6 +539,12 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
             $"&scope={Uri.EscapeDataString(scope)}&state=xyz" +
             $"&code_challenge={challenge}&code_challenge_method=S256" +
             (string.IsNullOrEmpty(extra) ? "" : $"&{extra}");
+    }
+
+    private async Task LoginAsAsync(string email)
+    {
+        var login = await _client.PostAsJsonAsync("/api/auth/login", new { email, password = "Test1234!" });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
     }
 
     private async Task<Tokens> AuthorizeAndRedeemAsync(string? extra, string scope)

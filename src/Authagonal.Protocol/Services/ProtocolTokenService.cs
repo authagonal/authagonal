@@ -1167,6 +1167,13 @@ public sealed class ProtocolTokenService(
                 new TokenIssuanceContext(clientId, null, GrantTypes.ClientCredentials, scopeList, authorityJson)
                 {
                     EffectiveAuthorityJson = authorityJson,
+                    // No organization, and there is none to give: client_credentials has no subject at
+                    // all (note the null subjectId above). A host CAN bind a context to one of these
+                    // tokens through IClientCredentialsClaimsTransformer, but that seam runs after this
+                    // gate by design — see the comment below — so the gate cannot see its result, and
+                    // pretending otherwise by reordering would let a transformer's output decide whether
+                    // the gate that governs it runs. A host needing to veto on a machine token's bound
+                    // context does it inside the transformer, which can refuse.
                 }, ct);
         }
 
@@ -1425,10 +1432,15 @@ public sealed class ProtocolTokenService(
         // user's token for customer B and exchange it into a token that still says B, with the
         // restriction never consulted because no `organization` parameter was involved. RestrictedTo is
         // a statement about which customers a client may act for, and an exchange is it acting.
+        // `?? []` because the model's initializer does not survive JSON binding: a request body with an
+        // explicit `"restrictedToOrganizationIds": null` leaves the property null, and reading .Count on
+        // it here would turn a malformed admin payload into a NullReferenceException on every later
+        // exchange. The admin endpoints normalise it too; this is the guard at the point of use.
+        var restricted = client.RestrictedToOrganizationIds ?? [];
         var subjectOrganizationId = ExtractString(tokenClaims, "org_id");
-        if (client.RestrictedToOrganizationIds.Count > 0 &&
+        if (restricted.Count > 0 &&
             (subjectOrganizationId is null ||
-             !client.RestrictedToOrganizationIds.Contains(subjectOrganizationId, StringComparer.Ordinal)))
+             !restricted.Contains(subjectOrganizationId, StringComparer.Ordinal)))
         {
             // invalid_target, matching every other "this client may not aim a token there" refusal on
             // this path (see the resource/audience policy above).
@@ -1749,6 +1761,10 @@ public sealed class ProtocolTokenService(
                 clientId, sub, GrantTypes.TokenExchange, grantedScopes, authorizationDetailsJson)
             {
                 EffectiveAuthorityJson = effectiveJson,
+                // The delegated mint is the one a gate most needs the organization for: it is minting
+                // USER authority for an agent, and "which customer" is half of that decision.
+                OrganizationId = subject.OrganizationId,
+                OrganizationSlug = subject.OrganizationSlug,
             }, ct);
         }
 
@@ -2296,20 +2312,35 @@ public sealed class ProtocolTokenService(
             if (!string.IsNullOrEmpty(subject.Locale))
                 claims["locale"] = subject.Locale;
 
-            // org_id describes the account's placement, so it travels with the profile set.
-            if (!string.IsNullOrEmpty(subject.OrganizationId))
-                claims["org_id"] = subject.OrganizationId;
-
-            // The slug and the name ride the same gate, and only when the organization is a real
-            // record rather than the bare id an account carried before organizations existed — a
-            // relying party must be able to read "org_slug is absent" as "there is no slug", not as
-            // "the server declined to tell you".
-            if (!string.IsNullOrEmpty(subject.OrganizationSlug))
-                claims["org_slug"] = subject.OrganizationSlug;
-
+            // Only the NAME is profile data. It is presentation — what a screen renders — and nothing
+            // should authorise on it, so it keeps the profile gate the other two have left.
             if (!string.IsNullOrEmpty(subject.OrganizationName))
                 claims["org_name"] = subject.OrganizationName;
         }
+
+        // org_id and org_slug are UNGATED, deliberately, and they are the only identity claims here
+        // that are.
+        //
+        // They are not profile data. They say which customer this token may act for, and that is the
+        // first thing a multi-customer resource server has to check — before it has decided whether it
+        // cares about a name or an email, and often on a token that asked for neither. Under the
+        // profile gate an API-only client requesting `openid` alone got a token with no organization on
+        // it at all, which a resource server reads as "belongs to nobody": either it refuses a
+        // legitimate caller, or it treats the token as unscoped and serves every customer's data from
+        // it. The second failure is silent and is the one that matters.
+        //
+        // Releasing them ungated discloses nothing the client did not already establish — it chose the
+        // organization, or it is restricted to one — and both values are already reserved names that no
+        // scope's UserClaims and no custom attribute can forge. An account with no organization emits
+        // neither, so a token that carried no organization claims before carries none now.
+        if (!string.IsNullOrEmpty(subject.OrganizationId))
+            claims["org_id"] = subject.OrganizationId;
+
+        // Present only when the organization is a real record rather than the bare id an account
+        // carried before organizations existed, so a relying party can read "org_slug is absent" as
+        // "there is no slug" rather than "the server declined to tell you".
+        if (!string.IsNullOrEmpty(subject.OrganizationSlug))
+            claims["org_slug"] = subject.OrganizationSlug;
 
         // §5.4 assigns the phone claims their own scope. They rode `profile` before, which is both the wrong
         // binding and one the user was never shown.

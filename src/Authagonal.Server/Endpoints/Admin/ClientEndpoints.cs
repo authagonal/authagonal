@@ -26,6 +26,46 @@ public static class ClientEndpoints
         return app;
     }
 
+    /// <summary>
+    /// Replaces a null <see cref="OAuthClient.RestrictedToOrganizationIds"/> with an empty list and
+    /// refuses malformed entries. Returns an error message, or null when the value is acceptable.
+    /// </summary>
+    /// <remarks>
+    /// The model's <c>= []</c> initializer does not survive JSON binding: a body carrying an explicit
+    /// <c>"restrictedToOrganizationIds": null</c> leaves the property null, and the token paths read
+    /// <c>.Count</c> on it — so a single malformed admin call turned every later authorize and exchange
+    /// for that client into a 500. Normalising here, and guarding at the point of use, means neither
+    /// half has to trust the other.
+    /// <para>
+    /// Entries are held to the same charset as the <c>organization</c> authorize parameter. An id that
+    /// cannot be sent as that parameter is an id nothing can ever select, so accepting one would store
+    /// a restriction that silently matches nothing — and a restriction that matches nothing refuses
+    /// every request, which is a lockout written by a typo.
+    /// </para>
+    /// </remarks>
+    private static string? NormalizeOrganizationRestriction(OAuthClient client)
+    {
+        if (client.RestrictedToOrganizationIds is null)
+        {
+            client.RestrictedToOrganizationIds = [];
+            return null;
+        }
+
+        foreach (var id in client.RestrictedToOrganizationIds)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return "restrictedToOrganizationIds must not contain empty entries.";
+
+            if (!OrganizationIdentifier.IsValid(id))
+            {
+                return $"restrictedToOrganizationIds entry '{id}' is not a valid organization id: "
+                    + "1-200 characters of letters, digits, '.', '_', '~' or '-'.";
+            }
+        }
+
+        return null;
+    }
+
     private static async Task<IResult> ListClients(IClientStore store, CancellationToken ct)
     {
         var clients = await store.GetAllAsync(ct);
@@ -57,6 +97,9 @@ public static class ClientEndpoints
 
         if (InvalidSecretHashes(client) is { } createHashError)
             return TypedResults.Json(new ErrorInfoResponse { Error = "invalid_request", ErrorDescription = createHashError }, AuthagonalJsonContext.Default.ErrorInfoResponse, statusCode: 400);
+
+        if (NormalizeOrganizationRestriction(client) is { } createOrgError)
+            return TypedResults.Json(new ErrorInfoResponse { Error = "invalid_request", ErrorDescription = createOrgError }, AuthagonalJsonContext.Default.ErrorInfoResponse, statusCode: 400);
 
         // 403 with a reason, not Results.Forbid().
         //
@@ -222,6 +265,13 @@ public static class ClientEndpoints
 
         if (Sent("audiences") && Authagonal.Core.Services.ResourceAudiencePolicy.RejectAudiences(client.Audiences) is { } audienceError)
             return TypedResults.Json(new ErrorInfoResponse { Error = "invalid_request", ErrorDescription = audienceError }, AuthagonalJsonContext.Default.ErrorInfoResponse, statusCode: 400);
+
+        // Not gated on Sent(): the normalisation half has to run whatever the caller sent, because an
+        // explicit null anywhere in the merge leaves the list null and every later `.Count` on it is a
+        // NullReferenceException. The validation half only rejects values, and a stored value that was
+        // already valid stays valid.
+        if (NormalizeOrganizationRestriction(client) is { } updateOrgError)
+            return TypedResults.Json(new ErrorInfoResponse { Error = "invalid_request", ErrorDescription = updateOrgError }, AuthagonalJsonContext.Default.ErrorInfoResponse, statusCode: 400);
 
         // Monotonic even against an EXPLICIT false: an update may set the declaration but never clear it.
         // Omission is already handled by the merge; this is the stronger rule, because unsetting only ever

@@ -50,6 +50,24 @@ public static class AuthagonalExtensions
     /// Full single-tenant registration. Calls <see cref="AddAuthagonalCore"/> and adds
     /// singleton stores, KeyManager, background services, and other single-tenant infrastructure.
     /// </summary>
+    /// <remarks>
+    /// <b>Registration order: a storage provider goes BEFORE this call.</b> Registering
+    /// <c>AddAuthagonalPostgres</c>, <c>AddDynamoStorage</c> or your own <c>IUserStore</c> first is what
+    /// makes this method skip its built-in Azure Table Storage wiring — the check is for an existing
+    /// <c>IUserStore</c> registration. A provider registered afterwards loses every interface this
+    /// method has already filled, silently, because those use <c>TryAdd</c>.
+    /// <para>
+    /// Three interfaces are special-cased, and the reason is worth knowing if you are adding a fourth.
+    /// <c>IOrganizationStore</c>, <c>IOrganizationMembershipStore</c> and
+    /// <c>IScimGroupRoleMappingStore</c> have empty, read-only in-memory fallbacks in
+    /// <see cref="AddAuthagonalCore"/> so that DI resolves on a host wiring no store at all. Those
+    /// fallbacks are lifted out of the way before the storage provider registers and restored by
+    /// <c>TryAdd</c> afterwards, so the provider's durable store wins and the fallback still covers a
+    /// host with no provider. Without that dance <c>TryAdd</c> keeps the FIRST registration rather than
+    /// the best one, and the provider's never happens: the host resolves a store that answers empty
+    /// forever and refuses every write, with nothing logged.
+    /// </para>
+    /// </remarks>
     /// <summary>
     /// Interfaces whose only registration in <see cref="AddAuthagonalCore"/> is an empty, read-only
     /// in-memory fallback: the last resort for a host that wires no durable store at all.

@@ -48,6 +48,10 @@ await organizationStore.UpsertAsync(new Organization
 
 `Slug` must be unique within the tenant, and **ids and slugs share one namespace**: a store rejects an upsert whose slug is already held by another organization, and equally one whose slug equals another organization's id, or whose id equals another's slug. Two records answering one value would make the `organization` parameter mean one organization while every stored id means another.
 
+`Id` must match `^[A-Za-z0-9._~-]{1,200}$` — the same shape as the `organization` parameter, so every id can always be sent as one. An id outside that shape is an id no request can select, and a client restricted to one would refuse every request.
+
+`Id` **should** also contain at least one character a slug may not: an uppercase letter, `.`, `_` or `~`. Ids and slugs share one lookup namespace, and an all-lowercase value is resolved slug-first — so an id that is itself slug-shaped is one that could later be refused at creation because someone took that slug, while an id carrying a non-slug character never can. The recommended shape for new ids is an `org_`-prefixed opaque value (`org_7f3a9c`): `_` is not slug-legal, so the prefix alone guarantees it. No convention is enforced, and the values already in the field are arbitrary — they come from a downstream app's TCC `/try` response (`TccProvisioningOrchestrator`) or an operator's SCIM token binding (`ScimToken.OrganizationId`, stamped on new users by `ScimUserEndpoints`).
+
 Both `Id` and `Slug` are immutable in practice. Relying parties compare them against the instance they are serving and will hard-code them, so changing either is an outage with no error message. `DisplayName` is freely mutable and is what a screen renders.
 
 ## Granting membership
@@ -100,7 +104,10 @@ GET /connect/authorize
   &code_challenge=...&code_challenge_method=S256
 ```
 
-The value must match `^[A-Za-z0-9._~-]{1,200}$` (the RFC 3986 unreserved set); anything else is `invalid_request`. It is resolved as a slug first — lowercased, since slugs are stored lowercase — and then as an id, which is matched exactly, because an id is opaque and lowercasing it would name a different organization.
+The value must match `^[A-Za-z0-9._~-]{1,200}$` (the RFC 3986 unreserved set); anything else is `invalid_request`. How it resolves depends on its case:
+
+- **Any uppercase character → resolved as an id only, exactly.** Slugs are lowercase-only, so such a value cannot be one. Lowercasing it and asking the slug index anyway would ask "is some organization's slug the lowercased form of this id?" — and if one were, a caller naming an id would be handed a different customer.
+- **All lowercase → slug first, then id.** It could be either, and a slug is what a relying party usually sends. Unambiguous because a store refuses to let an id and a slug share a value.
 
 `org_slug` and `org_id` are accepted as aliases — both are in the wild at other providers, and quietly ignoring the one this server did not pick is worse than accepting both. Sending two that name *different* organizations is refused with `invalid_request`: the request means two things, and whichever the server chose, the relying party would have been told the other. Repeating any of the three is refused for the same reason `redirect_uri` is.
 
@@ -122,17 +129,25 @@ Rules 1 and 2 are *explicit* selections and must satisfy membership. Rule 3 is n
 client.RestrictedToOrganizationIds = ["org_7f3a"];
 ```
 
+Each entry must match the organization id shape `^[A-Za-z0-9._~-]{1,200}$`; the admin API answers `400 invalid_request` for an empty or malformed one, because a restriction listing an id no `organization` parameter can send matches nothing, and a restriction that matches nothing refuses every request. A `null` list is normalized to empty.
+
 Empty — what every existing client has — means unrestricted. A request whose organization is not on the list is refused with `access_denied`. A list of one also selects, per rule 2 above. A list of several restricts but does not select: the request must still name one, or it is refused with `account_selection_required`.
 
 ## The claims
 
-Under the `profile` scope, on both the ID token and the access token:
+On both the ID token and the access token:
 
-| Claim | Value |
-|---|---|
-| `org_id` | `Organization.Id` |
-| `org_slug` | `Organization.Slug` |
-| `org_name` | `Organization.DisplayName` |
+| Claim | Value | Scope |
+|---|---|---|
+| `org_id` | `Organization.Id` | none — always present when the subject has an organization |
+| `org_slug` | `Organization.Slug` | none — always present when the organization is a real record |
+| `org_name` | `Organization.DisplayName` | `profile` |
+
+**`org_id` and `org_slug` are deliberately not scope-gated.** They are authorization context, not profile data: they say which customer the token may act for, which is the first thing a multi-customer resource server checks — before it has decided whether it cares about a name, and often on a token that requested no profile at all. Under a `profile` gate an API-only client asking for `openid` alone received a token with no organization on it, which reads as "belongs to nobody": the resource server either refuses a legitimate caller, or treats the token as unscoped and serves every customer's data from it. The second failure is silent, and it is the one that matters.
+
+Releasing them ungated discloses nothing the client had not already established — it chose the organization, or it is restricted to one. `org_name` keeps the `profile` gate because it is presentation, and nothing should authorize on it.
+
+An account with no organization emits none of the three, so a token that carried no organization claims before carries none now.
 
 All three are reserved: no scope's `UserClaims` list and no custom user attribute can produce or override them. That matters most for `org_slug`, which is the stable key a relying party compares against the customer instance it is serving — a self-asserted one would be that comparison's answer.
 
@@ -148,13 +163,13 @@ if (!string.Equals(orgId, ThisInstanceOrganizationId, StringComparison.Ordinal))
 
 ## Userinfo, introspection and token exchange
 
-**`/connect/userinfo`** answers `org_id`, `org_slug`, `org_name` and `roles` from the **presented token**, not from the user record. That is the only source that can be right once a user may belong to several organizations: the account carries one default, while the token names the organization the grant was actually issued for. Profile fields (`email`, `name`, `phone_number`) stay live — those are the subject's current details, which is what userinfo is for.
+**`/connect/userinfo`** answers `org_id`, `org_slug`, `org_name` and `roles` from the **presented token**, not from the user record. `org_id` and `org_slug` are returned whenever the token carries them, with no scope gate, for the same reason they are ungated on the token itself; `org_name` needs `profile`. That is the only source that can be right once a user may belong to several organizations: the account carries one default, while the token names the organization the grant was actually issued for. Profile fields (`email`, `name`, `phone_number`) stay live — those are the subject's current details, which is what userinfo is for.
 
 So re-tagging an account does not change what userinfo says about a token already issued, and a user signed in to organization B is never told `org_id` A by the same server that put B in their ID token.
 
 **`/connect/introspect`** includes `org_id` and `org_slug` when the token carries them. A resource server that validates the JWT itself reads them off the token; one that introspects instead now gets the same answer.
 
-**RFC 8693 token exchange** carries `org_id`, `org_slug` and `org_name` from the subject token onto the exchanged one, and enforces the **exchanging** client's `RestrictedToOrganizationIds` against them: a client registered to serve one customer cannot exchange another customer's token, and cannot exchange a token that carries no organization at all. A refusal is `invalid_target`, matching the other target-policy refusals on that path. An exchange is a projection of an existing session, and a projection that dropped the organization it was acting for would be unattributed rather than narrower. A host's `ITokenExchangeSubjectTransformer` may still re-bind the exchange to another organization deliberately — that is what context-bound exchanges are for — but it has to say so.
+**RFC 8693 token exchange** carries `org_id`, `org_slug` and `org_name` from the subject token onto the exchanged one, and enforces the **exchanging** client's `RestrictedToOrganizationIds` against them: a client registered to serve one customer cannot exchange another customer's token, and cannot exchange a token that carries no organization at all. Because `org_id` is ungated, that check also works for a resource-server token minted without the `profile` scope — under the old gating such a token looked unattributed, and a restricted client was refused its own traffic. A refusal is `invalid_target`, matching the other target-policy refusals on that path. An exchange is a projection of an existing session, and a projection that dropped the organization it was acting for would be unattributed rather than narrower. A host's `ITokenExchangeSubjectTransformer` may still re-bind the exchange to another organization deliberately — that is what context-bound exchanges are for — but it has to say so.
 
 ## Refresh
 

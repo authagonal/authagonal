@@ -223,9 +223,21 @@ public sealed class OrganizationSelector(
     /// id attempt is NOT: an id is opaque and compared ordinally, so lowercasing it would resolve a
     /// different organisation from the one named.
     /// </remarks>
-    private async Task<Organization?> ResolveBySlugThenIdAsync(string slugOrId, CancellationToken ct) =>
-        await organizations.GetBySlugAsync(slugOrId.ToLowerInvariant(), ct)
-        ?? await organizations.GetAsync(slugOrId, ct);
+    private async Task<Organization?> ResolveBySlugThenIdAsync(string slugOrId, CancellationToken ct)
+    {
+        // A value carrying any uppercase character CANNOT be a slug: slugs are lowercase-only by
+        // OrganizationSlug, which every store enforces at write time. Lowercasing it and asking the
+        // slug index anyway is worse than wasteful — it asks "is some organisation's slug the
+        // lowercased form of this id?", and if one is, a caller naming an id would be handed that
+        // other organisation instead. So a mixed-case value resolves by id, exactly, and once.
+        if (slugOrId.Any(char.IsUpper))
+            return await organizations.GetAsync(slugOrId, ct);
+
+        // All-lowercase: it could be either. Slug first, because that is what a relying party sends,
+        // then id. Unambiguous because the store refuses to let an id and a slug share a value.
+        return await organizations.GetBySlugAsync(slugOrId, ct)
+            ?? await organizations.GetAsync(slugOrId, ct);
+    }
 
     /// <summary>
     /// The membership's roles minus anything claiming a reserved namespace.

@@ -16,10 +16,31 @@ namespace Authagonal.Core.Models;
 public sealed class Organization
 {
     /// <summary>
-    /// Stable opaque identifier, emitted as the <c>org_id</c> claim. Immutable: relying parties
-    /// compare it against the instance they are serving, so a changed value is an outage with no
-    /// error message.
+    /// Stable opaque identifier, emitted as the <c>org_id</c> claim. Immutable: relying parties compare
+    /// it against the instance they are serving, so a changed value is an outage with no error message.
     /// </summary>
+    /// <remarks>
+    /// Must match <see cref="OrganizationIdentifier"/> — <c>^[A-Za-z0-9._~-]{1,200}$</c> — so it can
+    /// always be sent as the <c>organization</c> authorize parameter. An id outside that shape is an id
+    /// no request can select, and a client restricted to one would refuse every request.
+    /// <para>
+    /// It SHOULD also contain at least one character a slug may not: an uppercase letter, <c>.</c>,
+    /// <c>_</c> or <c>~</c>. Ids and slugs share one lookup namespace (stores refuse an actual
+    /// collision), and the <c>organization</c> parameter is resolved slug-first for an all-lowercase
+    /// value — so an id that is itself slug-shaped is an id that could one day be refused at creation
+    /// because someone took that slug, while one carrying a non-slug character never can.
+    /// <c>OrganizationIdentifier.CouldCollideWithASlug</c> reports which kind an id is.
+    /// </para>
+    /// <para>
+    /// No convention is enforced, and the library has never enforced one: the values already in the
+    /// field come from a downstream app's TCC <c>/try</c> response
+    /// (<c>TccProvisioningOrchestrator</c>) or from an operator's SCIM token binding
+    /// (<c>ScimToken.OrganizationId</c>, stamped on new users by <c>ScimUserEndpoints</c>), and both are
+    /// arbitrary strings. For new ids an <c>org_</c>-prefixed opaque value — <c>org_7f3a9c</c> — is the
+    /// recommended shape: the underscore is not slug-legal, so the prefix alone guarantees the id can
+    /// never collide with any slug.
+    /// </para>
+    /// </remarks>
     public required string Id { get; set; }
 
     /// <summary>

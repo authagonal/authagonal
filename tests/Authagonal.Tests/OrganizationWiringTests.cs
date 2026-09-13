@@ -21,37 +21,14 @@ namespace Authagonal.Tests;
 /// Wiring defects: a client field that never reached storage, provider stores DI could not reach, and
 /// an organisation the embedded host parsed and then discarded.
 /// </summary>
-[Collection("Azurite")]
-public sealed class OrganizationWiringTests(AzuriteFixture azurite)
+public sealed class OrganizationWiringTests
 {
     private static readonly EnvPartitioner Live = new("live");
+
 
     // -----------------------------------------------------------------------
     // F1 — RestrictedToOrganizationIds survives a round trip through Table Storage
     // -----------------------------------------------------------------------
-
-    /// The field was on the model and honoured by the selector, so it looked wired — but the Azure
-    /// client entity had no column for it, so an operator who restricted a client saw the restriction
-    /// vanish on the very next read, silently. SQL and Dynamo serialise the whole record and were fine,
-    /// which is how it survived review of those two.
-    [Fact]
-    public async Task ClientStore_RoundTripsTheOrganizationRestriction()
-    {
-        var store = await NewClientStoreAsync();
-        var clientId = $"c-{Guid.NewGuid():N}";
-
-        await store.UpsertAsync(new OAuthClient
-        {
-            ClientId = clientId,
-            ClientName = "Restricted",
-            RestrictedToOrganizationIds = ["org-a", "org-b"],
-        });
-
-        var read = await store.GetAsync(clientId);
-
-        Assert.NotNull(read);
-        Assert.Equal(["org-a", "org-b"], read!.RestrictedToOrganizationIds);
-    }
 
     /// A row written before the column existed has no such property in storage, so the entity's own
     /// default has to mean "unrestricted" — never null, which every caller would then have to guard.
@@ -97,31 +74,108 @@ public sealed class OrganizationWiringTests(AzuriteFixture azurite)
         Assert.Equal(["org-a"], ids);
     }
 
+    /// R4. The model's `= []` initializer does not survive JSON binding: an explicit null leaves the
+    /// property null, and the token paths read `.Count` on it — so one malformed admin call turned every
+    /// later authorize and exchange for that client into a 500. Normalised at the endpoint AND guarded
+    /// at the point of use, so neither half has to trust the other.
+    [Fact]
+    public async Task AdminApi_NullRestrictionIsStoredAsEmpty()
+    {
+        await using var factory = new AuthagonalTestFactory();
+        var client = factory.CreateClient();
+        await factory.SeedTestDataAsync();
+        client.DefaultRequestHeaders.Authorization =
+            new("Bearer", await factory.GetAdminTokenAsync(client));
+
+        var created = await client.PostAsJsonAsync("/api/v1/clients", new
+        {
+            clientId = "null-restriction-client",
+            clientName = "Null Restriction",
+            restrictedToOrganizationIds = (string[]?)null,
+        });
+        Assert.True(created.IsSuccessStatusCode, await created.Content.ReadAsStringAsync());
+
+        var stored = await factory.ClientStore.GetAsync("null-restriction-client");
+        Assert.NotNull(stored!.RestrictedToOrganizationIds);
+        Assert.Empty(stored.RestrictedToOrganizationIds);
+    }
+
+    /// An id outside the organization charset is an id no `organization` parameter can ever send, so a
+    /// restriction listing one would match nothing — and a restriction that matches nothing refuses
+    /// every request. That is a lockout written by a typo, so it is a 400 instead.
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("a/b")]
+    [InlineData("a b")]
+    public async Task AdminApi_RejectsAMalformedRestrictionEntry(string entry)
+    {
+        await using var factory = new AuthagonalTestFactory();
+        var client = factory.CreateClient();
+        await factory.SeedTestDataAsync();
+        client.DefaultRequestHeaders.Authorization =
+            new("Bearer", await factory.GetAdminTokenAsync(client));
+
+        var created = await client.PostAsJsonAsync("/api/v1/clients", new
+        {
+            clientId = $"bad-restriction-{Guid.NewGuid():N}",
+            clientName = "Bad Restriction",
+            restrictedToOrganizationIds = new[] { entry },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, created.StatusCode);
+        var body = await created.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_request", body.GetProperty("error").GetString());
+    }
+
+    /// The same normalisation on the update path, which merges onto the stored record and can therefore
+    /// produce a null from a body that never mentioned the field.
+    [Fact]
+    public async Task AdminApi_UpdateRejectsAMalformedRestrictionEntry()
+    {
+        await using var factory = new AuthagonalTestFactory();
+        var client = factory.CreateClient();
+        await factory.SeedTestDataAsync();
+        client.DefaultRequestHeaders.Authorization =
+            new("Bearer", await factory.GetAdminTokenAsync(client));
+
+        var updated = await client.PutAsJsonAsync($"/api/v1/clients/{AuthagonalTestFactory.TestClientId}", new
+        {
+            restrictedToOrganizationIds = new[] { "a#b" },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, updated.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("org_7f3a", true)]
+    [InlineData("acme", true)]
+    [InlineData("A.b~c_d-e", true)]
+    [InlineData("a/b", false)]
+    [InlineData("a b", false)]
+    [InlineData("", false)]
+    public void OrganizationIdentifier_Classify(string id, bool valid) =>
+        Assert.Equal(valid, OrganizationIdentifier.IsValid(id));
+
+    /// R10's advice, mechanised: an `org_`-prefixed id can never be a slug, because `_` is not
+    /// slug-legal. A bare lowercase id can be, which is why it is only a SHOULD.
+    [Theory]
+    [InlineData("org_7f3a", false)]
+    [InlineData("AbC123", false)]
+    [InlineData("acme", true)]
+    public void OrganizationIdentifier_ReportsSlugCollisionRisk(string id, bool couldCollide) =>
+        Assert.Equal(couldCollide, OrganizationIdentifier.CouldCollideWithASlug(id));
+
     // -----------------------------------------------------------------------
     // F2 — the provider's stores must win over the in-memory fallbacks
     // -----------------------------------------------------------------------
-
-    /// AddAuthagonalCore TryAdds the empty in-memory fallbacks and AddTableStorage TryAdds the durable
-    /// ones, in that order — so the fallbacks won and the batteries-included host could never create an
-    /// organization or read a group→role mapping, with nothing logged. Built through the real
-    /// AddAuthagonal rather than a hand-assembled collection, because the registration ORDER is the
-    /// defect and a hand-assembled one would not reproduce it.
-    [Fact]
-    public void AddAuthagonal_ResolvesTheProviderStores_NotTheInMemoryFallbacks()
-    {
-        using var provider = BuildHost(core: false);
-
-        Assert.IsType<TableOrganizationStore>(provider.GetRequiredService<IOrganizationStore>());
-        Assert.IsType<TableOrganizationMembershipStore>(provider.GetRequiredService<IOrganizationMembershipStore>());
-        Assert.IsType<TableScimGroupRoleMappingStore>(provider.GetRequiredService<IScimGroupRoleMappingStore>());
-    }
 
     /// The fallbacks are still there for a host that wires no provider at all: the demotion is
     /// conditional on a real registration existing, not unconditional.
     [Fact]
     public void AddAuthagonalCore_AloneStillResolvesTheFallbacks()
     {
-        using var provider = BuildHost(core: true);
+        using var provider = BuildCoreOnlyHost();
 
         Assert.IsType<Authagonal.Server.Services.InMemoryOrganizationStore>(
             provider.GetRequiredService<IOrganizationStore>());
@@ -199,7 +253,86 @@ public sealed class OrganizationWiringTests(AzuriteFixture azurite)
     // Helpers
     // -----------------------------------------------------------------------
 
-    private ServiceProvider BuildHost(bool core)
+    private static ServiceProvider BuildCoreOnlyHost()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Auth:Issuer"] = "https://wiring.test",
+            })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddAuthagonalCore(configuration);
+
+        return services.BuildServiceProvider();
+    }
+
+    private static (string Verifier, string Challenge) NewPkcePair()
+    {
+        var verifier = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var challenge = Convert.ToBase64String(
+                SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return (verifier, challenge);
+    }
+}
+
+/// <summary>
+/// The one wiring assertion that needs a real table: that <c>RestrictedToOrganizationIds</c> survives a
+/// round trip through Azure Table Storage. Split out of <see cref="OrganizationWiringTests"/> so the
+/// rest of that file — DI composition, admin-API validation, pure shape checks — does not take a Docker
+/// dependency to assert things that have nothing to do with storage.
+/// </summary>
+[Collection("Azurite")]
+public sealed class OrganizationClientEntityStorageTests(AzuriteFixture azurite)
+{
+    private static readonly EnvPartitioner Live = new("live");
+
+    /// The field was on the model and honoured by the selector, so it looked wired — but the Azure
+    /// client entity had no column for it, so an operator who restricted a client saw the restriction
+    /// vanish on the very next read, silently. SQL and Dynamo serialise the whole record and were fine,
+    /// which is how it survived review of those two.
+    [Fact]
+    public async Task ClientStore_RoundTripsTheOrganizationRestriction()
+    {
+        var store = await NewClientStoreAsync();
+        var clientId = $"c-{Guid.NewGuid():N}";
+
+        await store.UpsertAsync(new OAuthClient
+        {
+            ClientId = clientId,
+            ClientName = "Restricted",
+            RestrictedToOrganizationIds = ["org-a", "org-b"],
+        });
+
+        var read = await store.GetAsync(clientId);
+
+        Assert.NotNull(read);
+        Assert.Equal(["org-a", "org-b"], read!.RestrictedToOrganizationIds);
+    }
+
+    /// AddAuthagonalCore TryAdds the empty in-memory fallbacks and AddTableStorage TryAdds the durable
+    /// ones, in that order — so the fallbacks won and the batteries-included host could never create an
+    /// organization or read a group→role mapping, with nothing logged. Built through the real
+    /// AddAuthagonal rather than a hand-assembled collection, because the registration ORDER is the
+    /// defect and a hand-assembled one would not reproduce it.
+    [Fact]
+    public void AddAuthagonal_ResolvesTheProviderStores_NotTheInMemoryFallbacks()
+    {
+        using var provider = BuildFullHost();
+
+        Assert.IsType<TableOrganizationStore>(provider.GetRequiredService<IOrganizationStore>());
+        Assert.IsType<TableOrganizationMembershipStore>(provider.GetRequiredService<IOrganizationMembershipStore>());
+        Assert.IsType<TableScimGroupRoleMappingStore>(provider.GetRequiredService<IScimGroupRoleMappingStore>());
+    }
+
+    /// <summary>Composes the real batteries-included host against a live Azurite, because
+    /// AddTableStorage creates its tables eagerly — so this cannot be asserted without one.</summary>
+    private ServiceProvider BuildFullHost()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -212,8 +345,7 @@ public sealed class OrganizationWiringTests(AzuriteFixture azurite)
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IConfiguration>(configuration);
-        if (core) services.AddAuthagonalCore(configuration);
-        else services.AddAuthagonal(configuration);
+        services.AddAuthagonal(configuration);
 
         return services.BuildServiceProvider();
     }
@@ -224,15 +356,5 @@ public sealed class OrganizationWiringTests(AzuriteFixture azurite)
             .GetTableClient($"Clients{Guid.NewGuid():N}");
         await table.CreateIfNotExistsAsync();
         return new TableClientStore(table, Live);
-    }
-
-    private static (string Verifier, string Challenge) NewPkcePair()
-    {
-        var verifier = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var challenge = Convert.ToBase64String(
-                SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)))
-            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        return (verifier, challenge);
     }
 }

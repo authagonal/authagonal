@@ -146,16 +146,35 @@ public sealed class OrganizationAuthorizeParameterTests : IAsyncLifetime
         Assert.False(claims.ContainsKey("org_name"));
     }
 
-    /// The organisation claims ride the profile scope, exactly as org_id always has. Without it the
-    /// token carries none of the three.
+    /// org_id and org_slug are NOT scope-gated: they say which customer the token may act for, which a
+    /// multi-customer resource server has to check before it has decided whether it cares about a name,
+    /// and often on a token that asked for no profile at all. Under the profile gate an API-only client
+    /// requesting `openid` alone got a token with no organization on it — which reads as "belongs to
+    /// nobody", so the resource server either refuses a legitimate caller or, worse and silently,
+    /// treats the token as unscoped. org_name stays gated: it is presentation, not authority.
     [Fact]
-    public async Task OrganizationClaims_AreGatedOnTheProfileScope()
+    public async Task OrganizationIdAndSlug_AreNotGatedOnTheProfileScope()
     {
         _factory.OrganizationStore.With("org-a", "acme", "Acme");
         _factory.OrganizationMembershipStore.With("org-a", _user.Id);
         await LoginAsync();
 
         var claims = await AuthorizeAndReadIdTokenAsync("organization=acme", scope: "openid");
+
+        Assert.Equal("org-a", claims["org_id"]);
+        Assert.Equal("acme", claims["org_slug"]);
+        Assert.False(claims.ContainsKey("org_name"));
+    }
+
+    /// The regression the ungating must not break: an account with no organization emits none of the
+    /// three, so a token that carried no organization claims before carries none now — no empty strings,
+    /// no nulls, no keys at all.
+    [Fact]
+    public async Task NoOrganization_NoOrgClaimsAppearWithoutProfileEither()
+    {
+        await LoginAsync();
+
+        var claims = await AuthorizeAndReadIdTokenAsync(null, scope: "openid");
 
         Assert.False(claims.ContainsKey("org_id"));
         Assert.False(claims.ContainsKey("org_slug"));

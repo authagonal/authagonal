@@ -155,12 +155,14 @@ public static class UserinfoEndpoint
             // their ID token, and handed A's roles with it. Profile fields (email, name, phone) stay
             // live, because those are the subject's current details and that is what userinfo is for;
             // these are authorization context, which belongs to the grant.
+            // org_id and org_slug are returned whenever the token carries them, with no scope gate:
+            // they say which customer this token acts for, which a multi-customer resource server has
+            // to know before it has decided whether it cares about a name. Only org_name is profile
+            // data — it is presentation, and nothing should authorise on it.
+            CopyStringFromToken("org_id");
+            CopyStringFromToken("org_slug");
             if (hasProfile)
-            {
-                CopyStringFromToken("org_id");
-                CopyStringFromToken("org_slug");
                 CopyStringFromToken("org_name");
-            }
 
             if (scopes.Contains(StandardScopes.Roles, StringComparer.Ordinal)
                 && ReadStringArray(result.Claims, "roles") is { Count: > 0 } tokenRoles)

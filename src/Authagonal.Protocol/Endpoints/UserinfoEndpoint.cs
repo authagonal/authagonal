@@ -109,12 +109,22 @@ internal static class UserinfoEndpoint
                 claims["sub"] = subValue;
 
             CopyIfScoped("email", "email", "email_verified");
-            // org_slug and org_name join org_id under the same scope: this host already answered from
-            // the token, so it needed only to be told the two new names exist.
-            CopyIfScoped("profile", "given_name", "family_name", "name", "org_id", "org_slug", "org_name");
+            // org_name is profile data; org_id and org_slug are not — they name the customer the token
+            // acts for, so they are returned whenever the token carries them (see Copy below).
+            CopyIfScoped("profile", "given_name", "family_name", "name", "org_name");
             CopyIfScoped("phone", "phone_number");
             CopyIfScoped("roles", "roles");
             CopyIfScoped("groups", "groups");
+            Copy("org_id", "org_slug");
+
+            void Copy(params string[] claimNames)
+            {
+                foreach (var name in claimNames)
+                {
+                    if (result.Claims.TryGetValue(name, out var value) && value is not null)
+                        claims[name] = value;
+                }
+            }
 
             void CopyIfScoped(string scope, params string[] claimNames)
             {
