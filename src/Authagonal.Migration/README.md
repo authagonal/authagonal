@@ -42,3 +42,10 @@ Ships three things:
 
 `GET /admin/migration/status` returns the latest marker + last report, gated by the `IdentityAdmin`
 authorization policy like the other admin endpoints.
+
+## NDJSON user import
+
+A second, independent import source: `NdjsonUserImportEngine` reads a flat NDJSON file (one JSON
+object per line — `email` required; `passwordHash` stored verbatim) and writes users only, through
+the same `IUserStore` abstraction. Wired into the CLI as `import-ndjson-users`. See
+`docs/migration.md` — "NDJSON user import" — for the record schema and full CLI reference.

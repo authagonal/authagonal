@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **A generic NDJSON user-import source, alongside the existing Duende migration.** Migrating a
+  legacy app into Authagonal used to mean either the Duende SQL Server path or hand-rolling
+  something against the store interfaces directly — there was no supported way to bring in users
+  from an arbitrary legacy store (a hand-rolled ASP.NET Identity table, a Rails/Devise export, a
+  Node app on scrypt) that isn't Duende. `Authagonal.Migration` now ships a second, independent
+  import source that reads a flat NDJSON file (one JSON object per line: `email` required;
+  optional `username`, `givenName`, `familyName`, `displayName`, `emailVerified`, `passwordHash`,
+  `roles`, `organizationId`, `attributes`, `phoneNumber`, `disabled`, `createdAt`, `externalId`) and
+  writes `AuthUser` rows through the same store abstractions the Duende engine uses — users only, no
+  clients/roles/scopes/federation. `passwordHash` is stored verbatim in whatever legacy format
+  `PasswordHasher` recognises (bcrypt, ASP.NET Identity V3, scrypt `$s2$`); it is not validated
+  beyond non-empty, so an imported user logs in with their old password and is transparently
+  rehashed to native PBKDF2 on the next successful login, the same lazy-rehash path Duende imports
+  already rely on. Wired into `tools/Authagonal.Migration.Cli` as a new `import-ndjson-users`
+  subcommand, in the same option style as the existing Duende command: `--Input`,
+  `--Target:ConnectionString`, `--DryRun` (parse + validate + report counts, write nothing),
+  `--OnDuplicate skip|fail|update` (duplicate = an existing user with the same email,
+  case-insensitive; default `skip`, which is what makes re-running the same file idempotent),
+  `--BatchSize`, `--AllowUnknownFields` (unrecognised top-level JSON fields fail that line by
+  default, listing the offending names), and `--ContinueOnError` (exit 0 despite failed lines; does
+  not apply to `--OnDuplicate fail`, which always aborts the run). The summary reports total lines,
+  imported, skipped, updated and failed counts plus the first 20 failures as line number + reason.
+  See `docs/migration.md` — "NDJSON user import" — for the full schema and CLI reference.
+
 ## [0.27.1], 2026-09-11
 
 ### Fixed
