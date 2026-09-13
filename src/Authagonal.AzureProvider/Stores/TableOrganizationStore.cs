@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Azure;
 using Azure.Data.Tables;
 using Authagonal.Core.Models;
@@ -14,15 +13,6 @@ public sealed class TableOrganizationStore(
     EnvPartitioner partitioner,
     IChangeWriter? changeWriter = null) : IOrganizationStore
 {
-    /// <summary>
-    /// Lowercase, URL-safe, 1-64 chars, no leading/trailing hyphen. Validated on every
-    /// <see cref="UpsertAsync"/> — the slug is what a relying party hard-codes into the
-    /// <c>organization</c> authorize parameter, so it is checked the same way whether it came from an
-    /// admin UI or a provisioning script.
-    /// </summary>
-    private static readonly Regex SlugPattern = new(
-        "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$", RegexOptions.Compiled);
-
     public async Task<Organization?> GetAsync(string organizationId, CancellationToken ct = default)
     {
         try
@@ -65,10 +55,9 @@ public sealed class TableOrganizationStore(
 
     public async Task UpsertAsync(Organization organization, CancellationToken ct = default)
     {
-        if (!SlugPattern.IsMatch(organization.Slug))
-            throw new ArgumentException(
-                $"Slug '{organization.Slug}' is invalid: it must match ^[a-z0-9](?:[a-z0-9-]{{0,62}}[a-z0-9])?$.",
-                nameof(organization));
+        // R7: the pattern lives once, in Core, so every provider and the in-memory reference enforce
+        // the identical rule rather than each keeping its own copy in sync by hand.
+        OrganizationSlug.Validate(organization.Slug);
 
         var orgsPk = partitioner.PK(OrganizationEntity.OrganizationsPartition);
         var slugsPk = partitioner.PK(OrganizationSlugEntity.SlugsPartition);
@@ -126,23 +115,30 @@ public sealed class TableOrganizationStore(
             try
             {
                 await organizationSlugsTable.AddEntityAsync(slugEntity, ct);
+                if (changeWriter is not null)
+                    await changeWriter.WriteUpsertAsync("OrganizationSlugs", slugEntity.PartitionKey, slugEntity.RowKey, ct);
             }
             catch (RequestFailedException ex) when (ex.Status == 409)
             {
-                var heldBy = "another organization";
+                // R2: the slug row can already exist and point at OUR id — a retry of this exact
+                // create after a crash between this insert and the org-row write below. Self-heal by
+                // falling through to (re)write the org row, rather than reporting the organization as
+                // already held by an organization that, from the org table's perspective, was never
+                // created. Only a DIFFERENT owner is a genuine conflict.
+                OrganizationSlugEntity? winner = null;
                 try
                 {
-                    var winner = await organizationSlugsTable.GetEntityAsync<OrganizationSlugEntity>(
-                        slugsPk, organization.Slug, cancellationToken: ct);
-                    heldBy = winner.Value.OrganizationId;
+                    winner = (await organizationSlugsTable.GetEntityAsync<OrganizationSlugEntity>(
+                        slugsPk, organization.Slug, cancellationToken: ct)).Value;
                 }
                 catch (RequestFailedException)
                 {
                 }
-                throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by organization '{heldBy}'.");
+
+                if (winner is null || !string.Equals(winner.OrganizationId, organization.Id, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"Slug '{organization.Slug}' is already held by organization '{winner?.OrganizationId ?? "another organization"}'.");
             }
-            if (changeWriter is not null)
-                await changeWriter.WriteUpsertAsync("OrganizationSlugs", slugEntity.PartitionKey, slugEntity.RowKey, ct);
         }
         // Existing organization: the slug is unchanged (enforced above), so its slug row already
         // points here and is left as is — nothing to write on this table for an update.

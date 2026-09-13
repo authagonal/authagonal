@@ -71,22 +71,34 @@ public sealed class TableOrganizationMembershipStore(
         var orgPk = partitioner.PK(OrganizationMembershipEntity.OrgPartition(organizationId));
         var userPk = partitioner.PK(OrganizationMembershipEntity.UserPartition(userId));
 
-        // Tombstone-first (F24e): record both deletes before removing anything.
+        // Each row is handled independently of the other's presence (F18) — an orphan left by an
+        // earlier partial write must still be cleaned up on its own side — but R9: a row that never
+        // existed gets neither a delete attempt nor a tombstone. That decision has to be made from an
+        // existence check made BEFORE the tombstone, not from the delete's own 404, or a row that
+        // does exist would have its data removed before the crash-safe (F24e) tombstone-first record
+        // of that removal.
+        await DeleteRowIfPresentAsync(organizationMembersTable, "OrganizationMembers", orgPk, userId, ct);
+        await DeleteRowIfPresentAsync(userMembershipsTable, "UserMemberships", userPk, organizationId, ct);
+    }
+
+    private async Task DeleteRowIfPresentAsync(TableClient table, string logicalTable, string pk, string rk, CancellationToken ct)
+    {
+        try
+        {
+            await table.GetEntityAsync<OrganizationMembershipEntity>(pk, rk, cancellationToken: ct);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return; // Nothing there — nothing to tombstone or delete.
+        }
+
+        // Tombstone-first (F24e): record the delete before removing the row.
         if (changeWriter is not null)
-        {
-            await changeWriter.WriteAsync("OrganizationMembers", orgPk, userId, ct);
-            await changeWriter.WriteAsync("UserMemberships", userPk, organizationId, ct);
-        }
+            await changeWriter.WriteAsync(logicalTable, pk, rk, ct);
 
         try
         {
-            await organizationMembersTable.DeleteEntityAsync(orgPk, userId, cancellationToken: ct);
-        }
-        catch (RequestFailedException ex) when (ex.Status == 404) { }
-
-        try
-        {
-            await userMembershipsTable.DeleteEntityAsync(userPk, organizationId, cancellationToken: ct);
+            await table.DeleteEntityAsync(pk, rk, cancellationToken: ct);
         }
         catch (RequestFailedException ex) when (ex.Status == 404) { }
     }

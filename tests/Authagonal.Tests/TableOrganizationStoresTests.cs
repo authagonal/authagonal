@@ -205,6 +205,32 @@ public class TableOrganizationStoresTests(AzuriteFixture azurite)
     }
 
     [Fact]
+    public async Task Organization_create_retry_after_crash_between_slug_and_org_write_succeeds()
+    {
+        // R2: the slug row is written before the org row (F4), so a crash in that exact window leaves
+        // a slug row pointing at an id with no org row behind it yet. Retrying the identical create
+        // must self-heal (AddEntityAsync's 409 sees its OWN id as the existing owner) rather than
+        // fail as "already held" by an organization that, from the org table, does not exist.
+        var p = Prefix();
+        var store = NewOrgStore(p);
+
+        var slugsTable = T(p, "OrganizationSlugs");
+        var orphanSlugRow = OrganizationEntity.CreateSlugIndex(Org("org1", "acme"));
+        orphanSlugRow.PartitionKey = EnvPartitioner.Live.PK(orphanSlugRow.PartitionKey);
+        await slugsTable.AddEntityAsync(orphanSlugRow);
+
+        // The org row genuinely does not exist yet — this is the crash window, not a normal update.
+        Assert.Null(await store.GetAsync("org1"));
+
+        await store.UpsertAsync(Org("org1", "acme"));
+
+        var read = await store.GetAsync("org1");
+        Assert.NotNull(read);
+        Assert.Equal("acme", read!.Slug);
+        Assert.Equal("org1", (await store.GetBySlugAsync("acme"))!.Id);
+    }
+
+    [Fact]
     public async Task UpsertAsync_rejects_a_slug_that_collides_with_an_existing_organizations_id()
     {
         var p = Prefix();
@@ -439,11 +465,12 @@ public class TableOrganizationStoresTests(AzuriteFixture azurite)
     }
 
     [Fact]
-    public async Task Membership_delete_repairs_an_orphaned_reverse_row_and_tombstones_both()
+    public async Task Membership_delete_repairs_an_orphaned_reverse_row_and_tombstones_only_it()
     {
         // F18: an orphan — only the user-partitioned (reverse) row present, e.g. from a half-completed
-        // upsert or an out-of-band repair — must still have both its delete attempted and both
-        // tombstones written. No early return just because the forward row is already missing.
+        // upsert or an out-of-band repair — must still have its delete attempted. No early return just
+        // because the forward row is already missing. R9: the forward row was never there, so it gets
+        // neither a delete attempt nor a tombstone — only the row that actually existed does.
         var p = Prefix();
         var log = T(p, "Tombstones");
         var membersTable = T(p, "OrganizationMembers");
@@ -463,9 +490,24 @@ public class TableOrganizationStoresTests(AzuriteFixture azurite)
 
         // The orphaned reverse row is gone.
         Assert.Empty(await store.ListByUserAsync("user1"));
-        // Both tombstones were written even though only one row ever existed.
-        Assert.Single(await ChangeRows(log, "OrganizationMembers", "D"));
+        // Only the row that actually existed is tombstoned.
+        Assert.Empty(await ChangeRows(log, "OrganizationMembers", "D"));
         Assert.Single(await ChangeRows(log, "UserMemberships", "D"));
+    }
+
+    [Fact]
+    public async Task Membership_delete_of_a_nonexistent_membership_writes_no_tombstones()
+    {
+        // R9: neither row ever existed, so DeleteAsync must write no tombstone for either — a
+        // tombstone means "this key was deleted", not "a delete was requested".
+        var p = Prefix();
+        var log = T(p, "Tombstones");
+        var store = NewMembershipStore(p, changeWriter: new TableChangeWriter(log));
+
+        await store.DeleteAsync("org1", "user1"); // must not throw
+
+        Assert.Empty(await ChangeRows(log, "OrganizationMembers", "D"));
+        Assert.Empty(await ChangeRows(log, "UserMemberships", "D"));
     }
 
     [Fact]
