@@ -26,6 +26,9 @@ An `Organization` gives it a record: an immutable opaque id, an immutable tenant
 - **No organization-scoped SCIM.** `ScimToken.OrganizationId` still tags provisioned users rather than granting them membership.
 - **No invitations.** A membership is created directly; there is no invitation email flow. The `invited` status exists so one can be added without a schema change.
 - **No organization-scoped groups.** The `groups` claim and SCIM group membership stay tenant-wide; only roles are organization-scoped.
+- **No organization webhook events, and no organization-scoped audit.** `IAuthHook` has no organization lifecycle events (created, membership granted or revoked), existing hook payloads carry no `organizationId`, and there is no organization column or index on the audit log.
+- **Role-gated scopes are filtered against tenant roles at authorize.** `Scope.AllowedRoles` is applied on `/connect/authorize` against the account's directly-assigned roles, before the organization is resolved, so a scope whose `AllowedRoles` is satisfied only by an organization-scoped role is dropped at authorize — or refused with `access_denied` if no requested scope survives. On refresh the same gate runs against the resolved subject's roles, which do include the organization's. Until the two agree, gate scopes on tenant roles.
+- **Not yet in Authagonal Cloud:** a customer hostname resolving to an organization (host → organization domain binding), organization branding merged over the tenant's (`Organization.BrandingJson` is stored, but nothing renders it yet), a Portal UI for organizations and memberships, and a backfill of legacy `AuthUser.OrganizationId` values into organization and membership records.
 
 ## Creating an organization
 
@@ -96,7 +99,7 @@ GET /connect/authorize
 
 `org_slug` and `org_id` are accepted as aliases — both are in the wild at other providers, and quietly ignoring the one this server did not pick is worse than accepting both. Sending two that name *different* organizations is refused with `invalid_request`: the request means two things, and whichever the server chose, the relying party would have been told the other. Repeating any of the three is refused for the same reason `redirect_uri` is.
 
-The parameter survives the round trip through the login UI, because the whole authorize URL travels as `returnUrl`. It also works through [Pushed Authorization Requests](par.md) with no extra work — the PAR endpoint stores every field it is given, and `/connect/authorize` reads the pushed payload instead of the query.
+The parameter survives the round trip through the login UI, because the whole authorize URL travels as `returnUrl`. It also works through [Pushed Authorization Requests](par) with no extra work — the PAR endpoint stores every field it is given, and `/connect/authorize` reads the pushed payload instead of the query.
 
 ### Precedence
 

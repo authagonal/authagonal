@@ -70,24 +70,6 @@
   held in one can never reach a token issued for another. Re-read on every rotation, so changing them
   reaches a live session at its next refresh. A request that selects no organization produces the role
   set it produced before — the union is over an empty list.
-- **`/connect/userinfo` answers `org_id`, `org_slug`, `org_name` and `roles` from the presented token
-  rather than re-reading the user record.** The record carries one default organization while the
-  token names the one the grant was issued for, so on a multi-organization account the two disagree by
-  construction: a user signed in to organization B was told `org_id` A by the same server that had just
-  put B in their ID token, and handed A's roles with it. Re-tagging an account no longer changes what
-  userinfo says about a token already issued. Profile fields (`email`, `name`, `phone_number`) stay
-  live, because those are the subject's current details and that is what userinfo is for; these are
-  authorization context, which belongs to the grant. The `Authagonal.Protocol` host already answered
-  from the token and needed only the two new claim names.
-- **RFC 8693 token exchange keeps the organization; `/connect/introspect` reports it.** The exchange
-  rebuilds its subject from the subject token's claims and skips every reserved name — and all three
-  organization claims are reserved — so a downscoped token came out naming no organization at all while
-  the token it was derived from named one. An exchange is a projection of an existing session, and a
-  projection that drops the customer it was acting for is not narrower, it is unattributed: a resource
-  server gating on `org_id` read it as belonging nowhere. A host's `ITokenExchangeSubjectTransformer`
-  may still re-bind deliberately, which is what context-bound exchanges are for, but it now has to say
-  so rather than inherit silence. Introspection emits `org_id`/`org_slug` when present, so a resource
-  server that introspects instead of validating the JWT itself gets the same answer as one that does.
 - **`IAuthHook.OnTokenIssuingAsync` now fires from the three interactive mints, so a host can veto a
   token per (user, client, request).** There was no such gate. `OnTokenIssuedAsync` is documented
   "Throw to reject the token issuance" but the token endpoint calls it with a NULL subject —
@@ -147,6 +129,27 @@
   exact-key equality, so none of it depends on the byte-ordinal `COLLATE "C"` pin the range-scanning
   SQL stores need; it is still verified against the same ICU-collated PostgreSQL fixture the rest of
   the provider is tested on. Both stores take the optional `IChangeWriter` every other SQL store does.
+
+### Fixed
+
+- **`/connect/userinfo` answers `org_id`, `org_slug`, `org_name` and `roles` from the presented token
+  rather than re-reading the user record.** The record carries one default organization while the
+  token names the one the grant was issued for, so on a multi-organization account the two disagree by
+  construction: a user signed in to organization B was told `org_id` A by the same server that had just
+  put B in their ID token, and handed A's roles with it. Re-tagging an account no longer changes what
+  userinfo says about a token already issued. Profile fields (`email`, `name`, `phone_number`) stay
+  live, because those are the subject's current details and that is what userinfo is for; these are
+  authorization context, which belongs to the grant. The `Authagonal.Protocol` host already answered
+  from the token and needed only the two new claim names.
+- **RFC 8693 token exchange keeps the organization; `/connect/introspect` reports it.** The exchange
+  rebuilds its subject from the subject token's claims and skips every reserved name — and all three
+  organization claims are reserved — so a downscoped token came out naming no organization at all while
+  the token it was derived from named one. An exchange is a projection of an existing session, and a
+  projection that drops the customer it was acting for is not narrower, it is unattributed: a resource
+  server gating on `org_id` read it as belonging nowhere. A host's `ITokenExchangeSubjectTransformer`
+  may still re-bind deliberately, which is what context-bound exchanges are for, but it now has to say
+  so rather than inherit silence. Introspection emits `org_id`/`org_slug` when present, so a resource
+  server that introspects instead of validating the JWT itself gets the same answer as one that does.
 
 ## [0.27.1], 2026-09-11
 
