@@ -57,6 +57,33 @@
   chain at the next rotation rather than waiting out the absolute refresh lifetime. Not yet supported,
   and listed in `docs/organizations.md`: the org picker, org-scoped SSO connections, org-scoped roles,
   delegated org admin, per-org SCIM, invitations, org-aware userinfo and org on an exchanged token.
+- **Azure Table Storage provider for `IOrganizationStore` and `IOrganizationMembershipStore`.**
+  `TableOrganizationStore` writes the organization as a full document to `Organizations` and
+  maintains a separate `OrganizationSlugs` lookup table so resolving the `organization` authorize
+  parameter is a point read — the same separate-index-table shape `TableScimGroupStore` uses for its
+  external-id lookup — and rejects an upsert whose slug is already held by a different organization
+  id, matching the in-memory reference store. `TableOrganizationMembershipStore` writes each
+  membership as a full document to both `OrganizationMembers` (partitioned by organization, for the
+  admin "who is a member" listing) and `UserMemberships` (partitioned by user, for the token-issuance
+  path's "which organizations may this person authenticate as"), the same dual-full-document shape
+  `TableScimTokenStore` uses for its forward/reverse indexes. Both stores route every write through
+  `IChangeWriter` so incremental backups capture them, and all four tables are now in
+  `BackupDefaults.Tables` (and `ChangeLoggedTables`, since every write path logs unconditionally).
+- **DynamoDB provider for `IOrganizationStore` and `IOrganizationMembershipStore`.**
+  `DynamoOrganizationStore` writes the organization as a full document to an `Organizations` table
+  (pk = `org`, sk = the organization id) and maintains a separate `OrganizationSlugs` table
+  (pk = `orgslug`, sk = the slug, data = the owning organization id) so resolving the `organization`
+  authorize parameter is a `GetItem`, not a query — the same separate-table shape
+  `TableOrganizationStore` uses on Azure — and rejects an upsert whose slug is already held by a
+  different organization id, matching the in-memory reference store; a slug rename writes the new
+  lookup row before dropping the stale one. `DynamoOrganizationMembershipStore` writes each
+  membership as a full document to both `OrganizationMembers` (pk = `org|{orgId}`, for the admin
+  "who is a member" listing) and `UserMemberships` (pk = `user|{userId}`, for the token-issuance
+  path's "which organizations may this person authenticate as"), the same dual-full-document shape
+  `DynamoScimTokenStore` uses for its forward/reverse rows; the membership `GetAsync` the
+  token-issuance gate calls is a point read on the organization-partitioned row. Both stores take
+  the optional `IChangeWriter` every other Dynamo store does, though no DynamoDB variant of the
+  backup engine exists yet to read it (`BackupService`/`RestoreService` are Table-Storage-only).
 
 ## [0.27.1], 2026-09-11
 

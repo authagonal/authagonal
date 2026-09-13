@@ -53,7 +53,8 @@ public static class BackupDefaults
         "Roles", "UserRoles",
         "Scopes",
         "AgentProfiles",
-        "ProvisioningApps"
+        "ProvisioningApps",
+        "Organizations", "OrganizationSlugs", "OrganizationMembers", "UserMemberships"
     ];
 
     /// <summary>
@@ -69,6 +70,7 @@ public static class BackupDefaults
         "UserEmails", "UserFirstNames", "UserLastNames", "UserLogins", "UserExternalIds",
         "UserEmailDomains", "UserEmailLocalPrefixes", "UserOrganizations",
         "ScimGroupRoleMappings", "ProvisioningApps",
+        "Organizations", "OrganizationSlugs", "OrganizationMembers", "UserMemberships",
     };
 
     /// <summary>
