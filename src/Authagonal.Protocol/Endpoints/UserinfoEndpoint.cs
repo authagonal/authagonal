@@ -109,7 +109,9 @@ internal static class UserinfoEndpoint
                 claims["sub"] = subValue;
 
             CopyIfScoped("email", "email", "email_verified");
-            CopyIfScoped("profile", "given_name", "family_name", "name", "org_id");
+            // org_slug and org_name join org_id under the same scope: this host already answered from
+            // the token, so it needed only to be told the two new names exist.
+            CopyIfScoped("profile", "given_name", "family_name", "name", "org_id", "org_slug", "org_name");
             CopyIfScoped("phone", "phone_number");
             CopyIfScoped("roles", "roles");
             CopyIfScoped("groups", "groups");

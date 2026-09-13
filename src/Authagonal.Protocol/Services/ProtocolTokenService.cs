@@ -645,6 +645,9 @@ public sealed class ProtocolTokenService(
 
         var subject = authCode.Subject;
 
+        await RunIssuanceGateAsync(
+            clientId, subject.SubjectId, GrantTypes.AuthorizationCode, authCode.Scopes, ct);
+
         var accessToken = await MintAccessTokenAsync(subject, client, authCode.Scopes, authCode.Resources, ct: ct);
 
         string? idToken = null;
@@ -824,6 +827,12 @@ public sealed class ProtocolTokenService(
         {
             tokenResources = data.Resources;
         }
+
+        // Before the mint and before the rotation, so a veto leaves the presented refresh token
+        // unconsumed and the family intact: the host refused THIS issuance, which is not the same as
+        // ending the session.
+        await RunIssuanceGateAsync(
+            clientId, freshSubject.SubjectId, GrantTypes.RefreshToken, data.Scopes, ct);
 
         // Minted before the successor so the successor grant can record its jti: the successor is the
         // live refresh token from here on, so it is the one whose revocation must kill this access
@@ -1420,6 +1429,24 @@ public sealed class ProtocolTokenService(
             Roles = ExtractStringList(tokenClaims, "roles"),
             Groups = ExtractStringList(tokenClaims, "groups"),
             CustomAttributes = customAttributes.Count > 0 ? customAttributes : null,
+            // The organization travels with the exchange, like roles and groups and for a stronger
+            // reason than either. Every reserved name is skipped when CustomAttributes is rebuilt
+            // above, and org_id/org_slug/org_name are reserved — so the exchanged token came out
+            // naming NO organization at all, while its subject token named one. An exchange is a
+            // projection of an existing session (see the comment on the rebuild), and a projection
+            // that drops the customer it was acting for is not narrower, it is unattributed: a
+            // resource server gating on org_id would have read the downscoped token as belonging
+            // nowhere and, depending on which way it fails, either refused it or treated it as
+            // unscoped. The transformer below may still overwrite these deliberately — a
+            // context-bound exchange re-binding to another organization is its whole purpose — but it
+            // has to say so rather than inherit silence.
+            OrganizationId = ExtractString(tokenClaims, "org_id"),
+            OrganizationSlug = ExtractString(tokenClaims, "org_slug"),
+            OrganizationName = ExtractString(tokenClaims, "org_name"),
+            // Not carried: OrganizationExplicitlySelected. It governs the refresh carry-forward, and
+            // an exchanged token has no refresh chain of its own — it is capped at the subject
+            // token's exp and dies with it.
+            //
             // The exchanged token may never outlive the token it was derived from — that cap is
             // what makes "short-lived downscoped token" true by construction, and it composes
             // with any upstream session cap already clamped into the subject token's exp.
@@ -2049,6 +2076,60 @@ public sealed class ProtocolTokenService(
         return list.Count > 0 ? list : null;
     }
 
+    /// <summary>A single string-valued claim off a validated token, or null when absent or empty.</summary>
+    private static string? ExtractString(IDictionary<string, object> claims, string name) =>
+        claims.TryGetValue(name, out var value) && value is string { Length: > 0 } text ? text : null;
+
+    /// <summary>
+    /// The host's per-(user, client, request) veto, run immediately before an interactive grant mints
+    /// anything. Throwing from <see cref="IAuthHook.OnTokenIssuingAsync"/> refuses the issuance.
+    /// </summary>
+    /// <remarks>
+    /// There was no such gate on the interactive paths. <see cref="IAuthHook.OnTokenIssuedAsync"/> is
+    /// documented "Throw to reject the token issuance" but the token endpoint calls it with a NULL
+    /// subject — deliberately, since it fires before the grant is redeemed — so a host could refuse a
+    /// client but never a user, and the one decision an authorization server is asked for most ("may
+    /// THIS person have a token for THIS application right now") had nowhere to live.
+    /// <see cref="IAuthHook.OnTokenIssuingAsync"/> did carry the subject, but fired from exactly two
+    /// agentic mints, so it was unreachable for authorization_code, refresh_token and device_code — the
+    /// three grants that issue tokens to actual people.
+    /// <para>
+    /// No interface change: <c>OnTokenIssuingAsync</c> is a default interface member, so every existing
+    /// implementor that does not override it — which is all of them — stays a no-op and the two agentic
+    /// call sites keep firing exactly as before, on exactly their own conditions.
+    /// </para>
+    /// <para>
+    /// A hook that throws a <see cref="ProtocolTokenException"/> has named its own OAuth error and keeps
+    /// it; anything else becomes <c>access_denied</c>, which is the accurate code for "the
+    /// authorization server declined" and is what a relying party can act on. It is NOT
+    /// <c>invalid_grant</c>: the grant is fine, the answer is no.
+    /// </para>
+    /// </remarks>
+    private async Task RunIssuanceGateAsync(
+        string clientId, string? subjectId, string grantType, IReadOnlyList<string> scopes, CancellationToken ct)
+    {
+        // Nothing registered, nothing to run — and nothing allocated either, because this is the hot
+        // path for every interactive token in the deployment.
+        if (authHooks is null) return;
+
+        try
+        {
+            await Hooks.RunOnTokenIssuingAsync(
+                new TokenIssuanceContext(clientId, subjectId, grantType, scopes, null), ct);
+        }
+        catch (ProtocolTokenException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogInformation(
+                "Token issuance refused by a host hook. Client: {ClientId}, Subject: {SubjectId}, Grant: {GrantType}",
+                clientId, subjectId, grantType);
+            throw new ProtocolTokenException("access_denied", ex.Message);
+        }
+    }
+
     public async Task<TokenResponse> HandleDeviceCodeAsync(
         OidcSubject subject,
         OAuthClient client,
@@ -2056,6 +2137,9 @@ public sealed class ProtocolTokenService(
         CancellationToken ct = default)
     {
         var scopeList = scopes.ToList();
+
+        await RunIssuanceGateAsync(
+            client.ClientId, subject.SubjectId, GrantTypes.DeviceCode, scopeList, ct);
 
         var accessToken = await MintAccessTokenAsync(subject, client, scopeList, ct: ct);
 

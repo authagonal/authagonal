@@ -55,8 +55,54 @@
   still re-derived each rotation, so re-tagging keeps taking effect. Revoking a membership, disabling
   an organization or narrowing a client's `RestrictedToOrganizationIds` therefore ends the refresh
   chain at the next rotation rather than waiting out the absolute refresh lifetime. Not yet supported,
-  and listed in `docs/organizations.md`: the org picker, org-scoped SSO connections, org-scoped roles,
-  delegated org admin, per-org SCIM, invitations, org-aware userinfo and org on an exchanged token.
+  and listed in `docs/organizations.md`: the org picker, org-scoped SSO connections, delegated org
+  admin, per-org SCIM, invitations and org-scoped groups.
+- **Organization-scoped roles: `OrganizationMembership.Roles` now reaches the `roles` claim.** The
+  field was persisted from the start and read by nothing, so a tenant could record that someone was an
+  Auditor at one customer and a Site Manager at another, and every token said the same thing either
+  way. They are unioned with the directly-assigned and SCIM-group-granted sets under the same `roles`
+  scope gate, so a resource server does not have to know how a role was granted — but it does have to
+  read `org_id` alongside, because the same name now means "in THIS organization". Bounded three ways:
+  only an EXPLICITLY selected organization contributes (the same asymmetry the membership gate has, so
+  an organization merely inherited from the account grants nothing); only an `active` membership
+  contributes, because an invited-but-unaccepted or suspended member grants nothing exactly as they
+  authorise nothing; and the roles are read from the row keyed by the SELECTED organization, so a role
+  held in one can never reach a token issued for another. Re-read on every rotation, so changing them
+  reaches a live session at its next refresh. A request that selects no organization produces the role
+  set it produced before — the union is over an empty list.
+- **`/connect/userinfo` answers `org_id`, `org_slug`, `org_name` and `roles` from the presented token
+  rather than re-reading the user record.** The record carries one default organization while the
+  token names the one the grant was issued for, so on a multi-organization account the two disagree by
+  construction: a user signed in to organization B was told `org_id` A by the same server that had just
+  put B in their ID token, and handed A's roles with it. Re-tagging an account no longer changes what
+  userinfo says about a token already issued. Profile fields (`email`, `name`, `phone_number`) stay
+  live, because those are the subject's current details and that is what userinfo is for; these are
+  authorization context, which belongs to the grant. The `Authagonal.Protocol` host already answered
+  from the token and needed only the two new claim names.
+- **RFC 8693 token exchange keeps the organization; `/connect/introspect` reports it.** The exchange
+  rebuilds its subject from the subject token's claims and skips every reserved name — and all three
+  organization claims are reserved — so a downscoped token came out naming no organization at all while
+  the token it was derived from named one. An exchange is a projection of an existing session, and a
+  projection that drops the customer it was acting for is not narrower, it is unattributed: a resource
+  server gating on `org_id` read it as belonging nowhere. A host's `ITokenExchangeSubjectTransformer`
+  may still re-bind deliberately, which is what context-bound exchanges are for, but it now has to say
+  so rather than inherit silence. Introspection emits `org_id`/`org_slug` when present, so a resource
+  server that introspects instead of validating the JWT itself gets the same answer as one that does.
+- **`IAuthHook.OnTokenIssuingAsync` now fires from the three interactive mints, so a host can veto a
+  token per (user, client, request).** There was no such gate. `OnTokenIssuedAsync` is documented
+  "Throw to reject the token issuance" but the token endpoint calls it with a NULL subject —
+  deliberately, since it runs before the grant is redeemed — so a host could refuse a client and never
+  a user, and the question an authorization server is asked most often ("may THIS person have a token
+  for THIS application right now") had nowhere to live. `OnTokenIssuingAsync` did carry the subject but
+  fired from exactly two agentic mints, so it was unreachable for `authorization_code`, `refresh_token`
+  and `device_code` — the three grants that issue tokens to people. No interface change: it is a
+  default interface member, every existing implementor that does not override it stays a no-op, and the
+  two agentic call sites keep firing on exactly their own conditions. Throwing yields `access_denied`
+  with the exception message as `error_description`; throwing a `ProtocolTokenException` names your own
+  error instead. On the refresh path the gate runs BEFORE the rotation, so a refusal leaves the
+  presented token unconsumed and the family intact — a host saying "not now" is not a host ending the
+  session. The device grant is handled outside `TokenGrantHandlers` and did not inherit its error
+  mapping, so it was taught to translate the refusal rather than surface a 500.
 - **Azure Table Storage provider for `IOrganizationStore` and `IOrganizationMembershipStore`.**
   `TableOrganizationStore` writes the organization as a full document to `Organizations` and
   maintains a separate `OrganizationSlugs` lookup table so resolving the `organization` authorize

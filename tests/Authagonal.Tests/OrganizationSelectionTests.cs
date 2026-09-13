@@ -324,6 +324,121 @@ public sealed class OrganizationSelectionTests
     }
 
     // -----------------------------------------------------------------------
+    // Organization-scoped roles
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task MembershipRoles_AreUnionedForAnExplicitSelection()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme");
+        var members = new WritableOrganizationMembershipStore()
+            .With("org-a", "user-1", MembershipStatus.Active, "Auditor");
+        var user = User();
+        user.Roles.Add("tenant-wide");
+
+        var subject = Allowed(await ResolveAsync(Resolver(user, Client(), orgs, members), user, "acme"));
+
+        Assert.Contains("Auditor", subject.Roles!);
+        Assert.Contains("tenant-wide", subject.Roles!);
+    }
+
+    /// The isolation property. The same user holds a role in B; a token for A must not carry it.
+    [Fact]
+    public async Task MembershipRoles_DoNotLeakAcrossOrganizations()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme").With("org-b", "beta", "Beta");
+        var members = new WritableOrganizationMembershipStore()
+            .With("org-a", "user-1", MembershipStatus.Active, "Auditor")
+            .With("org-b", "user-1", MembershipStatus.Active, "Organisation Manager");
+        var user = User();
+
+        var subject = Allowed(await ResolveAsync(Resolver(user, Client(), orgs, members), user, "acme"));
+
+        Assert.Contains("Auditor", subject.Roles!);
+        Assert.DoesNotContain("Organisation Manager", subject.Roles!);
+    }
+
+    /// An organisation that turned the membership gate off can still grant roles to the members it
+    /// does have — the gate decides who may in, not what a member holds.
+    [Fact]
+    public async Task MembershipRoles_AreGrantedEvenWhenTheGateIsOff()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme", requireMembership: false);
+        var members = new WritableOrganizationMembershipStore()
+            .With("org-a", "user-1", MembershipStatus.Active, "Auditor");
+        var user = User();
+
+        var subject = Allowed(await ResolveAsync(Resolver(user, Client(), orgs, members), user, "acme"));
+
+        Assert.Contains("Auditor", subject.Roles!);
+    }
+
+    [Theory]
+    [InlineData(MembershipStatus.Invited)]
+    [InlineData(MembershipStatus.Suspended)]
+    public async Task MembershipRoles_AnInactiveMembershipGrantsNone(string status)
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme", requireMembership: false);
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1", status, "Ghost");
+        var user = User();
+
+        var subject = Allowed(await ResolveAsync(Resolver(user, Client(), orgs, members), user, "acme"));
+
+        Assert.Null(subject.Roles);
+    }
+
+    /// An inherited organisation was never proven to be the one this request acts for, so its roles
+    /// are not this request's authority — the same asymmetry the membership gate has.
+    [Fact]
+    public async Task MembershipRoles_AreNotUnionedForAnInheritedOrganization()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme", requireMembership: false);
+        var members = new WritableOrganizationMembershipStore()
+            .With("org-a", "user-1", MembershipStatus.Active, "Auditor");
+        var user = User(organizationId: "org-a");
+
+        var subject = Allowed(await ResolveAsync(Resolver(user, Client(), orgs, members), user));
+
+        Assert.Equal("org-a", subject.OrganizationId);
+        Assert.Null(subject.Roles);
+    }
+
+    /// The regression: no organisation, so the role set is untouched.
+    [Fact]
+    public async Task MembershipRoles_NoOrganization_LeavesRolesUnchanged()
+    {
+        var user = User();
+        user.Roles.Add("tenant-wide");
+
+        var subject = Allowed(await ResolveAsync(Resolver(user, Client()), user));
+
+        Assert.Equal(["tenant-wide"], subject.Roles!);
+    }
+
+    /// Roles are carried across the rotation because the selection is, and are re-read from the
+    /// membership row each time — so changing a role reaches a live session at the next refresh.
+    [Fact]
+    public async Task MembershipRoles_AreReReadOnRefresh()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme");
+        var members = new WritableOrganizationMembershipStore()
+            .With("org-a", "user-1", MembershipStatus.Active, "Auditor");
+        var user = User(organizationId: "org-b");
+        var resolver = Resolver(user, Client(), orgs, members);
+
+        var atLogin = Allowed(await ResolveAsync(resolver, user, "acme"));
+        Assert.Contains("Auditor", atLogin.Roles!);
+
+        members.With("org-a", "user-1", MembershipStatus.Active, "Site Manager");
+
+        var afterRefresh = Allowed(await resolver.ResolveRefreshAsync(
+            atLogin, new OidcSubjectResolutionContext(ClientId, ["openid", "roles"], [])));
+
+        Assert.Contains("Site Manager", afterRefresh.Roles!);
+        Assert.DoesNotContain("Auditor", afterRefresh.Roles!);
+    }
+
+    // -----------------------------------------------------------------------
     // Refresh carry-forward — the regression this design exists to prevent
     // -----------------------------------------------------------------------
 

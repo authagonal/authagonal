@@ -129,6 +129,17 @@ public static class IntrospectionEndpoint
             if (result.Claims.TryGetValue("aud", out var aud) && aud is not null)
                 response["aud"] = aud;
 
+            // Organization context. A resource server that validates the JWT itself reads these off the
+            // token, but one that introspects instead — which is the reason this endpoint exists — had
+            // no way to learn which customer the token was issued for, and "which organization is this
+            // for" is exactly the question a relying party serving many of them asks before it touches
+            // any data. Emitted only when present, so a token with no organization is described exactly
+            // as it was before.
+            if (result.Claims.TryGetValue("org_id", out var orgId) && orgId is not null)
+                response["org_id"] = orgId;
+            if (result.Claims.TryGetValue("org_slug", out var orgSlug) && orgSlug is not null)
+                response["org_slug"] = orgSlug;
+
             // Agentic claims — resource servers gate on these: act names the delegation chain
             // (RFC 8693 §4.1), authorization_details the fine-grained authority (RFC 9396).
             if (result.Claims.TryGetValue("act", out var act) && act is not null)

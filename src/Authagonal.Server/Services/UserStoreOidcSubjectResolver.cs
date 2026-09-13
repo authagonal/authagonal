@@ -438,6 +438,16 @@ public sealed class UserStoreOidcSubjectResolver(
             ? new OrganizationSelection { OrganizationId = user.OrganizationId }
             : await organizationSelector.SelectAsync(user, client, requestedOrganization, ct);
 
+        // …and the roles that organization grants, unioned in last. Only an EXPLICITLY selected
+        // organization with an ACTIVE membership contributes any (see OrganizationSelector), so a
+        // request that named no organization produces exactly the set it produced before organizations
+        // existed — the union is over an empty list and the HashSet is untouched.
+        if (organization.MembershipRoles is { Count: > 0 } organizationRoles)
+        {
+            foreach (var role in organizationRoles)
+                roles.Add(role);
+        }
+
         return new OidcSubject
         {
             SubjectId = user.Id,

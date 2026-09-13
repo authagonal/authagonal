@@ -125,16 +125,26 @@ public sealed class OrganizationSelector(
 
         RequireClientPermits(client, restricted, organization.Id, organization.Slug);
 
-        if (explicitlySelected && organization.RequireMembershipForTokens)
+        // Read once, for two purposes. The gate needs it when RequireMembershipForTokens is on; the
+        // roles claim needs it whether or not the gate is — fetching it only for the gated case would
+        // mean an organisation that chose not to gate could never grant a role, which is not what
+        // turning the gate off says.
+        //
+        // Only for an EXPLICIT selection, the same asymmetry the gate has. An organisation inherited
+        // from the account was never proven to be the one this request acts for, so its roles are not
+        // this request's authority.
+        OrganizationMembership? membership = null;
+        if (explicitlySelected)
+            membership = await memberships.GetAsync(organization.Id, user.Id, ct);
+
+        var activeMember = membership is not null &&
+            string.Equals(membership.Status, MembershipStatus.Active, StringComparison.Ordinal);
+
+        if (explicitlySelected && organization.RequireMembershipForTokens && !activeMember)
         {
-            var membership = await memberships.GetAsync(organization.Id, user.Id, ct);
-            if (membership is null ||
-                !string.Equals(membership.Status, MembershipStatus.Active, StringComparison.Ordinal))
-            {
-                throw new OrganizationAccessDeniedException(
-                    OidcRejection.AccessDenied,
-                    $"User is not an active member of organization '{organization.Slug}'.");
-            }
+            throw new OrganizationAccessDeniedException(
+                OidcRejection.AccessDenied,
+                $"User is not an active member of organization '{organization.Slug}'.");
         }
 
         return new OrganizationSelection
@@ -143,6 +153,12 @@ public sealed class OrganizationSelector(
             Slug = organization.Slug,
             DisplayName = organization.DisplayName,
             ExplicitlySelected = explicitlySelected,
+            // An invited-but-unaccepted or suspended membership grants nothing, exactly as it
+            // authorises nothing. The roles come off the row keyed by THIS organisation, so a role
+            // held in one organisation cannot reach a token issued for another.
+            MembershipRoles = activeMember && membership!.Roles.Count > 0
+                ? [.. membership.Roles]
+                : null,
         };
     }
 
@@ -186,6 +202,20 @@ public sealed record OrganizationSelection
     /// tell a selection it must preserve and re-check from one it should re-derive.
     /// </summary>
     public bool ExplicitlySelected { get; init; }
+
+    /// <summary>
+    /// Roles the user holds WITHIN this organisation, from their active membership row. Null when the
+    /// organisation was not explicitly selected, when there is no active membership, or when the
+    /// membership grants none.
+    /// </summary>
+    /// <remarks>
+    /// Unioned into the subject's effective roles alongside the directly-assigned and
+    /// SCIM-group-granted sets, so they reach the <c>roles</c> claim under the same <c>roles</c> scope
+    /// gate as everything else in it. A resource server reading <c>roles</c> therefore does not have to
+    /// know whether a role was granted tenant-wide or per organisation — but it does have to read
+    /// <c>org_id</c> alongside, because the same role name means "in this organisation" here.
+    /// </remarks>
+    public IReadOnlyList<string>? MembershipRoles { get; init; }
 
     /// <summary>No organisation. Emits no org claims at all.</summary>
     public static readonly OrganizationSelection None = new();

@@ -22,12 +22,10 @@ An `Organization` gives it a record: an immutable opaque id, an immutable tenant
 
 - **No organization picker.** A user who belongs to several organizations, on a request that names none, gets `account_selection_required` — an error the relying party can act on by retrying with a parameter. There is no hosted screen that asks them to choose.
 - **No organization-scoped SSO connections.** SAML and OIDC connections are tenant-wide, and an email domain routes to exactly one connection per tenant. A per-customer identity provider is not expressible yet.
-- **No organization-scoped roles.** `OrganizationMembership.Roles` is persisted but nothing reads it. Effective roles are still directly-assigned roles unioned with SCIM-group-granted roles, tenant-wide.
 - **No delegated organization administration.** There is no permission that lets a customer's own administrator manage their members.
 - **No organization-scoped SCIM.** `ScimToken.OrganizationId` still tags provisioned users rather than granting them membership.
 - **No invitations.** A membership is created directly; there is no invitation email flow. The `invited` status exists so one can be added without a schema change.
-- **No organization-aware userinfo.** `/connect/userinfo` answers `org_id` from the user record, not from the presented token, so a multi-organization user gets their stored default there rather than the organization the token names. Read `org_id` from the access token.
-- **No organization on an exchanged token.** RFC 8693 token exchange rebuilds its subject from the subject token's claims and drops reserved ones, so an exchanged token carries no organization claims.
+- **No organization-scoped groups.** The `groups` claim and SCIM group membership stay tenant-wide; only roles are organization-scoped.
 
 ## Creating an organization
 
@@ -61,6 +59,26 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 ```
 
 `Status` is `invited`, `active` or `suspended`. **Only `active` authorizes token issuance.** Suspending rather than deleting keeps the record of who invited whom.
+
+## Organization-scoped roles
+
+`OrganizationMembership.Roles` holds the roles a user has **within** that organization. The names come from the tenant's existing role catalogue: an ISV declares "Auditor" once, and every customer grants it to their own people.
+
+```csharp
+membership.Roles = ["Auditor", "Site Manager"];
+```
+
+They are unioned into the `roles` claim alongside the user's directly-assigned roles and any granted by SCIM group membership, under the same `roles` scope gate. A resource server does not have to know whether a role was granted tenant-wide or per organization — but it **does** have to read `org_id` alongside `roles`, because the same role name now means "in this organization".
+
+Three rules bound it:
+
+- **Only an explicitly selected organization contributes roles** — one named by the `organization` parameter or by a single-entry client restriction. An organization inherited from `AuthUser.OrganizationId` contributes none, the same asymmetry the membership gate has.
+- **Only an `active` membership contributes.** An invited-but-unaccepted or suspended member grants nothing, exactly as they authorize nothing.
+- **Roles never cross organizations.** They are read from the membership row keyed by the selected organization, so a role held in one cannot reach a token issued for another.
+
+Roles are re-read from the membership row on every refresh rotation, so changing them reaches a live session at its next refresh.
+
+Tenant-wide roles are **unioned with**, not replaced by, the organization's — `tenant:admin` is portal authority and survives selecting an organization.
 
 ## Selecting an organization on an authorization request
 
@@ -120,6 +138,16 @@ if (!string.Equals(orgId, ThisInstanceOrganizationId, StringComparison.Ordinal))
     return Results.Forbid();
 ```
 
+## Userinfo, introspection and token exchange
+
+**`/connect/userinfo`** answers `org_id`, `org_slug`, `org_name` and `roles` from the **presented token**, not from the user record. That is the only source that can be right once a user may belong to several organizations: the account carries one default, while the token names the organization the grant was actually issued for. Profile fields (`email`, `name`, `phone_number`) stay live — those are the subject's current details, which is what userinfo is for.
+
+So re-tagging an account does not change what userinfo says about a token already issued, and a user signed in to organization B is never told `org_id` A by the same server that put B in their ID token.
+
+**`/connect/introspect`** includes `org_id` and `org_slug` when the token carries them. A resource server that validates the JWT itself reads them off the token; one that introspects instead now gets the same answer.
+
+**RFC 8693 token exchange** carries `org_id`, `org_slug` and `org_name` from the subject token onto the exchanged one. An exchange is a projection of an existing session, and a projection that dropped the organization it was acting for would be unattributed rather than narrower. A host's `ITokenExchangeSubjectTransformer` may still re-bind the exchange to another organization deliberately — that is what context-bound exchanges are for — but it has to say so.
+
 ## Refresh
 
 The organization a grant was issued for is carried across every refresh rotation, and re-checked on each one. Three things therefore take effect on the next rotation rather than waiting out the refresh lifetime:
@@ -141,6 +169,23 @@ organization.RequireMembershipForTokens = false;
 ```
 
 On by default. Turn it off for a deployment using organizations for branding and routing rather than for access — anyone who can name the organization is then issued a token for it. An organization whose membership is advisory is not a boundary; make that choice deliberately.
+
+## Refusing an issuance from a host hook
+
+`IAuthHook.OnTokenIssuingAsync` fires immediately before the `authorization_code`, `refresh_token` and `device_code` grants mint anything, with the resolved subject:
+
+```csharp
+public Task OnTokenIssuingAsync(TokenIssuanceContext context, CancellationToken ct = default)
+{
+    if (IsOffboarded(context.SubjectId, context.ClientId))
+        throw new InvalidOperationException("This account is being offboarded.");
+    return Task.CompletedTask;
+}
+```
+
+Throwing refuses the issuance with `access_denied` and the exception's message as `error_description`; throwing a `ProtocolTokenException` instead names your own OAuth error. On the refresh path the gate runs **before** the rotation, so a refusal leaves the presented refresh token unconsumed and the family intact — "not right now" is not "end this session".
+
+It is a default interface member, so an existing `IAuthHook` that does not override it is unaffected. The two agentic mints (`client_credentials` and token exchange, each with an agent profile) fire it exactly as they did before.
 
 ## Refusals
 
