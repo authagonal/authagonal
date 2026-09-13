@@ -12,7 +12,11 @@ namespace Authagonal.SqlProvider.Stores;
 /// (pk = "org|{organizationId}", sk = userId) answers "who is in this organization" and backs the
 /// single-row <see cref="GetAsync"/>; <c>UserMemberships</c> (pk = "user|{userId}", sk = organizationId)
 /// answers "which organizations may this person authenticate as". Both rows carry the full membership
-/// document and are kept in sync on every write.
+/// document and are kept in sync on every write. <see cref="DeleteAsync"/> checks and removes each row
+/// independently — it does not let one row's absence short-circuit the other, so a membership left
+/// inconsistent by an earlier partial write (one row present, the other missing) is still fully
+/// cleaned up, with a tombstone for whichever row actually existed, rather than left half-orphaned
+/// forever.
 /// </summary>
 public sealed class SqlOrganizationMembershipStore(
     SqlTable members, SqlTable userMemberships, EnvPartitioner partitioner, IChangeWriter? tombstones = null)
@@ -65,13 +69,19 @@ public sealed class SqlOrganizationMembershipStore(
         var orgPk = OrgPk(partitioner, organizationId);
         var userPk = UserPk(partitioner, userId);
 
-        var removed = await members.DeleteIfExistsReturningAsync(orgPk, userId, ct).ConfigureAwait(false);
-        await userMemberships.DeleteAsync(userPk, organizationId, ct).ConfigureAwait(false);
+        // Each side is checked-and-removed independently, on purpose: the forward row being absent
+        // must not stop the reverse row from being deleted (and tombstoned), or a membership left
+        // inconsistent by an earlier partial write — one row present, the other missing — would stay
+        // half-orphaned forever the next time someone tried to clean it up.
+        var removedMember = await members.DeleteIfExistsReturningAsync(orgPk, userId, ct).ConfigureAwait(false);
+        var removedUserMembership = await userMemberships.DeleteIfExistsReturningAsync(userPk, organizationId, ct).ConfigureAwait(false);
 
-        if (removed is not null && tombstones is not null)
+        if (tombstones is not null)
         {
-            await tombstones.WriteAsync("OrganizationMembers", orgPk, userId, ct).ConfigureAwait(false);
-            await tombstones.WriteAsync("UserMemberships", userPk, organizationId, ct).ConfigureAwait(false);
+            if (removedMember is not null)
+                await tombstones.WriteAsync("OrganizationMembers", orgPk, userId, ct).ConfigureAwait(false);
+            if (removedUserMembership is not null)
+                await tombstones.WriteAsync("UserMemberships", userPk, organizationId, ct).ConfigureAwait(false);
         }
     }
 

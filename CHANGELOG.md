@@ -150,6 +150,27 @@
   may still re-bind deliberately, which is what context-bound exchanges are for, but it now has to say
   so rather than inherit silence. Introspection emits `org_id`/`org_slug` when present, so a resource
   server that introspects instead of validating the JWT itself gets the same answer as one that does.
+- **`DynamoOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
+  validates the slug pattern; both organization stores now log upserts as well as deletes, and
+  membership delete no longer skips the reverse row.** A slug rename used to write the new lookup
+  row and drop the stale one under a plain read-then-write — a relying party hard-codes the slug
+  into the `organization` authorize parameter, so a rename is now refused outright
+  (`InvalidOperationException`) rather than supported unsafely. Two concurrent creates racing on the
+  same brand-new slug could both pass the read-then-write uniqueness check and both write, so a new
+  organization's slug row is now claimed with `DynamoTable.PutIfAbsentAsync`
+  (`attribute_not_exists(pk)`), and the loser's `ConditionalCheckFailedException` is what rejects
+  it, not a check that ran too early. An id and a slug can also no longer resolve to two different
+  organizations (an incoming slug matching another organization's id, or vice versa, is refused with
+  a `GetItem` point read each way), and `UpsertAsync` now validates the slug against
+  `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing anything. Both `DynamoOrganizationStore`
+  and `DynamoOrganizationMembershipStore` had mirrored `DynamoScimTokenStore`'s tombstone-on-delete-
+  only pattern, which was the wrong sibling to copy — `DynamoUserStore`/`DynamoProvisioningAppStore`/
+  `DynamoAgentProfileStore` all log an upsert too, so an incremental backup window that only ever saw
+  upserts would have carried nothing for either store. `DynamoOrganizationMembershipStore.DeleteAsync`
+  checked the forward row first and returned early when it was missing, so a membership left
+  inconsistent by an earlier partial write (one row present, the other not) could never be cleaned up
+  by a delete that only ever looked at the row it was about to skip; it now deletes and tombstones
+  both rows unconditionally.
 
 ## [0.27.1], 2026-09-11
 

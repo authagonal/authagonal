@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Authagonal.Core.Models;
 using Authagonal.Core.Services;
+using Authagonal.SqlProvider;
 using Authagonal.SqlProvider.Sql;
 using Authagonal.SqlProvider.Stores;
 using Authagonal.Tests.Infrastructure;
@@ -48,6 +50,41 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
 
     private async Task<SqlOrganizationMembershipStore> NewMembershipStoreAsync(IChangeWriter? tombstones = null)
         => new(await T("OrganizationMembers"), await T("UserMemberships"), Live, tombstones);
+
+    /// <summary>Same as <see cref="NewMembershipStoreAsync"/>, but also hands back the two underlying
+    /// tables so a test can seed a row directly, bypassing the store's own dual-write.</summary>
+    private async Task<(SqlOrganizationMembershipStore Store, SqlTable Members, SqlTable UserMemberships)>
+        NewMembershipStoreWithTablesAsync(IChangeWriter? tombstones = null)
+    {
+        var members = await T("OrganizationMembers");
+        var userMemberships = await T("UserMemberships");
+        return (new SqlOrganizationMembershipStore(members, userMemberships, Live, tombstones), members, userMemberships);
+    }
+
+    /// <summary>Records every delete this test run sent through <see cref="IChangeWriter"/>, so a test
+    /// can assert exactly which rows were (and were not) tombstoned.</summary>
+    private sealed class RecordingChangeWriter : IChangeWriter
+    {
+        public List<(string TableName, string PartitionKey, string RowKey)> Deletes { get; } = [];
+
+        public Task WriteAsync(string tableName, string partitionKey, string rowKey, CancellationToken ct = default)
+        {
+            Deletes.Add((tableName, partitionKey, rowKey));
+            return Task.CompletedTask;
+        }
+
+        public Task WriteBatchAsync(string tableName, IEnumerable<(string PartitionKey, string RowKey)> keys, CancellationToken ct = default)
+        {
+            foreach (var (pk, rk) in keys) Deletes.Add((tableName, pk, rk));
+            return Task.CompletedTask;
+        }
+
+        public Task WriteUpsertAsync(string tableName, string partitionKey, string rowKey, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task WriteUpsertBatchAsync(string tableName, IEnumerable<(string PartitionKey, string RowKey)> keys, CancellationToken ct = default)
+            => Task.CompletedTask;
+    }
 
     private static Organization Org(string id, string slug, string name = "Acme") => new()
     {
@@ -102,18 +139,23 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
         Assert.Null(await store.GetBySlugAsync("ACME"));
     }
 
+    /// <summary>F11 — the slug is immutable once an organization exists.</summary>
     [Fact]
-    public async Task OrganizationStore_SlugChange_WritesTheNewRowAndRemovesTheStaleOne()
+    public async Task OrganizationStore_SlugChange_ThrowsAndChangesNothing()
     {
         var store = await NewOrgStoreAsync();
         await store.UpsertAsync(Org("o1", "acme-old"));
         Assert.Equal("o1", (await store.GetBySlugAsync("acme-old"))?.Id);
 
-        await store.UpsertAsync(Org("o1", "acme-new"));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.UpsertAsync(Org("o1", "acme-new")));
+        Assert.Contains("immutable", ex.Message, StringComparison.OrdinalIgnoreCase);
 
-        Assert.Null(await store.GetBySlugAsync("acme-old"));
-        Assert.Equal("o1", (await store.GetBySlugAsync("acme-new"))?.Id);
-        Assert.Equal("acme-new", (await store.GetAsync("o1"))!.Slug);
+        // Nothing changed: the old slug still resolves, the new one resolves to nothing, and the
+        // stored document's slug is untouched.
+        Assert.Equal("acme-old", (await store.GetAsync("o1"))!.Slug);
+        Assert.Equal("o1", (await store.GetBySlugAsync("acme-old"))?.Id);
+        Assert.Null(await store.GetBySlugAsync("acme-new"));
         Assert.Single(await store.ListAsync());
     }
 
@@ -126,11 +168,100 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => store.UpsertAsync(Org("o2", "acme")));
         Assert.Contains("acme", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("o1", ex.Message, StringComparison.Ordinal);
 
         // The rejected upsert must not have written anything for o2.
         Assert.Null(await store.GetAsync("o2"));
         Assert.Equal("o1", (await store.GetBySlugAsync("acme"))?.Id);
+    }
+
+    /// <summary>F4 — the slug is claimed with an insert-only write, so of many concurrent creators of
+    /// the same brand-new slug, exactly one wins, on both dialects.</summary>
+    [Fact]
+    public async Task OrganizationStore_ConcurrentUpsertsOfTheSameNewSlug_ExactlyOneSucceeds()
+    {
+        var store = await NewOrgStoreAsync();
+
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 8).Select(async i =>
+        {
+            try
+            {
+                await store.UpsertAsync(Org($"o{i}", "contested"));
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }));
+
+        Assert.Equal(1, outcomes.Count(won => won));
+        Assert.Single(await store.ListAsync());
+
+        var winner = (await store.ListAsync())[0];
+        Assert.Equal("contested", winner.Slug);
+        Assert.Equal(winner.Id, (await store.GetBySlugAsync("contested"))?.Id);
+    }
+
+    /// <summary>F3 — ids and slugs share no namespace: a new organization's slug may not equal an
+    /// existing organization's id.</summary>
+    [Fact]
+    public async Task OrganizationStore_SlugEqualToAnExistingOrganizationsId_ThrowsAndWritesNothing()
+    {
+        var store = await NewOrgStoreAsync();
+        await store.UpsertAsync(Org("acme-id", "acme-slug"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.UpsertAsync(Org("o2", "acme-id")));
+        Assert.Contains("acme-id", ex.Message, StringComparison.Ordinal);
+
+        Assert.Null(await store.GetAsync("o2"));
+        Assert.Null(await store.GetBySlugAsync("acme-id"));
+    }
+
+    /// <summary>F3, the other direction: a new organization's id may not equal an existing
+    /// organization's slug.</summary>
+    [Fact]
+    public async Task OrganizationStore_IdEqualToAnExistingOrganizationsSlug_ThrowsAndWritesNothing()
+    {
+        var store = await NewOrgStoreAsync();
+        await store.UpsertAsync(Org("o1", "acme-slug"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.UpsertAsync(Org("acme-slug", "different-slug")));
+        Assert.Contains("acme-slug", ex.Message, StringComparison.Ordinal);
+
+        Assert.Null(await store.GetAsync("acme-slug"));
+        Assert.Null(await store.GetBySlugAsync("different-slug"));
+        // The pre-existing organization is untouched.
+        Assert.Equal("o1", (await store.GetBySlugAsync("acme-slug"))?.Id);
+    }
+
+    /// <summary>F4 — slug format is validated at the boundary, not left for some later reader to choke
+    /// on.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("Acme")]
+    [InlineData("-acme")]
+    [InlineData("acme-")]
+    [InlineData("ac me")]
+    [InlineData("ac_me")]
+    public async Task OrganizationStore_InvalidSlugPattern_ThrowsArgumentExceptionAndWritesNothing(string slug)
+    {
+        var store = await NewOrgStoreAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => store.UpsertAsync(Org("o1", slug)));
+        Assert.Null(await store.GetAsync("o1"));
+        Assert.Empty(await store.ListAsync());
+    }
+
+    [Theory]
+    [InlineData("a")]
+    [InlineData("a1")]
+    [InlineData("acme-corp-2")]
+    public async Task OrganizationStore_ValidSlugPattern_IsAccepted(string slug)
+    {
+        var store = await NewOrgStoreAsync();
+        await store.UpsertAsync(Org("o1", slug));
+        Assert.Equal(slug, (await store.GetAsync("o1"))?.Slug);
     }
 
     [Fact]
@@ -235,6 +366,35 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
         await store.DeleteAsync("no-such-org", "no-such-user"); // must not throw
     }
 
+    /// <summary>F18 — delete must not let the forward row's absence short-circuit the reverse row's
+    /// removal (and tombstone). Seeds ONLY the reverse (<c>UserMemberships</c>) row directly, bypassing
+    /// <see cref="SqlOrganizationMembershipStore.UpsertAsync"/>, to simulate a membership an earlier
+    /// partial write left half-orphaned.</summary>
+    [Fact]
+    public async Task MembershipStore_Delete_WithOnlyTheReverseRowPresent_RemovesAndTombstonesIt()
+    {
+        var tombstones = new RecordingChangeWriter();
+        var (store, _, userMemberships) = await NewMembershipStoreWithTablesAsync(tombstones);
+
+        var orphan = new SqlRow(Live.PK("user|u1"), "o1")
+        {
+            Data = JsonSerializer.Serialize(Membership("o1", "u1"), SqlJsonContext.Default.OrganizationMembership),
+        };
+        await userMemberships.PutAsync(orphan);
+
+        // The forward row was never written — GetAsync (backed by OrganizationMembers) confirms the
+        // orphan is exactly the inconsistency this test means to set up.
+        Assert.Null(await store.GetAsync("o1", "u1"));
+        Assert.Single(await store.ListByUserAsync("u1"));
+
+        await store.DeleteAsync("o1", "u1");
+
+        Assert.Empty(await store.ListByUserAsync("u1"));
+        Assert.Contains(("UserMemberships", Live.PK("user|u1"), "o1"), tombstones.Deletes);
+        // No forward row ever existed, so no forward tombstone should have been written.
+        Assert.DoesNotContain(("OrganizationMembers", Live.PK("org|o1"), "u1"), tombstones.Deletes);
+    }
+
     [Fact]
     public async Task MembershipStore_ListByUserAndListByOrganization_ReturnIndependentSets()
     {
@@ -270,13 +430,15 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
         var orgStore = await NewOrgStoreAsync();
         var membershipStore = await NewMembershipStoreAsync();
 
-        await orgStore.UpsertAsync(Org("Org-Zeta", "Zeta-Slug"));
-        await orgStore.UpsertAsync(Org("org-zeta-2", "zeta-slug"));
+        // Slugs must be lowercase (the F4 pattern), so the case-sensitivity half of this test lives on
+        // the ids instead — which carry no such restriction.
+        await orgStore.UpsertAsync(Org("Org-Zeta", "zeta-slug"));
+        await orgStore.UpsertAsync(Org("org-zeta-2", "zeta-slug-2"));
 
         Assert.Equal("Org-Zeta", (await orgStore.GetAsync("Org-Zeta"))?.Id);
         Assert.Equal("org-zeta-2", (await orgStore.GetAsync("org-zeta-2"))?.Id);
-        Assert.Equal("Org-Zeta", (await orgStore.GetBySlugAsync("Zeta-Slug"))?.Id);
-        Assert.Equal("org-zeta-2", (await orgStore.GetBySlugAsync("zeta-slug"))?.Id);
+        Assert.Equal("Org-Zeta", (await orgStore.GetBySlugAsync("zeta-slug"))?.Id);
+        Assert.Equal("org-zeta-2", (await orgStore.GetBySlugAsync("zeta-slug-2"))?.Id);
 
         await membershipStore.UpsertAsync(Membership("Org-Zeta", "User-A"));
         await membershipStore.UpsertAsync(Membership("Org-Zeta", "user-a"));

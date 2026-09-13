@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Authagonal.Core.Models;
 using Authagonal.Core.Services;
 using Authagonal.Core.Stores;
@@ -13,6 +14,17 @@ namespace Authagonal.SqlProvider.Stores;
 /// attribute the point lookup needs to redirect into the first table. Same two-table shape as
 /// <see cref="SqlRoleStore"/>/<see cref="SqlScopeStore"/> for the primary row, plus a slug index the
 /// same way <see cref="SqlSsoDomainStore"/> indexes by domain.
+/// <para>
+/// The slug is immutable once an organization exists — <see cref="UpsertAsync"/> refuses to change
+/// it, since it is the value a relying party hard-codes as the <c>organization</c> authorize
+/// parameter, and changing what it resolves to under the same string is a silent redirect to a
+/// different customer, not an update. Ids and slugs also share no namespace: a NEW organization is
+/// refused when its slug reads as an existing organization's id, or its id reads as an existing
+/// organization's slug — otherwise a bare string accepted as either would resolve to different
+/// entities depending on which lookup read it. A brand-new slug is claimed with an insert-only
+/// conditional write (<see cref="SqlTable.PutIfAbsentAsync"/>) before the organization document
+/// itself is written, so two concurrent creates for the same new slug cannot both succeed.
+/// </para>
 /// </summary>
 public sealed class SqlOrganizationStore(
     SqlTable organizations, SqlTable slugs, EnvPartitioner partitioner, IChangeWriter? tombstones = null)
@@ -20,6 +32,9 @@ public sealed class SqlOrganizationStore(
 {
     private const string OrgPartition = "org";
     private const string SlugPartition = "orgslug";
+
+    private static readonly Regex SlugPattern =
+        new("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$", RegexOptions.Compiled);
 
     public async Task<Organization?> GetAsync(string organizationId, CancellationToken ct = default)
     {
@@ -47,23 +62,62 @@ public sealed class SqlOrganizationStore(
 
     public async Task UpsertAsync(Organization organization, CancellationToken ct = default)
     {
+        if (!SlugPattern.IsMatch(organization.Slug))
+        {
+            throw new ArgumentException(
+                $"Slug '{organization.Slug}' is invalid; slugs must match ^[a-z0-9](?:[a-z0-9-]{{0,62}}[a-z0-9])?$.",
+                nameof(organization));
+        }
+
         var orgPk = partitioner.PK(OrgPartition);
         var slugPk = partitioner.PK(SlugPartition);
 
-        // Reject a slug already held by a DIFFERENT organization — two rows answering one slug would
-        // make the `organization` authorize parameter ambiguous. Re-saving the same organization under
-        // the same slug is not a clash.
-        var clash = await slugs.GetAsync(slugPk, organization.Slug, ct: ct).ConfigureAwait(false);
-        if (clash is not null && !string.Equals(clash.GetStr("organizationId"), organization.Id, StringComparison.Ordinal))
+        var existingRow = await organizations.GetAsync(orgPk, organization.Id, ct: ct).ConfigureAwait(false);
+        if (existingRow is not null)
         {
-            throw new InvalidOperationException(
-                $"Slug '{organization.Slug}' is already held by organization '{clash.GetStr("organizationId")}'.");
+            // The slug is immutable once set — see the class remarks. Everything else on the
+            // document is freely mutable, so this is the only field upsert has to police.
+            var existing = Read(existingRow);
+            if (!string.Equals(existing.Slug, organization.Slug, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Organization '{organization.Id}' slug is immutable; cannot change '{existing.Slug}' to '{organization.Slug}'.");
+            }
+
+            var updatedRow = new SqlRow(orgPk, organization.Id)
+            {
+                Data = JsonSerializer.Serialize(organization, SqlJsonContext.Default.Organization),
+            };
+            await organizations.PutAsync(updatedRow, ct).ConfigureAwait(false);
+            if (tombstones is not null)
+                await tombstones.WriteUpsertAsync("Organizations", orgPk, organization.Id, ct).ConfigureAwait(false);
+            return;
         }
 
-        // Read the pre-existing row (if any) BEFORE overwriting it — it is the only place the previous
-        // slug is recorded, and we need it to know whether a stale slug row must be cleaned up.
-        var existing = await organizations.GetAsync(orgPk, organization.Id, ct: ct).ConfigureAwait(false);
-        var staleSlug = existing is not null ? Read(existing).Slug : null;
+        // New organization. Ids and slugs share no namespace: a slug that reads as another
+        // organization's id, or an id that reads as another organization's slug, would make "which
+        // one did the caller mean" ambiguous wherever a bare string is accepted as either.
+        var idClash = await organizations.GetAsync(orgPk, organization.Slug, ct: ct).ConfigureAwait(false);
+        if (idClash is not null)
+            throw new InvalidOperationException($"Slug '{organization.Slug}' is already in use as another organization's id.");
+
+        var slugClash = await slugs.GetAsync(slugPk, organization.Id, ct: ct).ConfigureAwait(false);
+        if (slugClash is not null)
+        {
+            var owner = slugClash.GetStr("organizationId");
+            throw new InvalidOperationException($"Id '{organization.Id}' is already held by organization '{owner}' as its slug.");
+        }
+
+        // Insert-only: exactly one concurrent creator of the same brand-new slug wins. This is the
+        // real uniqueness guarantee — the read above (slugClash) is a fast, friendlier rejection for
+        // the common non-racing case, not a substitute for it, since it and this insert are not one
+        // atomic operation.
+        var slugRow = new SqlRow(slugPk, organization.Slug);
+        slugRow.PutS("organizationId", organization.Id);
+        if (!await slugs.PutIfAbsentAsync(slugRow, ct).ConfigureAwait(false))
+            throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by another organization.");
+        if (tombstones is not null)
+            await tombstones.WriteUpsertAsync("OrganizationSlugs", slugPk, organization.Slug, ct).ConfigureAwait(false);
 
         var orgRow = new SqlRow(orgPk, organization.Id)
         {
@@ -72,23 +126,6 @@ public sealed class SqlOrganizationStore(
         await organizations.PutAsync(orgRow, ct).ConfigureAwait(false);
         if (tombstones is not null)
             await tombstones.WriteUpsertAsync("Organizations", orgPk, organization.Id, ct).ConfigureAwait(false);
-
-        var slugRow = new SqlRow(slugPk, organization.Slug);
-        slugRow.PutS("organizationId", organization.Id);
-        await slugs.PutAsync(slugRow, ct).ConfigureAwait(false);
-
-        if (tombstones is not null)
-            await tombstones.WriteUpsertAsync("OrganizationSlugs", slugPk, organization.Slug, ct).ConfigureAwait(false);
-
-        // The new slug row is written before the stale one is removed, so a crash between the two
-        // leaves the organization reachable by its (new) slug rather than briefly unreachable by
-        // either.
-        if (staleSlug is not null && !string.Equals(staleSlug, organization.Slug, StringComparison.Ordinal))
-        {
-            var removed = await slugs.DeleteIfExistsReturningAsync(slugPk, staleSlug, ct).ConfigureAwait(false);
-            if (removed is not null && tombstones is not null)
-                await tombstones.WriteAsync("OrganizationSlugs", slugPk, staleSlug, ct).ConfigureAwait(false);
-        }
     }
 
     public async Task DeleteAsync(string organizationId, CancellationToken ct = default)
