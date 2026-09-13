@@ -222,7 +222,12 @@ internal static class AuthorizeEndpoint
                     [authScheme]);
             }
 
-            var context = new OidcSubjectResolutionContext(clientId, request.RequestedScopes, request.Resources);
+            // request.Organization, not three arguments. AuthorizeRequest.Read is shared, so this host
+            // already parsed the `organization` parameter and already refused a malformed one — and
+            // then dropped the value, issuing a token for whatever organization the account happened to
+            // carry. An embedded Protocol host was therefore validating a parameter it did not honour.
+            var context = new OidcSubjectResolutionContext(
+                clientId, request.RequestedScopes, request.Resources, request.Organization);
             var resolved = await subjectResolver.ResolveAsync(principal, context, ct);
 
             if (resolved is OidcSubjectResult.Rejected rejected)

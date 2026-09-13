@@ -4,6 +4,7 @@ using Authagonal.Protocol;
 using Authagonal.Server.Services;
 using Authagonal.Tests.Infrastructure;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Authagonal.Tests;
 
@@ -68,7 +69,8 @@ public sealed class OrganizationSelectionTests
             users, new InMemoryScimGroupStore(), new WritableScimGroupRoleMappingStore(), clients,
             organizationSelector: new OrganizationSelector(
                 organizations ?? new WritableOrganizationStore(),
-                memberships ?? new WritableOrganizationMembershipStore()));
+                memberships ?? new WritableOrganizationMembershipStore(),
+                NullLogger<OrganizationSelector>.Instance));
     }
 
     private static Task<OidcSubjectResult> ResolveAsync(
@@ -225,7 +227,11 @@ public sealed class OrganizationSelectionTests
         var rejected = Rejected(await ResolveAsync(Resolver(user, Client(), orgs), user, "no-such-org"));
 
         Assert.Equal(OidcRejection.AccessDenied, rejected.Reason);
-        Assert.Contains("no-such-org", rejected.Description);
+        // The description reaches the relying party as error_description — into its logs and often
+        // onto a screen — so it must NOT echo the caller-supplied value back. The detail lives on the
+        // server's Debug log instead.
+        Assert.DoesNotContain("no-such-org", rejected.Description);
+        Assert.Contains("does not exist", rejected.Description);
     }
 
     [Fact]
@@ -517,7 +523,8 @@ public sealed class OrganizationSelectionTests
         await users.CreateAsync(user);
         var resolver = ResolverTestSupport.NewResolver(
             users, new InMemoryScimGroupStore(), new WritableScimGroupRoleMappingStore(), new InMemoryClientStore(),
-            organizationSelector: new OrganizationSelector(orgs, new WritableOrganizationMembershipStore()));
+            organizationSelector: new OrganizationSelector(
+                orgs, new WritableOrganizationMembershipStore(), NullLogger<OrganizationSelector>.Instance));
 
         var atLogin = Allowed(await resolver.ResolveAsync(
             Principal(user.Id), new OidcSubjectResolutionContext(ClientId, ["openid"], [])));

@@ -107,7 +107,10 @@ public sealed class UserStoreOidcSubjectResolver(
             // Refused rather than downgraded to a token with no organization: the relying party asked
             // for one, and a token that silently names none would be read as "this user belongs
             // nowhere" rather than "you may not have this".
-            logger.LogInformation(
+            // The selector has already logged the detail (Debug carries the caller-supplied value,
+            // Information does not), and ex.Message is written by the selector rather than echoed from
+            // the request — so it is safe to return, and safe to log here at Debug only.
+            logger.LogDebug(
                 "Refusing authorization for {SubjectId} on client {ClientId}: {Reason}",
                 subjectId, context.ClientId, ex.Message);
             return OidcSubjectResult.Reject(ex.Rejection, ex.Message);
@@ -244,7 +247,7 @@ public sealed class UserStoreOidcSubjectResolver(
                 priorSubject.UpstreamConnectionId,
                 priorSubject.AuthTime,
                 ct,
-                requestedOrganization: carriedOrganization);
+                carriedOrganizationId: carriedOrganization);
             return OidcSubjectResult.Allow(subject);
         }
         catch (OrganizationAccessDeniedException ex)
@@ -387,12 +390,17 @@ public sealed class UserStoreOidcSubjectResolver(
     /// through the authorize endpoint.
     /// </summary>
     /// <param name="requestedOrganization">
-    /// The organisation this request is for — the <c>organization</c> authorize parameter at
-    /// authorize, the organisation carried forward from the prior grant at refresh, and null on the
-    /// device and admin-mint paths, which name none and fall through to the client restriction and
-    /// then the account's own default. Trailing and after <paramref name="ct"/> deliberately, so every
-    /// existing positional caller keeps compiling — the same reason
-    /// <c>ProtocolTokenService.MintAccessTokenAsync</c> puts its forced-claims argument there.
+    /// The <c>organization</c> authorize parameter, when the request carried one. Caller-supplied, so
+    /// it resolves as a slug first and then as an id. Null on the device and admin-mint paths, which
+    /// name none and fall through to the client restriction and then the account's own default.
+    /// Trailing and after <paramref name="ct"/> deliberately, so every existing positional caller keeps
+    /// compiling — the same reason <c>ProtocolTokenService.MintAccessTokenAsync</c> puts its
+    /// forced-claims argument there.
+    /// </param>
+    /// <param name="carriedOrganizationId">
+    /// The organisation a prior grant was issued for, on the refresh path. An id this server minted,
+    /// so it resolves by id only — never as a slug, or a later organisation taking that value as its
+    /// slug would capture the grant.
     /// </param>
     /// <exception cref="OrganizationAccessDeniedException">
     /// The organisation does not exist, is disabled, is not permitted for this client, or the user is
@@ -409,7 +417,8 @@ public sealed class UserStoreOidcSubjectResolver(
         string? upstreamConnectionId = null,
         DateTimeOffset? authTime = null,
         CancellationToken ct = default,
-        string? requestedOrganization = null)
+        string? requestedOrganization = null,
+        string? carriedOrganizationId = null)
     {
         // SCIM group → role mappings (empty store = no-op). Fetch the user's groups once,
         // used for both the optional groups claim and effective-role resolution.
@@ -436,7 +445,8 @@ public sealed class UserStoreOidcSubjectResolver(
         // resolver by hand — the account's own field is the answer, which is what it has always been.
         var organization = organizationSelector is null
             ? new OrganizationSelection { OrganizationId = user.OrganizationId }
-            : await organizationSelector.SelectAsync(user, client, requestedOrganization, ct);
+            : await organizationSelector.SelectAsync(
+                user, client, requestedOrganization, carriedOrganizationId, ct);
 
         // …and the roles that organization grants, unioned in last. Only an EXPLICITLY selected
         // organization with an ACTIVE membership contributes any (see OrganizationSelector), so a

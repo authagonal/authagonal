@@ -1,6 +1,8 @@
+using Authagonal.Core.Constants;
 using Authagonal.Core.Models;
 using Authagonal.Core.Stores;
 using Authagonal.Protocol;
+using Microsoft.Extensions.Logging;
 
 namespace Authagonal.Server.Services;
 
@@ -36,23 +38,38 @@ namespace Authagonal.Server.Services;
 /// </remarks>
 public sealed class OrganizationSelector(
     IOrganizationStore organizations,
-    IOrganizationMembershipStore memberships)
+    IOrganizationMembershipStore memberships,
+    ILogger<OrganizationSelector> logger)
 {
     /// <summary>
     /// Resolve and authorise the organisation for this request.
     /// </summary>
     /// <param name="requestedOrganization">
-    /// The <c>organization</c> parameter's value (a slug or an id), or the organisation carried
-    /// forward from a prior grant on the refresh path. Null when the request named none.
+    /// The <c>organization</c> authorize parameter's value. Caller-supplied and of unknown shape, so
+    /// it is resolved as a SLUG first and then as an id. Null when the request named none.
+    /// </param>
+    /// <param name="carriedOrganizationId">
+    /// The organisation a prior grant was issued for, carried across a refresh rotation. Resolved by
+    /// ID ONLY, in a single point read.
     /// </param>
     /// <exception cref="OrganizationAccessDeniedException">
     /// The request named an organisation that does not exist, is disabled, is not permitted for this
     /// client, or that the user is not an active member of.
     /// </exception>
+    /// <remarks>
+    /// The id-only rule for everything that is already an id is not an optimisation, it is
+    /// correctness. A slug-first lookup asks "is this value some organisation's slug?" before asking
+    /// "is it this organisation's id?" — so once any organisation takes the slug <c>A1</c>, a grant
+    /// issued long before for the organisation whose ID is <c>A1</c> silently re-points at it on its
+    /// next refresh. The same applies to a legacy account tag and to a client's restricted list: all
+    /// three hold ids that this server minted, and an id is looked up as an id. Only the authorize
+    /// parameter is ambiguous, because only it comes from the caller.
+    /// </remarks>
     public async Task<OrganizationSelection> SelectAsync(
         AuthUser user,
         OAuthClient? client,
         string? requestedOrganization,
+        string? carriedOrganizationId = null,
         CancellationToken ct = default)
     {
         var restricted = client?.RestrictedToOrganizationIds ?? [];
@@ -61,35 +78,70 @@ public sealed class OrganizationSelector(
         string? legacyOrganizationId = null;
         var explicitlySelected = false;
 
-        if (!string.IsNullOrWhiteSpace(requestedOrganization))
+        if (!string.IsNullOrWhiteSpace(carriedOrganizationId))
+        {
+            // Refresh: an id this server minted and put on a prior token. One point read, by id.
+            explicitlySelected = true;
+            organization = await organizations.GetAsync(carriedOrganizationId, ct);
+            if (organization is null)
+            {
+                // The organisation behind a live grant is gone. Refuse this refresh rather than fall
+                // back to the account default, which would silently move the session to another
+                // customer.
+                logger.LogDebug(
+                    "Refusing refresh for {SubjectId}: carried organization {OrganizationId} no longer exists",
+                    user.Id, carriedOrganizationId);
+                throw new OrganizationAccessDeniedException(
+                    OidcRejection.AccessDenied,
+                    "The organization this grant was issued for is no longer available.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(requestedOrganization))
         {
             explicitlySelected = true;
-            organization = await ResolveAsync(requestedOrganization, ct);
+            organization = await ResolveBySlugThenIdAsync(requestedOrganization, ct);
             if (organization is null)
             {
                 // Named and absent is a refusal, never a silent fall-through to the account default:
                 // a relying party that asked for organisation A must not be handed a token for B.
+                //
+                // The value is caller-supplied, so it is logged at Debug and NOT reflected into the
+                // error: an error_description travels to the relying party, into its logs and often
+                // onto a screen, and echoing an attacker-chosen string there makes this endpoint a
+                // reflection surface for no diagnostic gain the Debug line does not already give.
+                logger.LogDebug(
+                    "No organization matches the requested value {RequestedOrganization} for {SubjectId}",
+                    requestedOrganization, user.Id);
+                logger.LogInformation(
+                    "Refusing authorization for {SubjectId} on client {ClientId}: the requested organization does not exist",
+                    user.Id, client?.ClientId);
                 throw new OrganizationAccessDeniedException(
                     OidcRejection.AccessDenied,
-                    $"No organization matches '{requestedOrganization}'.");
+                    "The requested organization does not exist or is not available to this client.");
             }
         }
         else if (restricted.Count == 1)
         {
+            // A client's restricted list holds ids, so it is read as one.
             explicitlySelected = true;
             organization = await organizations.GetAsync(restricted[0], ct);
             if (organization is null)
             {
                 throw new OrganizationAccessDeniedException(
                     OidcRejection.AccessDenied,
-                    $"Client '{client?.ClientId}' is restricted to organization '{restricted[0]}', which does not exist.");
+                    $"Client '{client?.ClientId}' is restricted to an organization that does not exist.");
             }
         }
         else if (!string.IsNullOrWhiteSpace(user.OrganizationId))
         {
-            organization = await ResolveAsync(user.OrganizationId, ct);
+            // The account's own tag is an id — written by TCC provisioning, a SCIM token binding or
+            // the admin API, never by a caller — so it is resolved by id in ONE point read. Reading it
+            // slug-first would let a newly created organisation whose SLUG happens to equal some
+            // account's stored id capture every one of those accounts.
+            organization = await organizations.GetAsync(user.OrganizationId, ct);
             // Pre-organizations account: the id is a bare string with no record behind it. Emit it as
-            // org_id and gate nothing, which is what this server has always done with the field.
+            // org_id and gate nothing, which is what this server has always done with the field. On a
+            // deployment with no organisations at all this is the only store read the mint makes.
             if (organization is null) legacyOrganizationId = user.OrganizationId;
         }
 
@@ -156,16 +208,61 @@ public sealed class OrganizationSelector(
             // An invited-but-unaccepted or suspended membership grants nothing, exactly as it
             // authorises nothing. The roles come off the row keyed by THIS organisation, so a role
             // held in one organisation cannot reach a token issued for another.
-            MembershipRoles = activeMember && membership!.Roles.Count > 0
-                ? [.. membership.Roles]
-                : null,
+            MembershipRoles = activeMember ? GrantableRoles(membership!, organization, user) : null,
         };
     }
 
-    /// <summary>Slug first, then id — the slug is what a relying party sends, so it must not cost a
-    /// failed id lookup on every request.</summary>
-    private async Task<Organization?> ResolveAsync(string slugOrId, CancellationToken ct) =>
-        await organizations.GetBySlugAsync(slugOrId, ct) ?? await organizations.GetAsync(slugOrId, ct);
+    /// <summary>
+    /// The caller-supplied <c>organization</c> parameter: slug first, then id. Used for that parameter
+    /// and nothing else — every other source already holds an id (see the remarks on
+    /// <see cref="SelectAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// The slug attempt is lowercased, because slugs are stored lowercase by
+    /// <see cref="OrganizationSlug"/> and a relying party that sends <c>Acme</c> means <c>acme</c>. The
+    /// id attempt is NOT: an id is opaque and compared ordinally, so lowercasing it would resolve a
+    /// different organisation from the one named.
+    /// </remarks>
+    private async Task<Organization?> ResolveBySlugThenIdAsync(string slugOrId, CancellationToken ct) =>
+        await organizations.GetBySlugAsync(slugOrId.ToLowerInvariant(), ct)
+        ?? await organizations.GetAsync(slugOrId, ct);
+
+    /// <summary>
+    /// The membership's roles minus anything claiming a reserved namespace.
+    /// </summary>
+    /// <remarks>
+    /// A membership row is customer-scoped data — written by a customer's own administrator once
+    /// delegated administration exists, and by whatever provisioning connector a customer points at
+    /// the tenant before then. A role list able to carry <c>tenant:admin</c> would turn "may manage my
+    /// own organisation" into "may administer the tenant", which is the escalation this product's
+    /// whole role split exists to prevent. Stripped rather than refused so a stray entry cannot lock a
+    /// customer out of their own login, and logged at Warning because a membership carrying one is
+    /// either a misconfiguration or an attempt.
+    /// </remarks>
+    private IReadOnlyList<string>? GrantableRoles(
+        OrganizationMembership membership, Organization organization, AuthUser user)
+    {
+        if (membership.Roles.Count == 0) return null;
+
+        List<string>? grantable = null;
+        List<string>? stripped = null;
+
+        foreach (var role in membership.Roles)
+        {
+            if (ReservedRolePrefixes.IsReserved(role)) (stripped ??= []).Add(role);
+            else (grantable ??= []).Add(role);
+        }
+
+        if (stripped is not null)
+        {
+            logger.LogWarning(
+                "Dropping {Count} reserved role(s) from the membership of {SubjectId} in organization "
+                + "{OrganizationId}: a membership may not grant tenant- or platform-scoped authority. Roles: {Roles}",
+                stripped.Count, user.Id, organization.Id, string.Join(',', stripped));
+        }
+
+        return grantable;
+    }
 
     private static void RequireClientPermits(
         OAuthClient? client, IReadOnlyList<string> restricted, string organizationId, string label)

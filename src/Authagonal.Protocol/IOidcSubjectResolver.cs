@@ -30,23 +30,35 @@ public interface IOidcSubjectResolver
     /// Re-resolve the subject when a refresh token is redeemed. Hosts should re-check
     /// that the identity is still valid (user not deactivated, share link not revoked,
     /// etc.) and return a fresh <see cref="OidcSubject"/>. Returning
-    /// <see cref="OidcRejection.AccessDenied"/> revokes the refresh chain.
+    /// <see cref="OidcRejection.AccessDenied"/> REFUSES THIS REFRESH; it does not revoke the grant.
     /// </summary>
+    /// <remarks>
+    /// The distinction matters and used to be stated the other way round here. A rejection fails the
+    /// one request: the presented refresh token is left unconsumed and the family is left intact, so
+    /// the chain stays refusable for as long as the condition holds and resumes the moment it stops
+    /// holding — restoring a revoked membership, or re-enabling an organisation, brings the session
+    /// back without a fresh sign-in. The grant still dies on its own absolute lifetime. This is the
+    /// same shape as a deactivated user, whose refreshes are refused while <c>IsActive</c> is false.
+    /// To actually end a session, revoke the grant (<c>/connect/revocation</c>, or
+    /// <c>GrantRevocation</c> on the host side).
+    /// </remarks>
     Task<OidcSubjectResult> ResolveRefreshAsync(
         OidcSubject priorSubject,
         OidcSubjectResolutionContext context,
         CancellationToken ct = default);
 }
 
+/// <param name="RequestedOrganization">
+/// The <c>organization</c> authorize parameter's value — an organisation slug or id — or null when
+/// the request named none, which is every request a host that predates organisations sends.
+/// Defaulted so existing three-argument CONSTRUCTION keeps compiling; note that the positional arity
+/// is now four, so a positional pattern or an explicit <c>Deconstruct</c> into three variables does
+/// not.
+/// </param>
 public sealed record OidcSubjectResolutionContext(
     string ClientId,
     IReadOnlyList<string> RequestedScopes,
     IReadOnlyList<string> RequestedResources,
-    /// <summary>
-    /// The <c>organization</c> authorize parameter's value — an organisation slug or id — or null
-    /// when the request named none, which is every request a host that predates organisations sends.
-    /// Defaulted so existing three-argument construction keeps compiling.
-    /// </summary>
     string? RequestedOrganization = null);
 
 public abstract record OidcSubjectResult

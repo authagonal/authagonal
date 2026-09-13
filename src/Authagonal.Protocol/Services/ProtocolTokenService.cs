@@ -646,7 +646,7 @@ public sealed class ProtocolTokenService(
         var subject = authCode.Subject;
 
         await RunIssuanceGateAsync(
-            clientId, subject.SubjectId, GrantTypes.AuthorizationCode, authCode.Scopes, ct);
+            clientId, subject, GrantTypes.AuthorizationCode, authCode.Scopes, ct);
 
         var accessToken = await MintAccessTokenAsync(subject, client, authCode.Scopes, authCode.Resources, ct: ct);
 
@@ -832,7 +832,7 @@ public sealed class ProtocolTokenService(
         // unconsumed and the family intact: the host refused THIS issuance, which is not the same as
         // ending the session.
         await RunIssuanceGateAsync(
-            clientId, freshSubject.SubjectId, GrantTypes.RefreshToken, data.Scopes, ct);
+            clientId, freshSubject, GrantTypes.RefreshToken, data.Scopes, ct);
 
         // Minted before the successor so the successor grant can record its jti: the successor is the
         // live refresh token from here on, so it is the one whose revocation must kill this access
@@ -1419,6 +1419,23 @@ public sealed class ProtocolTokenService(
                 customAttributes[key] = stringValue;
         }
 
+        // The exchanging client's own organization restriction, applied to the organization the subject
+        // token carries. Copying org_id across without this check was a hole in exactly the direction
+        // the restriction exists to close: a client registered to serve customer A could be handed any
+        // user's token for customer B and exchange it into a token that still says B, with the
+        // restriction never consulted because no `organization` parameter was involved. RestrictedTo is
+        // a statement about which customers a client may act for, and an exchange is it acting.
+        var subjectOrganizationId = ExtractString(tokenClaims, "org_id");
+        if (client.RestrictedToOrganizationIds.Count > 0 &&
+            (subjectOrganizationId is null ||
+             !client.RestrictedToOrganizationIds.Contains(subjectOrganizationId, StringComparer.Ordinal)))
+        {
+            // invalid_target, matching every other "this client may not aim a token there" refusal on
+            // this path (see the resource/audience policy above).
+            throw new ProtocolTokenException("invalid_target",
+                $"Client '{clientId}' is not permitted for the organization named by the subject token.");
+        }
+
         var subjectExpiry = tokenClaims.TryGetValue("exp", out var expValue)
             ? DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(expValue, System.Globalization.CultureInfo.InvariantCulture))
             : DateTimeOffset.UtcNow;
@@ -1440,7 +1457,7 @@ public sealed class ProtocolTokenService(
             // unscoped. The transformer below may still overwrite these deliberately — a
             // context-bound exchange re-binding to another organization is its whole purpose — but it
             // has to say so rather than inherit silence.
-            OrganizationId = ExtractString(tokenClaims, "org_id"),
+            OrganizationId = subjectOrganizationId,
             OrganizationSlug = ExtractString(tokenClaims, "org_slug"),
             OrganizationName = ExtractString(tokenClaims, "org_name"),
             // Not carried: OrganizationExplicitlySelected. It governs the refresh carry-forward, and
@@ -2106,7 +2123,7 @@ public sealed class ProtocolTokenService(
     /// </para>
     /// </remarks>
     private async Task RunIssuanceGateAsync(
-        string clientId, string? subjectId, string grantType, IReadOnlyList<string> scopes, CancellationToken ct)
+        string clientId, OidcSubject? subject, string grantType, IReadOnlyList<string> scopes, CancellationToken ct)
     {
         // Nothing registered, nothing to run — and nothing allocated either, because this is the hot
         // path for every interactive token in the deployment.
@@ -2115,7 +2132,13 @@ public sealed class ProtocolTokenService(
         try
         {
             await Hooks.RunOnTokenIssuingAsync(
-                new TokenIssuanceContext(clientId, subjectId, grantType, scopes, null), ct);
+                new TokenIssuanceContext(clientId, subject?.SubjectId, grantType, scopes, null)
+                {
+                    // A gate deciding "may this person have a token for this application" almost
+                    // always needs the third term: which customer they are acting for.
+                    OrganizationId = subject?.OrganizationId,
+                    OrganizationSlug = subject?.OrganizationSlug,
+                }, ct);
         }
         catch (ProtocolTokenException)
         {
@@ -2125,7 +2148,7 @@ public sealed class ProtocolTokenService(
         {
             logger.LogInformation(
                 "Token issuance refused by a host hook. Client: {ClientId}, Subject: {SubjectId}, Grant: {GrantType}",
-                clientId, subjectId, grantType);
+                clientId, subject?.SubjectId, grantType);
             throw new ProtocolTokenException("access_denied", ex.Message);
         }
     }
@@ -2139,7 +2162,7 @@ public sealed class ProtocolTokenService(
         var scopeList = scopes.ToList();
 
         await RunIssuanceGateAsync(
-            client.ClientId, subject.SubjectId, GrantTypes.DeviceCode, scopeList, ct);
+            client.ClientId, subject, GrantTypes.DeviceCode, scopeList, ct);
 
         var accessToken = await MintAccessTokenAsync(subject, client, scopeList, ct: ct);
 

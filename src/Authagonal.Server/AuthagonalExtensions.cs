@@ -50,6 +50,57 @@ public static class AuthagonalExtensions
     /// Full single-tenant registration. Calls <see cref="AddAuthagonalCore"/> and adds
     /// singleton stores, KeyManager, background services, and other single-tenant infrastructure.
     /// </summary>
+    /// <summary>
+    /// Interfaces whose only registration in <see cref="AddAuthagonalCore"/> is an empty, read-only
+    /// in-memory fallback: the last resort for a host that wires no durable store at all.
+    /// </summary>
+    /// <remarks>
+    /// They have to be lifted out of the way before a storage provider registers, and put back after.
+    /// Both sides use <c>TryAdd</c>, and <c>TryAdd</c> keeps the FIRST registration rather than the
+    /// best one — so with the fallback already in the collection the provider's own registration was
+    /// not merely losing, it never happened, and no amount of inspecting the collection afterwards
+    /// could tell that a durable store had been available. The effect on a batteries-included host was
+    /// that organizations could never be created and a SCIM group→role mapping could never be read:
+    /// the store resolved, answered empty forever and refused every write, with nothing logged.
+    /// </remarks>
+    private static readonly Type[] InMemoryFallbackServices =
+    [
+        typeof(IOrganizationStore),
+        typeof(IOrganizationMembershipStore),
+        typeof(IScimGroupRoleMappingStore),
+    ];
+
+    /// <summary>
+    /// Removes the fallback registrations so a storage provider's <c>TryAdd</c> actually takes effect.
+    /// Only removes a descriptor whose implementation is the known fallback type, so a host's own
+    /// deliberate store — registered before this call — is left exactly where it is.
+    /// </summary>
+    private static void LiftInMemoryFallbacks(IServiceCollection services)
+    {
+        foreach (var descriptor in services
+            .Where(d => InMemoryFallbackServices.Contains(d.ServiceType) && IsInMemoryFallback(d))
+            .ToList())
+        {
+            services.Remove(descriptor);
+        }
+
+        static bool IsInMemoryFallback(ServiceDescriptor d) =>
+            d.ImplementationType == typeof(InMemoryOrganizationStore)
+            || d.ImplementationType == typeof(InMemoryOrganizationMembershipStore)
+            || d.ImplementationType == typeof(InMemoryScimGroupRoleMappingStore);
+    }
+
+    /// <summary>
+    /// Puts the fallbacks back, by <c>TryAdd</c>, so they apply only where the provider supplied
+    /// nothing.
+    /// </summary>
+    private static void RestoreInMemoryFallbacks(IServiceCollection services)
+    {
+        services.TryAddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
+        services.TryAddSingleton<IOrganizationMembershipStore, InMemoryOrganizationMembershipStore>();
+        services.TryAddSingleton<IScimGroupRoleMappingStore, InMemoryScimGroupRoleMappingStore>();
+    }
+
     public static IServiceCollection AddAuthagonal(this IServiceCollection services, IConfiguration configuration, Action<ClusteringBuilder>? configureClustering = null)
     {
         services.AddAuthagonalCore(configuration, configureClustering);
@@ -70,6 +121,9 @@ public static class AuthagonalExtensions
         // the UserFirstNames / UserLastNames index writes (which use a single hot
         // partition and cap throughput at ~2k ops/sec at scale).
         var nameIndexesEnabled = configuration.GetValue("Storage:NameIndexesEnabled", true);
+        // Out of the way before the provider registers — see LiftInMemoryFallbacks for why "after"
+        // cannot work.
+        LiftInMemoryFallbacks(services);
         if (!services.Any(d => d.ServiceType == typeof(Authagonal.Core.Stores.IUserStore)))
         {
             if (!string.IsNullOrWhiteSpace(tableServiceUri))
@@ -85,6 +139,9 @@ public static class AuthagonalExtensions
                 throw new InvalidOperationException("Either Storage:ConnectionString or Storage:TableServiceUri must be configured");
             }
         }
+
+        // …and back afterwards, by TryAdd, so they apply only where the provider supplied nothing.
+        RestoreInMemoryFallbacks(services);
 
         // Data protection
         var dataProtection = services.AddDataProtection()

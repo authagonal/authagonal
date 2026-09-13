@@ -44,7 +44,9 @@ await organizationStore.UpsertAsync(new Organization
 });
 ```
 
-`Slug` must be unique within the tenant; a store rejects an upsert whose slug is already held by a different organization, because two records answering one slug would make the `organization` parameter ambiguous.
+`Slug` must match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` — 1 to 64 characters of lowercase letters, digits and interior hyphens, with no leading or trailing hyphen. Lowercase because the `organization` parameter is lowercased before the slug lookup, so an uppercase slug would be a value no request could ever resolve.
+
+`Slug` must be unique within the tenant, and **ids and slugs share one namespace**: a store rejects an upsert whose slug is already held by another organization, and equally one whose slug equals another organization's id, or whose id equals another's slug. Two records answering one value would make the `organization` parameter mean one organization while every stored id means another.
 
 Both `Id` and `Slug` are immutable in practice. Relying parties compare them against the instance they are serving and will hard-code them, so changing either is an outage with no error message. `DisplayName` is freely mutable and is what a screen renders.
 
@@ -78,6 +80,7 @@ Three rules bound it:
 - **Only an explicitly selected organization contributes roles** — one named by the `organization` parameter or by a single-entry client restriction. An organization inherited from `AuthUser.OrganizationId` contributes none, the same asymmetry the membership gate has.
 - **Only an `active` membership contributes.** An invited-but-unaccepted or suspended member grants nothing, exactly as they authorize nothing.
 - **Roles never cross organizations.** They are read from the membership row keyed by the selected organization, so a role held in one cannot reach a token issued for another.
+- **Reserved prefixes are stripped.** A role beginning `tenant:` or `platform:` is dropped at the union and logged at Warning. A membership row is customer-scoped data, so a membership able to grant `tenant:admin` would turn "may manage my own organization" into "may administer the tenant". Directly-assigned roles and SCIM group→role mappings are unaffected: those are written by an operator through an authenticated admin surface, which is the authority a membership row does not have.
 
 Roles are re-read from the membership row on every refresh rotation, so changing them reaches a live session at its next refresh.
 
@@ -96,6 +99,8 @@ GET /connect/authorize
   &organization=international-sos
   &code_challenge=...&code_challenge_method=S256
 ```
+
+The value must match `^[A-Za-z0-9._~-]{1,200}$` (the RFC 3986 unreserved set); anything else is `invalid_request`. It is resolved as a slug first — lowercased, since slugs are stored lowercase — and then as an id, which is matched exactly, because an id is opaque and lowercasing it would name a different organization.
 
 `org_slug` and `org_id` are accepted as aliases — both are in the wild at other providers, and quietly ignoring the one this server did not pick is worse than accepting both. Sending two that name *different* organizations is refused with `invalid_request`: the request means two things, and whichever the server chose, the relying party would have been told the other. Repeating any of the three is refused for the same reason `redirect_uri` is.
 
@@ -149,17 +154,19 @@ So re-tagging an account does not change what userinfo says about a token alread
 
 **`/connect/introspect`** includes `org_id` and `org_slug` when the token carries them. A resource server that validates the JWT itself reads them off the token; one that introspects instead now gets the same answer.
 
-**RFC 8693 token exchange** carries `org_id`, `org_slug` and `org_name` from the subject token onto the exchanged one. An exchange is a projection of an existing session, and a projection that dropped the organization it was acting for would be unattributed rather than narrower. A host's `ITokenExchangeSubjectTransformer` may still re-bind the exchange to another organization deliberately — that is what context-bound exchanges are for — but it has to say so.
+**RFC 8693 token exchange** carries `org_id`, `org_slug` and `org_name` from the subject token onto the exchanged one, and enforces the **exchanging** client's `RestrictedToOrganizationIds` against them: a client registered to serve one customer cannot exchange another customer's token, and cannot exchange a token that carries no organization at all. A refusal is `invalid_target`, matching the other target-policy refusals on that path. An exchange is a projection of an existing session, and a projection that dropped the organization it was acting for would be unattributed rather than narrower. A host's `ITokenExchangeSubjectTransformer` may still re-bind the exchange to another organization deliberately — that is what context-bound exchanges are for — but it has to say so.
 
 ## Refresh
 
-The organization a grant was issued for is carried across every refresh rotation, and re-checked on each one. Three things therefore take effect on the next rotation rather than waiting out the refresh lifetime:
+The organization a grant was issued for is carried across every refresh rotation, and re-checked on each one. Three things therefore take effect at the next rotation rather than waiting out the refresh lifetime:
 
 - revoking or suspending a membership,
 - disabling an organization (`Enabled = false`),
 - narrowing a client's `RestrictedToOrganizationIds`.
 
-Each ends the refresh chain rather than re-minting.
+**Each one refuses the refresh; none of them revokes the grant.** The presented refresh token is left unconsumed and the family is left intact, so the chain stays refusable for as long as the condition holds and resumes the moment it stops holding — restoring a membership, or re-enabling an organization, brings the session back with no fresh sign-in. The grant still expires on its own absolute lifetime. This is the same shape as a deactivated user, whose refreshes are refused while `IsActive` is false.
+
+To actually end a session, revoke the grant: `POST /connect/revocation` with the refresh token, or `GrantRevocation` on the host side. Disabling an organization is a gate, not a revocation.
 
 A grant that merely inherited the account's organization is re-derived on every rotation instead, so re-tagging an account still takes effect.
 

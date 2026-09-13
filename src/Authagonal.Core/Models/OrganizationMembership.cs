@@ -25,10 +25,18 @@ public sealed class OrganizationMembership
     /// people.
     /// </summary>
     /// <remarks>
-    /// Carried on the model from the start so stores persist it, but NOT yet unioned into the
-    /// <c>roles</c> claim — org-scoped role resolution is its own change. Until then this is
-    /// recorded membership metadata, and effective roles remain
-    /// <see cref="AuthUser.Roles"/> ∪ SCIM-group-granted roles exactly as before.
+    /// Unioned into the <c>roles</c> claim alongside <see cref="AuthUser.Roles"/> and the
+    /// SCIM-group-granted set, under the same <c>roles</c> scope gate — but only when this
+    /// organisation was EXPLICITLY selected by the request and only from an
+    /// <see cref="MembershipStatus.Active"/> row. An organisation merely inherited from the account
+    /// contributes none, the same asymmetry the membership gate has. Roles carrying a reserved prefix
+    /// (see <c>ReservedRolePrefixes</c>) are dropped at the union: a membership is customer-scoped
+    /// data and must not be able to mint tenant- or platform-level authority.
+    /// <para>
+    /// Re-read on every refresh rotation, so changing a member's roles reaches a live session at its
+    /// next refresh. They are read from the row keyed by the SELECTED organisation, so a role held in
+    /// one organisation can never reach a token issued for another.
+    /// </para>
     /// </remarks>
     public List<string> Roles { get; set; } = [];
 

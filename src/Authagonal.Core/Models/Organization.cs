@@ -54,7 +54,13 @@ public sealed class Organization
 
     /// <summary>
     /// Disabled organisations mint no tokens. Checked at authorize AND on every refresh, so disabling
-    /// one ends live sessions at their next rotation rather than only blocking new logins.
+    /// one stops live sessions at their next rotation rather than only blocking new logins.
+    /// </summary>
+    /// <remarks>
+    /// Each refresh is REFUSED while the organisation is disabled; the grant itself is not revoked and
+    /// is left unconsumed, so re-enabling the organisation resumes the session without a fresh
+    /// sign-in, and the chain still dies on its own absolute lifetime. Ending a session outright is
+    /// grant revocation, which this flag is not.
     /// </summary>
     public bool Enabled { get; set; } = true;
 

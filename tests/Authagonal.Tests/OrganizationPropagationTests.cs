@@ -226,6 +226,119 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
         Assert.False(claims.ContainsKey("org_slug"));
     }
 
+    /// F6. The exchanging client's own restriction was never consulted on this path: copying org_id
+    /// across from the subject token meant a client registered to serve customer A could be handed any
+    /// user's token for customer B and exchange it into a token that still said B. RestrictedTo is a
+    /// statement about which customers a client may act for, and an exchange is it acting.
+    [Fact]
+    public async Task Exchange_RefusesAnOrganizationTheExchangingClientMayNotServe()
+    {
+        await SeedExchangeClientAsync(restrictedTo: ["org-b"]);
+        var tokens = await AuthorizeAndRedeemAsync("organization=acme", "openid profile");
+
+        var exchanged = await ExchangeAsync(tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, exchanged.StatusCode);
+        var body = await exchanged.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_target", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Exchange_AllowsAnOrganizationOnTheClientsList()
+    {
+        await SeedExchangeClientAsync(restrictedTo: ["org-a"]);
+        var tokens = await AuthorizeAndRedeemAsync("organization=acme", "openid profile");
+
+        var exchanged = await ExchangeAsync(tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, exchanged.StatusCode);
+
+        var body = await exchanged.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("org-a", ReadJwt(body.GetProperty("access_token").GetString()!)["org_id"]);
+    }
+
+    /// A restricted client cannot launder an unattributed token either: no organization on the subject
+    /// token is not the same as permission to act for any.
+    [Fact]
+    public async Task Exchange_RestrictedClient_RefusesATokenWithNoOrganization()
+    {
+        await SeedExchangeClientAsync(restrictedTo: ["org-a"]);
+        var tokens = await AuthorizeAndRedeemAsync(null, "openid profile");
+
+        var exchanged = await ExchangeAsync(tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, exchanged.StatusCode);
+        var body = await exchanged.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_target", body.GetProperty("error").GetString());
+    }
+
+    // -----------------------------------------------------------------------
+    // F9 — the parameter's shape, and slug case
+    // -----------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("a/b")]
+    [InlineData("a#b")]
+    [InlineData("a b")]
+    [InlineData("a\u0001b")]
+    [InlineData("../acme")]
+    public async Task Organization_MalformedValueIsRefused(string value)
+    {
+        var response = await _client.GetAsync(AuthorizeUrl($"organization={Uri.EscapeDataString(value)}", "openid"));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        var query = HttpUtility.ParseQueryString(new Uri(response.Headers.Location!.ToString()).Query);
+        Assert.Equal("invalid_request", query["error"]);
+    }
+
+    /// Slugs are stored lowercase, so the parameter is lowercased before the slug lookup — otherwise
+    /// `Acme` would be a value no stored slug could ever answer.
+    [Fact]
+    public async Task Organization_IsLowercasedForTheSlugLookup()
+    {
+        var tokens = await AuthorizeAndRedeemAsync("organization=ACME", "openid profile");
+        Assert.Equal("org-a", ReadJwt(tokens.AccessToken)["org_id"]);
+    }
+
+    /// Ids stay exact-match: lowercasing an opaque id would resolve a different organisation from the
+    /// one named, or none at all.
+    [Fact]
+    public async Task Organization_IdLookupIsCaseSensitive()
+    {
+        _factory.OrganizationStore.With("OrgMixedCase", "mixed", "Mixed");
+        _factory.OrganizationMembershipStore.With("OrgMixedCase", _user.Id);
+
+        var byExactId = await AuthorizeAndRedeemAsync("organization=OrgMixedCase", "openid profile");
+        Assert.Equal("OrgMixedCase", ReadJwt(byExactId.AccessToken)["org_id"]);
+
+        var response = await _client.GetAsync(AuthorizeUrl("organization=orgmixedcase", "openid"));
+        var query = HttpUtility.ParseQueryString(new Uri(response.Headers.Location!.ToString()).Query);
+        Assert.Equal("access_denied", query["error"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // F13 — the issuance gate sees the organization
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task IssuanceGate_ObservesTheOrganization()
+    {
+        await AuthorizeAndRedeemAsync("organization=acme", "openid profile");
+
+        var call = Assert.Single(_factory.AuthHook.IssuanceGateCalls);
+        Assert.Equal("org-a", call.OrganizationId);
+        Assert.Equal("acme", call.OrganizationSlug);
+    }
+
+    [Fact]
+    public async Task IssuanceGate_WithNoOrganization_SeesNone()
+    {
+        await AuthorizeAndRedeemAsync(null, "openid profile");
+
+        var call = Assert.Single(_factory.AuthHook.IssuanceGateCalls);
+        Assert.Null(call.OrganizationId);
+        Assert.Null(call.OrganizationSlug);
+    }
+
     // -----------------------------------------------------------------------
     // Organization-scoped roles on the token
     // -----------------------------------------------------------------------
@@ -336,14 +449,20 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
 
     private sealed record Tokens(string AccessToken, string? IdToken);
 
-    private async Task<Tokens> AuthorizeAndRedeemAsync(string? extra, string scope)
+    private string AuthorizeUrl(string? extra, string scope, string challenge = "")
     {
-        var (verifier, challenge) = Pkce();
-        var url = $"/connect/authorize?client_id={AuthagonalTestFactory.TestClientId}" +
+        if (challenge.Length == 0) challenge = Pkce().Challenge;
+        return $"/connect/authorize?client_id={AuthagonalTestFactory.TestClientId}" +
             $"&response_type=code&redirect_uri={Uri.EscapeDataString(RedirectUri)}" +
             $"&scope={Uri.EscapeDataString(scope)}&state=xyz" +
             $"&code_challenge={challenge}&code_challenge_method=S256" +
             (string.IsNullOrEmpty(extra) ? "" : $"&{extra}");
+    }
+
+    private async Task<Tokens> AuthorizeAndRedeemAsync(string? extra, string scope)
+    {
+        var (verifier, challenge) = Pkce();
+        var url = AuthorizeUrl(extra, scope, challenge);
 
         var authorize = await _client.GetAsync(url);
         Assert.Equal(HttpStatusCode.Redirect, authorize.StatusCode);
@@ -389,7 +508,7 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    private async Task SeedExchangeClientAsync()
+    private async Task SeedExchangeClientAsync(string[]? restrictedTo = null)
     {
         var hasher = _factory.Services.GetRequiredService<Authagonal.Server.Services.PasswordHasher>();
         await _factory.ClientStore.UpsertAsync(new OAuthClient
@@ -403,6 +522,7 @@ public sealed class OrganizationPropagationTests : IAsyncLifetime
             AllowedScopes = ["openid", "profile", "roles"],
             Audiences = ["https://api.test/v1"],
             AccessTokenLifetimeSeconds = 3600,
+            RestrictedToOrganizationIds = [.. restrictedTo ?? []],
         });
     }
 

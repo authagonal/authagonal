@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Web;
 using Authagonal.Core.Models;
 using Authagonal.Protocol.Services;
@@ -246,7 +247,7 @@ internal sealed class AuthorizeRequest
 /// The hosts differ in how they authenticate the user (login UI vs. Challenge), consent,
 /// and provisioning — everything protocol-shaped lives here.
 /// </summary>
-internal static class AuthorizeRequestSupport
+internal static partial class AuthorizeRequestSupport
 {
     /// <summary>
     /// Upper bound on the <c>organization</c> parameter, so an unbounded value cannot be pushed
@@ -254,6 +255,20 @@ internal static class AuthorizeRequestSupport
     /// construction; the same ceiling SCIM tokens put on their organization binding.
     /// </summary>
     private const int MaxOrganizationLength = 200;
+
+    /// <summary>
+    /// The characters an <c>organization</c> value may contain: RFC 3986 unreserved, which covers every
+    /// organisation slug and every id shape this product mints.
+    /// </summary>
+    /// <remarks>
+    /// A length cap alone is not a charset. The value is echoed into logs, used as a storage lookup key
+    /// and, before this, reflected into an <c>error_description</c> — so a path separator, a fragment
+    /// marker or a control character in it is a value that means one thing to this server and another
+    /// to whatever reads it next. Refusing the shape is cheaper and more honest than escaping it at
+    /// every consumer.
+    /// </remarks>
+    [GeneratedRegex("^[A-Za-z0-9._~-]{1,200}$", RegexOptions.CultureInvariant)]
+    private static partial Regex OrganizationPattern();
 
     /// <summary>
     /// Runs the redirect_uri → response_type → scope → resource → PKCE validation sequence.
@@ -318,9 +333,10 @@ internal static class AuthorizeRequestSupport
             return BuildErrorRedirect(redirectUri, "invalid_request",
                 "organization, org_slug and org_id must not name different organizations", state, issuer);
 
-        if (request.Organization is { Length: > MaxOrganizationLength })
+        if (request.Organization is { } organization && !OrganizationPattern().IsMatch(organization))
             return BuildErrorRedirect(redirectUri, "invalid_request",
-                $"organization must be {MaxOrganizationLength} characters or fewer", state, issuer);
+                $"organization must be 1-{MaxOrganizationLength} characters of letters, digits, "
+                + "'.', '_', '~' or '-'", state, issuer);
 
         // OIDC Core §3.1.2.1: "If this parameter contains none with any other value, an error is
         // returned." The combination is self-contradictory — none forbids UI, every other value asks
