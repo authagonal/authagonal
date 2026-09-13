@@ -275,6 +275,22 @@
   means the genuine conflict it always was. The slug pattern is no longer a copy of the regex kept
   in `Organization.Slug`'s remarks — it now calls `OrganizationSlug.Validate` (`Authagonal.Core`),
   the one place the rule lives for every store to share.
+- **`DynamoOrganizationStore.UpsertAsync` self-heals a crash between the slug insert and the
+  organization write, shares the slug rule with every other store, and
+  `DynamoOrganizationMembershipStore.DeleteAsync` now tombstones only the row it actually
+  removed.** Slug-first ordering (see above) means a process that died right after
+  `DynamoTable.PutIfAbsentAsync` claimed the slug row but before the organization item itself was
+  written leaves a slug row owned by an id with no organization item behind it — and a retry of that
+  exact create used to read its own earlier claim back as "already held by another organization,"
+  permanently. `UpsertAsync` now checks the pre-existing slug row's owner on that path: the same id
+  means self-heal (finish the write), a different id means the genuine conflict it always was. The
+  slug pattern is no longer a copy of the regex kept in `Organization.Slug`'s remarks — it now calls
+  `OrganizationSlug.Validate` (`Authagonal.Core`), the one place the rule lives for every store to
+  share. Separately, `DeleteAsync` wrote a tombstone for both membership rows unconditionally, even
+  when one (or both) never existed, so deleting an already-gone or partially-orphaned membership
+  fabricated change-log entries for rows nothing had actually removed; it now deletes each side with
+  `DynamoTable.DeleteIfExistsReturningAsync` (`ReturnValues=ALL_OLD`) independently and tombstones
+  only the row that came back non-null.
 
 ### Changed
 

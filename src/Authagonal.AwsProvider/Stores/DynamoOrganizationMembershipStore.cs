@@ -11,9 +11,12 @@ namespace Authagonal.AwsProvider.Stores;
 /// (pk = "org|{orgId}", sk = userId) answers the point-read <see cref="GetAsync"/> and the
 /// <see cref="ListByOrganizationAsync"/> query; a reverse row (pk = "user|{userId}", sk = orgId)
 /// answers <see cref="ListByUserAsync"/>. Both rows carry the full membership document and are kept
-/// in sync. <see cref="DeleteAsync"/> removes both unconditionally — it does not check either row's
-/// existence first, so a membership left inconsistent by an earlier partial write (one row present,
-/// the other missing) is still fully cleaned up rather than left half-orphaned forever.</summary>
+/// in sync. <see cref="DeleteAsync"/> attempts both sides independently and unconditionally — it does
+/// not check either row's existence first and bail out, so a membership left inconsistent by an
+/// earlier partial write (one row present, the other missing) is still fully cleaned up rather than
+/// left half-orphaned forever — but it tombstones only the row that actually existed, so deleting
+/// something already gone (on one side or both) does not fabricate change-log entries for rows that
+/// were never there.</summary>
 public sealed class DynamoOrganizationMembershipStore(
     DynamoTable orgMembers,
     DynamoTable userMemberships,
@@ -71,18 +74,20 @@ public sealed class DynamoOrganizationMembershipStore(
         var orgPk = OrgPk(organizationId);
         var userPk = UserPk(userId);
 
-        // Unconditional on both sides — no existence check, and deliberately so. DynamoTable.DeleteAsync
-        // already succeeds when a row is gone; checking the forward row first (as the dual-index token
-        // store does) would leave a reverse row stranded forever if the two ever fell out of sync (a
-        // crashed upsert, a hand-edited row), because the store would see "forward missing" and return
-        // before ever touching the reverse table.
-        await orgMembers.DeleteAsync(orgPk, userId, ct).ConfigureAwait(false);
-        await userMemberships.DeleteAsync(userPk, organizationId, ct).ConfigureAwait(false);
+        // Conditional delete-returning on each side independently — no existence check that bails out
+        // early (checking the forward row first, as the dual-index token store does, would leave a
+        // reverse row stranded forever if the two ever fell out of sync), but also no tombstone for a
+        // row that was never there: ALL_OLD comes back null when nothing was removed, and that is
+        // exactly when this store should stay silent about that row in the change log.
+        var forwardRemoved = await orgMembers.DeleteIfExistsReturningAsync(orgPk, userId, ct).ConfigureAwait(false);
+        var reverseRemoved = await userMemberships.DeleteIfExistsReturningAsync(userPk, organizationId, ct).ConfigureAwait(false);
 
         if (tombstones is not null)
         {
-            await tombstones.WriteAsync("OrganizationMembers", orgPk, userId, ct).ConfigureAwait(false);
-            await tombstones.WriteAsync("UserMemberships", userPk, organizationId, ct).ConfigureAwait(false);
+            if (forwardRemoved is not null)
+                await tombstones.WriteAsync("OrganizationMembers", orgPk, userId, ct).ConfigureAwait(false);
+            if (reverseRemoved is not null)
+                await tombstones.WriteAsync("UserMemberships", userPk, organizationId, ct).ConfigureAwait(false);
         }
     }
 

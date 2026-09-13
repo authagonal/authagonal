@@ -169,6 +169,39 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
         Assert.NotNull(await store.GetBySlugAsync("acme"));
     }
 
+    /// R2: a crash between writing the slug item and writing the organization item leaves an orphaned
+    /// slug row owned by this same id with no organization item — the atomic insert-only put on a
+    /// retry of the SAME create fails exactly as a losing race would ("already held"), so it must be
+    /// told apart from one by self-healing rather than refusing forever.
+    [Fact]
+    public async Task OrganizationStore_CreateRetryAfterCrashBetweenSlugAndOrgWrite_Succeeds()
+    {
+        var orgsTable = await T("crashOrgs");
+        var slugsTable = await T("crashOrgSlugs");
+        var store = new DynamoOrganizationStore(orgsTable, slugsTable, EnvPartitioner.Live);
+
+        // Simulate the crash: only the slug row exists, naming an organization that was never
+        // written.
+        var slugItem = new Dictionary<string, AttributeValue>
+        {
+            ["pk"] = new AttributeValue { S = EnvPartitioner.Live.PK("orgslug") },
+            ["sk"] = new AttributeValue { S = "acme" },
+            ["data"] = new AttributeValue { S = "org-1" },
+        };
+        await slugsTable.PutAsync(slugItem);
+
+        Assert.Null(await store.GetAsync("org-1")); // the organization item was never written
+        Assert.Null(await store.GetBySlugAsync("acme")); // GetBySlugAsync chains to it, so it isn't resolvable yet either
+
+        // Retrying the same create must self-heal, not fail as "already held" by itself.
+        await store.UpsertAsync(new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow });
+
+        var org = await store.GetAsync("org-1");
+        Assert.NotNull(org);
+        Assert.Equal("Acme", org!.DisplayName);
+        Assert.Equal("org-1", (await store.GetBySlugAsync("acme"))?.Id);
+    }
+
     /// Cross-namespace rule, direction 1: a NEW organization's slug must not equal another
     /// organization's id.
     [Fact]
@@ -411,8 +444,10 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
     }
 
     /// F18: delete must not early-return just because the forward row happens to be missing — it
-    /// still removes (and tombstones) whichever row IS present, so a membership left inconsistent by
-    /// an earlier partial write is fully cleaned up rather than left half-orphaned forever.
+    /// still removes whichever row IS present, so a membership left inconsistent by an earlier
+    /// partial write is fully cleaned up rather than left half-orphaned forever. R9: it tombstones
+    /// only the row that actually existed — the forward row was never there, so only the reverse
+    /// row's removal is recorded.
     [Fact]
     public async Task MembershipStore_Delete_RemovesBothRows_EvenWhenForwardItemIsMissing()
     {
@@ -441,8 +476,22 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
         await store.DeleteAsync("org-1", "u1"); // must not early-return because the forward row is missing
 
         Assert.Empty(await store.ListByUserAsync("u1")); // the orphaned reverse row is now gone
-        Assert.True(await SawOp(log, "OrganizationMembers", "D"));
-        Assert.True(await SawOp(log, "UserMemberships", "D"));
+        Assert.False(await SawOp(log, "OrganizationMembers", "D")); // never existed — no fabricated record
+        Assert.True(await SawOp(log, "UserMemberships", "D")); // the row that actually existed IS recorded
+    }
+
+    /// R9: deleting a membership that never existed on either side writes no tombstones at all.
+    [Fact]
+    public async Task MembershipStore_Delete_OfANonExistentMembership_WritesNoTombstones()
+    {
+        var log = await T("neverExistedTombstones");
+        var writer = new DynamoChangeWriter(log);
+        var store = await NewMembershipStoreAsync("neverExisted", tombstones: writer);
+
+        await store.DeleteAsync("org-none", "u-none");
+
+        Assert.False(await SawOp(log, "OrganizationMembers", "D"));
+        Assert.False(await SawOp(log, "UserMemberships", "D"));
     }
 
     [Fact]

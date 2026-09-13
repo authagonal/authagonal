@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Amazon.DynamoDBv2.Model;
 using Authagonal.AwsProvider.Dynamo;
 using Authagonal.Core.Models;
@@ -15,9 +14,11 @@ namespace Authagonal.AwsProvider.Stores;
 /// refuses to change it — and ids/slugs share no namespace, so a new organization is also refused
 /// when its slug reads as an existing organization's id or its id reads as an existing organization's
 /// slug. A brand-new slug is claimed with an insert-only conditional write before the organization
-/// document itself is written, so two concurrent creates for the same new slug cannot both
-/// succeed.</summary>
-public sealed partial class DynamoOrganizationStore(
+/// document itself is written, so two concurrent creates for the same new slug cannot both succeed;
+/// a crash between that write and the organization write is self-healed rather than refused forever,
+/// because the lost race and "this is my own half-finished create" look identical except for who owns
+/// the slug row already there.</summary>
+public sealed class DynamoOrganizationStore(
     DynamoTable organizations,
     DynamoTable slugs,
     EnvPartitioner partitioner,
@@ -25,9 +26,6 @@ public sealed partial class DynamoOrganizationStore(
 {
     private const string OrgPartition = "org";
     private const string SlugPartition = "orgslug";
-
-    [GeneratedRegex("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")]
-    private static partial Regex SlugFormat();
 
     public async Task<Organization?> GetAsync(string organizationId, CancellationToken ct = default)
     {
@@ -51,12 +49,8 @@ public sealed partial class DynamoOrganizationStore(
 
     public async Task UpsertAsync(Organization organization, CancellationToken ct = default)
     {
-        if (!SlugFormat().IsMatch(organization.Slug))
-        {
-            throw new ArgumentException(
-                $"Slug '{organization.Slug}' is invalid; slugs must match ^[a-z0-9](?:[a-z0-9-]{{0,62}}[a-z0-9])?$.",
-                nameof(organization));
-        }
+        // The shape a slug must have lives once on the model, not re-declared per store.
+        OrganizationSlug.Validate(organization.Slug);
 
         var orgPk = partitioner.PK(OrgPartition);
         var slugPk = partitioner.PK(SlugPartition);
@@ -99,10 +93,21 @@ public sealed partial class DynamoOrganizationStore(
         // common (non-racing) case, not a substitute for it.
         var slugItem = Dyn.Item(slugPk, organization.Slug);
         slugItem.PutS("data", organization.Id);
-        if (!await slugs.PutIfAbsentAsync(slugItem, ct).ConfigureAwait(false))
-            throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by another organization.");
-        if (tombstones is not null)
-            await tombstones.WriteUpsertAsync("OrganizationSlugs", slugPk, organization.Slug, ct).ConfigureAwait(false);
+        if (await slugs.PutIfAbsentAsync(slugItem, ct).ConfigureAwait(false))
+        {
+            if (tombstones is not null)
+                await tombstones.WriteUpsertAsync("OrganizationSlugs", slugPk, organization.Slug, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            // Lost the race — or this IS the winner, retrying after a crash between this write and
+            // the organization write below. Both look identical from here except for who the slug
+            // row names: the same id means self-heal by proceeding to (re)write the organization
+            // item rather than refusing forever; a different id is a genuine conflict.
+            var current = await slugs.GetAsync(slugPk, organization.Slug, ct).ConfigureAwait(false);
+            if (!string.Equals(current?.GetStr("data"), organization.Id, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by another organization.");
+        }
 
         await organizations.PutAsync(OrgItem(orgPk, organization), ct).ConfigureAwait(false);
         if (tombstones is not null)
