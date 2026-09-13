@@ -498,6 +498,13 @@ public static class AuthagonalExtensions
         services.TryAddSingleton<IProvisioningAppQuota, UnlimitedProvisioningAppQuota>();
         // SCIM group → role mappings (empty default; the cloud registers a per-tenant store).
         services.TryAddSingleton<IScimGroupRoleMappingStore, InMemoryScimGroupRoleMappingStore>();
+        // Organizations (empty defaults; the cloud registers per-tenant stores). Empty here IS the
+        // pre-organizations behaviour and not a degraded one: nothing can select an organization, so
+        // no membership gate engages, and a legacy AuthUser.OrganizationId keeps emitting org_id from
+        // the user record exactly as before. Registered rather than left unresolvable because the
+        // subject resolver takes both and every host builds one.
+        services.TryAddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
+        services.TryAddSingleton<IOrganizationMembershipStore, InMemoryOrganizationMembershipStore>();
         // The store wins when there is one, because the ADMIN API writes to the store.
         //
         // This was TryAddScoped<IProvisioningAppProvider, ConfigProvisioningAppProvider>() and nothing else,
