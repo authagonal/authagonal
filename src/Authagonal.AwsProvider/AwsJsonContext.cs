@@ -24,6 +24,8 @@ namespace Authagonal.AwsProvider;
 [JsonSerializable(typeof(ScimGroupRoleMapping))]
 [JsonSerializable(typeof(MfaCredential))]
 [JsonSerializable(typeof(MfaChallenge))]
+[JsonSerializable(typeof(Organization))]
+[JsonSerializable(typeof(OrganizationMembership))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 internal partial class AwsJsonContext : JsonSerializerContext;

@@ -254,6 +254,84 @@ public class DynamoStoreParityTests(DynamoFixture dynamo)
         Assert.Equal("r2", Assert.Single(await store.ListAsync()).Id);
     }
 
+    // ----- DynamoOrganizationStore ------------------------------------------------
+
+    [Fact]
+    public async Task OrganizationStore_CrudSlugLookup_SlugChange_AndConflict()
+    {
+        var store = new DynamoOrganizationStore(await T("pcOrgs"), await T("pcOrgSlugs"), EnvPartitioner.Live);
+
+        var acme = new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow };
+        await store.UpsertAsync(acme);
+        await store.UpsertAsync(new Organization { Id = "org-2", Slug = "globex", DisplayName = "Globex", CreatedAt = DateTimeOffset.UtcNow });
+
+        Assert.Equal("Acme", (await store.GetAsync("org-1"))?.DisplayName);
+        Assert.Null(await store.GetAsync("missing"));
+
+        // GetBySlugAsync is the point-read the `organization` authorize parameter resolves through.
+        Assert.Equal("org-1", (await store.GetBySlugAsync("acme"))?.Id);
+        Assert.Null(await store.GetBySlugAsync("nowhere"));
+
+        Assert.Equal(2, (await store.ListAsync()).Count);
+
+        // A slug already held by a different organization is refused.
+        var clash = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.UpsertAsync(new Organization { Id = "org-3", Slug = "acme", DisplayName = "Impostor", CreatedAt = DateTimeOffset.UtcNow }));
+        Assert.Contains("org-1", clash.Message, StringComparison.Ordinal);
+
+        // Renaming the slug drops the stale lookup row and the new one resolves.
+        acme.Slug = "acme-corp";
+        acme.UpdatedAt = DateTimeOffset.UtcNow;
+        await store.UpsertAsync(acme);
+        Assert.Null(await store.GetBySlugAsync("acme"));
+        Assert.Equal("org-1", (await store.GetBySlugAsync("acme-corp"))?.Id);
+
+        // The old slug is free again for a different organization.
+        await store.UpsertAsync(new Organization { Id = "org-4", Slug = "acme", DisplayName = "New Acme", CreatedAt = DateTimeOffset.UtcNow });
+        Assert.Equal("org-4", (await store.GetBySlugAsync("acme"))?.Id);
+
+        await store.DeleteAsync("org-1");
+        Assert.Null(await store.GetAsync("org-1"));
+        Assert.Null(await store.GetBySlugAsync("acme-corp"));
+        Assert.Equal(2, (await store.ListAsync()).Count);
+        await store.DeleteAsync("org-1"); // already gone — no-op
+    }
+
+    // ----- DynamoOrganizationMembershipStore ---------------------------------------
+
+    [Fact]
+    public async Task OrganizationMembershipStore_DualIndex_StaysInSync_ThroughUpsertAndDelete()
+    {
+        var store = new DynamoOrganizationMembershipStore(await T("pcOrgMembers"), await T("pcUserMemberships"), EnvPartitioner.Live);
+
+        await store.UpsertAsync(new OrganizationMembership { OrganizationId = "org-1", UserId = "u1", Status = MembershipStatus.Active, Roles = ["auditor"] });
+        await store.UpsertAsync(new OrganizationMembership { OrganizationId = "org-1", UserId = "u2", Status = MembershipStatus.Invited });
+        await store.UpsertAsync(new OrganizationMembership { OrganizationId = "org-2", UserId = "u1", Status = MembershipStatus.Active });
+
+        // GetAsync is the point read the token-issuance membership gate uses.
+        var m = await store.GetAsync("org-1", "u1");
+        Assert.NotNull(m);
+        Assert.Equal(MembershipStatus.Active, m!.Status);
+        Assert.Equal(["auditor"], m.Roles);
+        Assert.Null(await store.GetAsync("org-1", "missing"));
+
+        Assert.Equal(["org-1", "org-2"], (await store.ListByUserAsync("u1")).Select(x => x.OrganizationId).OrderBy(x => x));
+        Assert.Equal(["u1", "u2"], (await store.ListByOrganizationAsync("org-1")).Select(x => x.UserId).OrderBy(x => x));
+        Assert.Equal("u1", Assert.Single(await store.ListByOrganizationAsync("org-2")).UserId);
+
+        // Upsert replaces both rows in place.
+        await store.UpsertAsync(new OrganizationMembership { OrganizationId = "org-1", UserId = "u2", Status = MembershipStatus.Active });
+        Assert.Equal(MembershipStatus.Active, (await store.GetAsync("org-1", "u2"))?.Status);
+        Assert.Equal(MembershipStatus.Active, (await store.ListByUserAsync("u2")).Single().Status);
+
+        // Delete removes both the forward and reverse rows.
+        await store.DeleteAsync("org-1", "u1");
+        Assert.Null(await store.GetAsync("org-1", "u1"));
+        Assert.Equal("org-2", Assert.Single(await store.ListByUserAsync("u1")).OrganizationId);
+        Assert.Equal("u2", Assert.Single(await store.ListByOrganizationAsync("org-1")).UserId);
+        await store.DeleteAsync("org-1", "u1"); // already gone — no-op
+    }
+
     // ----- DynamoScimTokenStore --------------------------------------------------
 
     [Fact]
