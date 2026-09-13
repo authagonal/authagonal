@@ -1,3 +1,4 @@
+using Authagonal.AzureProvider.Entities;
 using Authagonal.AzureProvider.Stores;
 using Authagonal.Core.Models;
 using Authagonal.Core.Services;
@@ -109,27 +110,130 @@ public class TableOrganizationStoresTests(AzuriteFixture azurite)
     }
 
     [Fact]
-    public async Task Slug_change_removes_the_stale_slug_row()
+    public async Task UpsertAsync_rejects_a_slug_rename_and_changes_nothing()
     {
+        // F11: the slug is immutable. This replaces the old rename/stale-slug-row test — renaming is
+        // no longer a supported path at all, it is a refusal.
         var p = Prefix();
         var store = NewOrgStore(p);
         var org = Org("org1", "acme");
         await store.UpsertAsync(org);
 
-        org.Slug = "acme-renamed";
-        await store.UpsertAsync(org);
+        var renamed = Org("org1", "acme-renamed");
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.UpsertAsync(renamed));
+        Assert.Contains("acme", ex.Message);
+        Assert.Contains("acme-renamed", ex.Message);
 
-        Assert.Null(await store.GetBySlugAsync("acme"));
-        var bySlug = await store.GetBySlugAsync("acme-renamed");
-        Assert.NotNull(bySlug);
-        Assert.Equal("org1", bySlug!.Id);
+        // Nothing changed: the original slug still resolves and the attempted new one does not exist.
+        var stillThere = await store.GetAsync("org1");
+        Assert.Equal("acme", stillThere!.Slug);
+        Assert.Equal("org1", (await store.GetBySlugAsync("acme"))!.Id);
+        Assert.Null(await store.GetBySlugAsync("acme-renamed"));
+    }
 
-        // Exactly one row survives in the slug table for this organization — the stale one is gone,
-        // not merely shadowed.
+    [Theory]
+    [InlineData("")]
+    [InlineData("Acme")]      // uppercase not allowed
+    [InlineData("-acme")]     // cannot start with a hyphen
+    [InlineData("acme-")]     // cannot end with a hyphen
+    [InlineData("ac me")]     // no whitespace
+    [InlineData("ac_me")]     // underscore not allowed
+    public async Task UpsertAsync_rejects_a_slug_that_does_not_match_the_slug_pattern(string badSlug)
+    {
+        var p = Prefix();
+        var store = NewOrgStore(p);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.UpsertAsync(Org("org1", badSlug)));
+        Assert.Null(await store.GetAsync("org1"));
+    }
+
+    [Theory]
+    [InlineData("a")]
+    [InlineData("a-b")]
+    [InlineData("abc-123-xyz")]
+    public async Task UpsertAsync_accepts_slugs_matching_the_slug_pattern(string slug)
+    {
+        var p = Prefix();
+        var store = NewOrgStore(p);
+
+        await store.UpsertAsync(Org("org1", slug));
+        Assert.Equal(slug, (await store.GetAsync("org1"))!.Slug);
+    }
+
+    [Fact]
+    public async Task Concurrent_creates_with_the_same_new_slug_race_to_exactly_one_winner()
+    {
+        // F4: uniqueness is enforced by the storage layer's insert-only primitive, not a
+        // read-then-write check — so this must hold under real concurrency against Azurite, not just
+        // sequential calls.
+        var p = Prefix();
+        var store = NewOrgStore(p);
+
+        var results = await Task.WhenAll(
+            TryUpsert(store, Org("orgA", "acme")),
+            TryUpsert(store, Org("orgB", "acme")));
+
+        Assert.Single(results, r => r is null);
+        Assert.Single(results, r => r is InvalidOperationException);
+
+        var winner = await store.GetBySlugAsync("acme");
+        Assert.NotNull(winner);
+        Assert.True(winner!.Id is "orgA" or "orgB");
+
+        // The loser wrote nothing at all.
+        var loserId = winner.Id == "orgA" ? "orgB" : "orgA";
+        Assert.Null(await store.GetAsync(loserId));
+
+        // Exactly one slug row exists for "acme".
         var slugsTable = T(p, "OrganizationSlugs");
         var rows = new List<TableEntity>();
         await foreach (var e in slugsTable.QueryAsync<TableEntity>()) rows.Add(e);
         Assert.Single(rows);
+    }
+
+    private static async Task<Exception?> TryUpsert(TableOrganizationStore store, Organization org)
+    {
+        try
+        {
+            await store.UpsertAsync(org);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
+    }
+
+    [Fact]
+    public async Task UpsertAsync_rejects_a_slug_that_collides_with_an_existing_organizations_id()
+    {
+        var p = Prefix();
+        var store = NewOrgStore(p);
+        await store.UpsertAsync(Org("org-a", "org-a-slug"));
+
+        // A new organization whose SLUG equals org-a's ID.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.UpsertAsync(Org("org-b", "org-a")));
+        Assert.Contains("org-a", ex.Message);
+
+        Assert.Null(await store.GetAsync("org-b"));
+        Assert.Null(await store.GetBySlugAsync("org-a"));
+    }
+
+    [Fact]
+    public async Task UpsertAsync_rejects_an_id_that_collides_with_an_existing_organizations_slug()
+    {
+        var p = Prefix();
+        var store = NewOrgStore(p);
+        await store.UpsertAsync(Org("org-a", "acme"));
+
+        // A new organization whose ID equals org-a's SLUG.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.UpsertAsync(Org("acme", "org-b-slug")));
+        Assert.Contains("acme", ex.Message);
+
+        Assert.Null(await store.GetAsync("acme"));
+        Assert.Null(await store.GetBySlugAsync("org-b-slug"));
     }
 
     [Fact]
@@ -335,20 +439,33 @@ public class TableOrganizationStoresTests(AzuriteFixture azurite)
     }
 
     [Fact]
-    public async Task Organization_store_logs_the_stale_slug_delete_on_rename()
+    public async Task Membership_delete_repairs_an_orphaned_reverse_row_and_tombstones_both()
     {
+        // F18: an orphan — only the user-partitioned (reverse) row present, e.g. from a half-completed
+        // upsert or an out-of-band repair — must still have both its delete attempted and both
+        // tombstones written. No early return just because the forward row is already missing.
         var p = Prefix();
         var log = T(p, "Tombstones");
-        var store = NewOrgStore(p, changeWriter: new TableChangeWriter(log));
-        var org = Org("org1", "acme");
-        await store.UpsertAsync(org);
+        var membersTable = T(p, "OrganizationMembers");
+        var userMembershipsTable = T(p, "UserMemberships");
+        var store = new TableOrganizationMembershipStore(
+            membersTable, userMembershipsTable, EnvPartitioner.Live, new TableChangeWriter(log));
 
-        org.Slug = "acme-renamed";
-        await store.UpsertAsync(org);
+        var membership = Membership("org1", "user1");
+        var orphanRow = OrganizationMembershipEntity.FromModelForUser(membership);
+        orphanRow.PartitionKey = EnvPartitioner.Live.PK(orphanRow.PartitionKey);
+        await userMembershipsTable.UpsertEntityAsync(orphanRow, TableUpdateMode.Replace);
 
-        var deletes = await ChangeRows(log, "OrganizationSlugs", "D");
-        var deletedRow = Assert.Single(deletes);
-        Assert.Equal("acme", deletedRow.GetString("OrigRK"));
+        // The forward row genuinely does not exist.
+        Assert.Null(await store.GetAsync("org1", "user1"));
+
+        await store.DeleteAsync("org1", "user1");
+
+        // The orphaned reverse row is gone.
+        Assert.Empty(await store.ListByUserAsync("user1"));
+        // Both tombstones were written even though only one row ever existed.
+        Assert.Single(await ChangeRows(log, "OrganizationMembers", "D"));
+        Assert.Single(await ChangeRows(log, "UserMemberships", "D"));
     }
 
     [Fact]

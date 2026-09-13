@@ -59,8 +59,9 @@ public class ChangeLogBackupEquivalenceTests(AzuriteFixture azurite)
             userOrganizationsTable: T("UserOrganizations"));
     }
 
-    // The other two change-logged stores (same prefix + partitioner + change-log table as the user store).
-    private (TableScimGroupRoleMappingStore ScimMappings, TableProvisioningAppStore ProvApps) NewAuxStores(string prefix, EnvPartitioner env)
+    // The other change-logged stores (same prefix + partitioner + change-log table as the user store).
+    private (TableScimGroupRoleMappingStore ScimMappings, TableProvisioningAppStore ProvApps,
+        TableOrganizationStore Organizations, TableOrganizationMembershipStore Memberships) NewAuxStores(string prefix, EnvPartitioner env)
     {
         TableClient T(string name)
         {
@@ -71,7 +72,9 @@ public class ChangeLogBackupEquivalenceTests(AzuriteFixture azurite)
         var writer = new TableChangeWriter(T("Tombstones"));
         return (
             new TableScimGroupRoleMappingStore(T("ScimGroupRoleMappings"), env, writer),
-            new TableProvisioningAppStore(T("ProvisioningApps"), env, writer));
+            new TableProvisioningAppStore(T("ProvisioningApps"), env, writer),
+            new TableOrganizationStore(T("Organizations"), T("OrganizationSlugs"), env, writer),
+            new TableOrganizationMembershipStore(T("OrganizationMembers"), T("UserMemberships"), env, writer));
     }
 
     private static AuthUser User(string id, string email, string first, string last) => new()
@@ -126,7 +129,7 @@ public class ChangeLogBackupEquivalenceTests(AzuriteFixture azurite)
     {
         var prefix = $"eq{Guid.NewGuid():N}";
         var store = NewStore(prefix);
-        var (scimMappings, provApps) = NewAuxStores(prefix, EnvPartitioner.Live);
+        var (scimMappings, provApps, organizations, memberships) = NewAuxStores(prefix, EnvPartitioner.Live);
 
         // Seed (before the watermark)
         await store.CreateAsync(User("u1", "ada@acme.test", "Ada", "Lovelace"));
@@ -148,6 +151,14 @@ public class ChangeLogBackupEquivalenceTests(AzuriteFixture azurite)
         await store.CreateAsync(User("u4", "alan@acme.test", "Alan", "Turing"));                         // UserEmails, names
         await scimMappings.SetAsync(new ScimGroupRoleMapping { GroupId = "g1", Role = "tenant:admin" }); // ScimGroupRoleMappings
         await provApps.UpsertAsync(new ProvisioningAppConfig { AppId = "app1", Name = "App", CallbackUrl = "https://x.test" }); // ProvisioningApps
+        await organizations.UpsertAsync(new Organization
+        {
+            Id = "org1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow,
+        }); // Organizations, OrganizationSlugs
+        await memberships.UpsertAsync(new OrganizationMembership
+        {
+            OrganizationId = "org1", UserId = "u1", Status = MembershipStatus.Active, CreatedAt = DateTimeOffset.UtcNow,
+        }); // OrganizationMembers, UserMemberships
 
         var scanDir = Path.Combine(Path.GetTempPath(), $"scan{Guid.NewGuid():N}");
         var logDir = Path.Combine(Path.GetTempPath(), $"log{Guid.NewGuid():N}");
@@ -207,7 +218,7 @@ public class ChangeLogBackupEquivalenceTests(AzuriteFixture azurite)
         var prefix = $"env{Guid.NewGuid():N}";
         var env = new EnvPartitioner("staging");
         var store = NewStore(prefix, env);
-        var (scimMappings, provApps) = NewAuxStores(prefix, env);
+        var (scimMappings, provApps, organizations, memberships) = NewAuxStores(prefix, env);
 
         await store.CreateAsync(User("u1", "ada@acme.test", "Ada", "Lovelace"));
         await store.CreateAsync(User("u2", "grace@acme.test", "Grace", "Hopper"));
@@ -223,6 +234,14 @@ public class ChangeLogBackupEquivalenceTests(AzuriteFixture azurite)
         await store.CreateAsync(User("u4", "alan@acme.test", "Alan", "Turing"));
         await scimMappings.SetAsync(new ScimGroupRoleMapping { GroupId = "g1", Role = "tenant:admin" });
         await provApps.UpsertAsync(new ProvisioningAppConfig { AppId = "app1", Name = "App", CallbackUrl = "https://x.test" });
+        await organizations.UpsertAsync(new Organization
+        {
+            Id = "org1", Slug = "acme", DisplayName = "Acme", CreatedAt = DateTimeOffset.UtcNow,
+        }); // Organizations, OrganizationSlugs
+        await memberships.UpsertAsync(new OrganizationMembership
+        {
+            OrganizationId = "org1", UserId = "u1", Status = MembershipStatus.Active, CreatedAt = DateTimeOffset.UtcNow,
+        }); // OrganizationMembers, UserMemberships
 
         var scanDir = Path.Combine(Path.GetTempPath(), $"scan{Guid.NewGuid():N}");
         var logDir = Path.Combine(Path.GetTempPath(), $"log{Guid.NewGuid():N}");

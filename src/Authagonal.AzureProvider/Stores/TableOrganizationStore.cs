@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Azure;
 using Azure.Data.Tables;
 using Authagonal.Core.Models;
@@ -13,6 +14,15 @@ public sealed class TableOrganizationStore(
     EnvPartitioner partitioner,
     IChangeWriter? changeWriter = null) : IOrganizationStore
 {
+    /// <summary>
+    /// Lowercase, URL-safe, 1-64 chars, no leading/trailing hyphen. Validated on every
+    /// <see cref="UpsertAsync"/> — the slug is what a relying party hard-codes into the
+    /// <c>organization</c> authorize parameter, so it is checked the same way whether it came from an
+    /// admin UI or a provisioning script.
+    /// </summary>
+    private static readonly Regex SlugPattern = new(
+        "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$", RegexOptions.Compiled);
+
     public async Task<Organization?> GetAsync(string organizationId, CancellationToken ct = default)
     {
         try
@@ -55,60 +65,93 @@ public sealed class TableOrganizationStore(
 
     public async Task UpsertAsync(Organization organization, CancellationToken ct = default)
     {
+        if (!SlugPattern.IsMatch(organization.Slug))
+            throw new ArgumentException(
+                $"Slug '{organization.Slug}' is invalid: it must match ^[a-z0-9](?:[a-z0-9-]{{0,62}}[a-z0-9])?$.",
+                nameof(organization));
+
         var orgsPk = partitioner.PK(OrganizationEntity.OrganizationsPartition);
         var slugsPk = partitioner.PK(OrganizationSlugEntity.SlugsPartition);
 
-        // Reject a slug already held by a different organization — two rows answering one slug would
-        // make the `organization` authorize parameter ambiguous.
+        // F11: the slug is immutable once set. A rename attempt is refused before anything else is
+        // even looked at, let alone written — the whole point is that a relying party can hard-code
+        // it.
+        OrganizationEntity? existingOrg = null;
         try
         {
-            var existingSlug = await organizationSlugsTable.GetEntityAsync<OrganizationSlugEntity>(
-                slugsPk, organization.Slug, cancellationToken: ct);
-            if (!string.Equals(existingSlug.Value.OrganizationId, organization.Id, StringComparison.Ordinal))
-                throw new InvalidOperationException(
-                    $"Slug '{organization.Slug}' is already held by organization '{existingSlug.Value.OrganizationId}'.");
+            existingOrg = (await organizationsTable.GetEntityAsync<OrganizationEntity>(
+                orgsPk, organization.Id, cancellationToken: ct)).Value;
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
         {
         }
 
-        // Find the previous slug, if this is an update that renames it, so the stale index row can be
-        // dropped once the new one is in place.
-        string? previousSlug = null;
+        if (existingOrg is not null && !string.Equals(existingOrg.Slug, organization.Slug, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Organization '{organization.Id}' slug is immutable: cannot change '{existingOrg.Slug}' to '{organization.Slug}'.");
+
+        // Cross-namespace: an id and a slug must never resolve to two different organizations, or
+        // which one an authorize request means depends on which of the two lookups the caller used.
         try
         {
-            var existingOrg = await organizationsTable.GetEntityAsync<OrganizationEntity>(orgsPk, organization.Id, cancellationToken: ct);
-            if (!string.Equals(existingOrg.Value.Slug, organization.Slug, StringComparison.Ordinal))
-                previousSlug = existingOrg.Value.Slug;
+            var idOwner = await organizationsTable.GetEntityAsync<OrganizationEntity>(
+                orgsPk, organization.Slug, cancellationToken: ct);
+            if (!string.Equals(idOwner.Value.RowKey, organization.Id, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"Slug '{organization.Slug}' collides with organization id '{idOwner.Value.RowKey}'.");
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
         {
         }
+
+        try
+        {
+            var slugOwner = await organizationSlugsTable.GetEntityAsync<OrganizationSlugEntity>(
+                slugsPk, organization.Id, cancellationToken: ct);
+            if (!string.Equals(slugOwner.Value.OrganizationId, organization.Id, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"Organization id '{organization.Id}' collides with slug '{organization.Id}', held by organization '{slugOwner.Value.OrganizationId}'.");
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+        }
+
+        if (existingOrg is null)
+        {
+            // F4: uniqueness is enforced by the storage layer's own insert-only primitive rather than
+            // a read-then-write check, so two concurrent creates racing on the same new slug can never
+            // both win — the loser's AddEntityAsync gets the 409, not a check that ran too early.
+            var slugEntity = OrganizationEntity.CreateSlugIndex(organization);
+            slugEntity.PartitionKey = partitioner.PK(slugEntity.PartitionKey);
+            try
+            {
+                await organizationSlugsTable.AddEntityAsync(slugEntity, ct);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 409)
+            {
+                var heldBy = "another organization";
+                try
+                {
+                    var winner = await organizationSlugsTable.GetEntityAsync<OrganizationSlugEntity>(
+                        slugsPk, organization.Slug, cancellationToken: ct);
+                    heldBy = winner.Value.OrganizationId;
+                }
+                catch (RequestFailedException)
+                {
+                }
+                throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by organization '{heldBy}'.");
+            }
+            if (changeWriter is not null)
+                await changeWriter.WriteUpsertAsync("OrganizationSlugs", slugEntity.PartitionKey, slugEntity.RowKey, ct);
+        }
+        // Existing organization: the slug is unchanged (enforced above), so its slug row already
+        // points here and is left as is — nothing to write on this table for an update.
 
         var entity = OrganizationEntity.FromModel(organization);
         entity.PartitionKey = partitioner.PK(entity.PartitionKey);
         await organizationsTable.UpsertEntityAsync(entity, TableUpdateMode.Replace, ct);
         if (changeWriter is not null)
             await changeWriter.WriteUpsertAsync("Organizations", entity.PartitionKey, entity.RowKey, ct);
-
-        // New slug row before the stale one is dropped: a crash in between leaves a harmless extra
-        // pointer, never a missing one.
-        var slugEntity = OrganizationEntity.CreateSlugIndex(organization);
-        slugEntity.PartitionKey = partitioner.PK(slugEntity.PartitionKey);
-        await organizationSlugsTable.UpsertEntityAsync(slugEntity, TableUpdateMode.Replace, ct);
-        if (changeWriter is not null)
-            await changeWriter.WriteUpsertAsync("OrganizationSlugs", slugEntity.PartitionKey, slugEntity.RowKey, ct);
-
-        if (previousSlug is not null)
-        {
-            if (changeWriter is not null)
-                await changeWriter.WriteAsync("OrganizationSlugs", slugsPk, previousSlug, ct);
-            try
-            {
-                await organizationSlugsTable.DeleteEntityAsync(slugsPk, previousSlug, cancellationToken: ct);
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404) { }
-        }
     }
 
     public async Task DeleteAsync(string organizationId, CancellationToken ct = default)
