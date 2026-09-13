@@ -48,6 +48,16 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
     private async Task<SqlOrganizationStore> NewOrgStoreAsync(IChangeWriter? tombstones = null)
         => new(await T("Organizations"), await T("OrganizationSlugs"), Live, tombstones);
 
+    /// <summary>Same as <see cref="NewOrgStoreAsync"/>, but also hands back the two underlying tables
+    /// so a test can seed a row directly, bypassing the store's own upsert.</summary>
+    private async Task<(SqlOrganizationStore Store, SqlTable Organizations, SqlTable Slugs)>
+        NewOrgStoreWithTablesAsync(IChangeWriter? tombstones = null)
+    {
+        var organizations = await T("Organizations");
+        var slugs = await T("OrganizationSlugs");
+        return (new SqlOrganizationStore(organizations, slugs, Live, tombstones), organizations, slugs);
+    }
+
     private async Task<SqlOrganizationMembershipStore> NewMembershipStoreAsync(IChangeWriter? tombstones = null)
         => new(await T("OrganizationMembers"), await T("UserMemberships"), Live, tombstones);
 
@@ -200,6 +210,33 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
         var winner = (await store.ListAsync())[0];
         Assert.Equal("contested", winner.Slug);
         Assert.Equal(winner.Id, (await store.GetBySlugAsync("contested"))?.Id);
+    }
+
+    /// <summary>R2 — the crash window slug-first ordering opens. If the process died right after
+    /// claiming the slug row but before writing the organization document, a retry of the exact same
+    /// create (same id, same slug) must self-heal and finish the write rather than read its own
+    /// earlier claim back as "held by another organization" — seeded here by writing only the slug
+    /// row, bypassing <see cref="SqlOrganizationStore.UpsertAsync"/> entirely.</summary>
+    [Fact]
+    public async Task OrganizationStore_CreateRetryAfterCrashBetweenSlugAndOrgWrite_Succeeds()
+    {
+        var (store, _, slugs) = await NewOrgStoreWithTablesAsync();
+
+        var orphanSlug = new SqlRow(Live.PK("orgslug"), "acme");
+        orphanSlug.PutS("organizationId", "o1");
+        await slugs.PutAsync(orphanSlug);
+
+        // The org row never landed, so nothing resolves yet — this is the exact inconsistency the
+        // crash window leaves behind.
+        Assert.Null(await store.GetAsync("o1"));
+        Assert.Null(await store.GetBySlugAsync("acme"));
+
+        // The retry — same id, same slug — must succeed rather than throw.
+        await store.UpsertAsync(Org("o1", "acme"));
+
+        Assert.Equal("o1", (await store.GetAsync("o1"))?.Id);
+        Assert.Equal("o1", (await store.GetBySlugAsync("acme"))?.Id);
+        Assert.Single(await store.ListAsync());
     }
 
     /// <summary>F3 — ids and slugs share no namespace: a new organization's slug may not equal an
@@ -364,6 +401,19 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
     {
         var store = await NewMembershipStoreAsync();
         await store.DeleteAsync("no-such-org", "no-such-user"); // must not throw
+    }
+
+    /// <summary>R9 — a tombstone records a row that actually changed. Deleting a membership that never
+    /// existed must remove nothing and therefore record nothing on either side.</summary>
+    [Fact]
+    public async Task MembershipStore_Delete_OfANonExistentMembership_WritesNoTombstones()
+    {
+        var tombstones = new RecordingChangeWriter();
+        var store = await NewMembershipStoreAsync(tombstones);
+
+        await store.DeleteAsync("no-such-org", "no-such-user");
+
+        Assert.Empty(tombstones.Deletes);
     }
 
     /// <summary>F18 — delete must not let the forward row's absence short-circuit the reverse row's

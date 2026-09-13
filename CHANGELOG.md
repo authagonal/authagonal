@@ -265,6 +265,16 @@
   earlier partial write (one row present, the other missing) could never be fully cleaned up; each
   side is now checked-and-removed independently with `SqlTable.DeleteIfExistsReturningAsync`, so
   whichever row actually exists is deleted and tombstoned regardless of the other's state.
+- **`SqlOrganizationStore.UpsertAsync` self-heals a crash between the slug insert and the
+  organization write, and shares the slug rule with every other store.** Slug-first ordering (see
+  above) means a process that died right after `SqlTable.PutIfAbsentAsync` claimed the slug row but
+  before the organization document itself was written leaves a slug row owned by an id with no
+  organization row behind it — and a retry of that exact create used to read its own earlier claim
+  back as "held by another organization," permanently. `UpsertAsync` now checks the pre-existing
+  slug row's owner on that path: the same id means self-heal (finish the write), a different id
+  means the genuine conflict it always was. The slug pattern is no longer a copy of the regex kept
+  in `Organization.Slug`'s remarks — it now calls `OrganizationSlug.Validate` (`Authagonal.Core`),
+  the one place the rule lives for every store to share.
 
 ### Changed
 

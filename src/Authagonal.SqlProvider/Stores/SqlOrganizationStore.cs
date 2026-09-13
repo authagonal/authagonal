@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Authagonal.Core.Models;
 using Authagonal.Core.Services;
 using Authagonal.Core.Stores;
@@ -23,7 +22,11 @@ namespace Authagonal.SqlProvider.Stores;
 /// organization's slug — otherwise a bare string accepted as either would resolve to different
 /// entities depending on which lookup read it. A brand-new slug is claimed with an insert-only
 /// conditional write (<see cref="SqlTable.PutIfAbsentAsync"/>) before the organization document
-/// itself is written, so two concurrent creates for the same new slug cannot both succeed.
+/// itself is written, so two concurrent creates for the same new slug cannot both succeed. That
+/// ordering opens one narrow, self-healing window: a crash between the slug insert and the
+/// organization write leaves a slug row owned by an id with no organization row behind it yet, and
+/// <see cref="UpsertAsync"/> recognises a retry of that same id/slug pair as exactly this case —
+/// finishing the write — rather than rejecting it as held by another organization.
 /// </para>
 /// </summary>
 public sealed class SqlOrganizationStore(
@@ -32,9 +35,6 @@ public sealed class SqlOrganizationStore(
 {
     private const string OrgPartition = "org";
     private const string SlugPartition = "orgslug";
-
-    private static readonly Regex SlugPattern =
-        new("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$", RegexOptions.Compiled);
 
     public async Task<Organization?> GetAsync(string organizationId, CancellationToken ct = default)
     {
@@ -62,12 +62,8 @@ public sealed class SqlOrganizationStore(
 
     public async Task UpsertAsync(Organization organization, CancellationToken ct = default)
     {
-        if (!SlugPattern.IsMatch(organization.Slug))
-        {
-            throw new ArgumentException(
-                $"Slug '{organization.Slug}' is invalid; slugs must match ^[a-z0-9](?:[a-z0-9-]{{0,62}}[a-z0-9])?$.",
-                nameof(organization));
-        }
+        // The rule lives once in Core so every store enforces the same shape.
+        OrganizationSlug.Validate(organization.Slug);
 
         var orgPk = partitioner.PK(OrgPartition);
         var slugPk = partitioner.PK(SlugPartition);
@@ -114,10 +110,22 @@ public sealed class SqlOrganizationStore(
         // atomic operation.
         var slugRow = new SqlRow(slugPk, organization.Slug);
         slugRow.PutS("organizationId", organization.Id);
-        if (!await slugs.PutIfAbsentAsync(slugRow, ct).ConfigureAwait(false))
-            throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by another organization.");
-        if (tombstones is not null)
-            await tombstones.WriteUpsertAsync("OrganizationSlugs", slugPk, organization.Slug, ct).ConfigureAwait(false);
+        if (await slugs.PutIfAbsentAsync(slugRow, ct).ConfigureAwait(false))
+        {
+            if (tombstones is not null)
+                await tombstones.WriteUpsertAsync("OrganizationSlugs", slugPk, organization.Slug, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            // The slug row already exists. That is a genuine conflict UNLESS it is this exact id —
+            // slug-first ordering means a crash between claiming the slug and writing the
+            // organization document leaves precisely this row behind, and a retry of the same
+            // create must self-heal and finish the write rather than read its own earlier claim
+            // back as "held by another organization".
+            var existingSlugRow = await slugs.GetAsync(slugPk, organization.Slug, ct: ct).ConfigureAwait(false);
+            if (!string.Equals(existingSlugRow?.GetStr("organizationId"), organization.Id, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Slug '{organization.Slug}' is already held by another organization.");
+        }
 
         var orgRow = new SqlRow(orgPk, organization.Id)
         {
