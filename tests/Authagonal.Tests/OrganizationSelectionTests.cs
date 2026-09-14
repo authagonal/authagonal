@@ -540,4 +540,193 @@ public sealed class OrganizationSelectionTests
 
         Assert.Equal("org-b", afterRefresh.OrganizationId);
     }
+
+    // -----------------------------------------------------------------------
+    // An org-scoped SSO connection's organisation
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A principal carrying <c>connection_org_id</c> — a session established through an SSO connection
+    /// that belongs to one organisation.
+    /// </summary>
+    private static ClaimsPrincipal FederatedPrincipal(string subjectId, string connectionOrganizationId)
+    {
+        var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
+        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, subjectId));
+        identity.AddClaim(new Claim("sub", subjectId));
+        identity.AddClaim(new Claim(CookieSignInHelper.ConnectionOrganizationClaim, connectionOrganizationId));
+        return new ClaimsPrincipal(identity);
+    }
+
+    private static Task<OidcSubjectResult> ResolveFederatedAsync(
+        UserStoreOidcSubjectResolver resolver, AuthUser user, string connectionOrganizationId,
+        string? organization = null) =>
+        resolver.ResolveAsync(
+            FederatedPrincipal(user.Id, connectionOrganizationId),
+            new OidcSubjectResolutionContext(ClientId, ["openid", "profile"], [], organization));
+
+    /// The connection's organisation is the one source here that was PROVEN — the user authenticated
+    /// at an IdP belonging to exactly that organisation — so it is treated as an explicit selection,
+    /// membership roles and all.
+    [Fact]
+    public async Task ConnectionOrganization_IsSelectedAndCarriesItsMembershipRoles()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme Corporation");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1", MembershipStatus.Active, "auditor");
+        var user = User();
+
+        var subject = Allowed(await ResolveFederatedAsync(Resolver(user, Client(), orgs, members), user, "org-a"));
+
+        Assert.Equal("org-a", subject.OrganizationId);
+        Assert.Equal("acme", subject.OrganizationSlug);
+        Assert.Equal("Acme Corporation", subject.OrganizationName);
+        Assert.True(subject.OrganizationExplicitlySelected);
+        Assert.Contains("auditor", subject.Roles);
+    }
+
+    /// It outranks the account's own tag, which is a downstream provisioning artefact rather than an
+    /// assertion about this sign-in.
+    [Fact]
+    public async Task ConnectionOrganization_OutranksTheAccountTag()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme").With("org-b", "beta", "Beta");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1");
+        var user = User(organizationId: "org-b");
+
+        var subject = Allowed(await ResolveFederatedAsync(Resolver(user, Client(), orgs, members), user, "org-a"));
+
+        Assert.Equal("org-a", subject.OrganizationId);
+    }
+
+    /// …and the `organization` parameter, which is the caller's request rather than the session's
+    /// authority. A conflicting request is REFUSED, never silently answered with the other one.
+    [Fact]
+    public async Task ConnectionOrganization_RefusesARequestNamingAnother()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme").With("org-b", "beta", "Beta");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1").With("org-b", "user-1");
+        var user = User();
+
+        var rejected = Rejected(await ResolveFederatedAsync(
+            Resolver(user, Client(), orgs, members), user, "org-a", organization: "beta"));
+
+        Assert.Equal(OidcRejection.AccessDenied, rejected.Reason);
+    }
+
+    /// An unknown value on the parameter is the same conflict: it does not name this organisation.
+    [Fact]
+    public async Task ConnectionOrganization_RefusesARequestNamingSomethingUnknown()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1");
+        var user = User();
+
+        var rejected = Rejected(await ResolveFederatedAsync(
+            Resolver(user, Client(), orgs, members), user, "org-a", organization: "no-such-org"));
+
+        Assert.Equal(OidcRejection.AccessDenied, rejected.Reason);
+    }
+
+    /// Naming the same organisation — by slug or by id — is agreement, not conflict.
+    [Theory]
+    [InlineData("acme")]
+    [InlineData("org-a")]
+    public async Task ConnectionOrganization_AllowsARequestNamingTheSameOne(string value)
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1");
+        var user = User();
+
+        var subject = Allowed(await ResolveFederatedAsync(
+            Resolver(user, Client(), orgs, members), user, "org-a", organization: value));
+
+        Assert.Equal("org-a", subject.OrganizationId);
+    }
+
+    /// A client restricted away from this session's organisation may not be issued a token for it. The
+    /// session cannot act for anything else, so there is nothing to fall back to.
+    [Fact]
+    public async Task ConnectionOrganization_RefusesAClientRestrictedAwayFromIt()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme").With("org-b", "beta", "Beta");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1");
+        var user = User();
+
+        var rejected = Rejected(await ResolveFederatedAsync(
+            Resolver(user, Client("org-b"), orgs, members), user, "org-a"));
+
+        Assert.Equal(OidcRejection.AccessDenied, rejected.Reason);
+    }
+
+    /// A disabled organisation mints no tokens however it was selected.
+    [Fact]
+    public async Task ConnectionOrganization_RefusesWhenDisabled()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme", enabled: false);
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1");
+        var user = User();
+
+        Assert.Equal(OidcRejection.AccessDenied,
+            Rejected(await ResolveFederatedAsync(Resolver(user, Client(), orgs, members), user, "org-a")).Reason);
+    }
+
+    /// The organisation behind the connection that authenticated the session is gone. Refusing beats
+    /// falling back to the account default, which would move a live session to another customer.
+    [Fact]
+    public async Task ConnectionOrganization_RefusesWhenTheOrganizationNoLongerExists()
+    {
+        var user = User(organizationId: "org-b");
+        var orgs = new WritableOrganizationStore().With("org-b", "beta", "Beta");
+
+        Assert.Equal(OidcRejection.AccessDenied,
+            Rejected(await ResolveFederatedAsync(Resolver(user, Client(), orgs), user, "org-a")).Reason);
+    }
+
+    /// Membership is demanded, and the callback that established the session is what creates it — so
+    /// the only way to arrive here without one is to have had it removed or suspended since.
+    [Fact]
+    public async Task ConnectionOrganization_RefusesWithoutAnActiveMembership()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1", MembershipStatus.Suspended);
+        var user = User();
+
+        Assert.Equal(OidcRejection.AccessDenied,
+            Rejected(await ResolveFederatedAsync(Resolver(user, Client(), orgs, members), user, "org-a")).Reason);
+    }
+
+    /// An organisation that chose not to gate on membership still selects, and still grants nothing it
+    /// has no row for — the same asymmetry every other explicit selection has.
+    [Fact]
+    public async Task ConnectionOrganization_SelectsWithoutMembershipWhenTheOrganizationDoesNotRequireIt()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme", requireMembership: false);
+        var user = User();
+
+        var subject = Allowed(await ResolveFederatedAsync(Resolver(user, Client(), orgs), user, "org-a"));
+
+        Assert.Equal("org-a", subject.OrganizationId);
+        // No membership row, so no membership roles — and the account itself holds none either, which
+        // is how "no roles at all" reads on this subject.
+        Assert.True(subject.Roles is null || !subject.Roles.Contains("auditor"));
+    }
+
+    /// It is carried across a refresh rotation like any other explicit selection: the cookie is not
+    /// read again at refresh time, so without the carry the session would revert to the account
+    /// default on its first rotation.
+    [Fact]
+    public async Task ConnectionOrganization_SurvivesARefreshRotation()
+    {
+        var orgs = new WritableOrganizationStore().With("org-a", "acme", "Acme").With("org-b", "beta", "Beta");
+        var members = new WritableOrganizationMembershipStore().With("org-a", "user-1");
+        var user = User(organizationId: "org-b");
+        var resolver = Resolver(user, Client(), orgs, members);
+
+        var atLogin = Allowed(await ResolveFederatedAsync(resolver, user, "org-a"));
+        var afterRefresh = Allowed(await resolver.ResolveRefreshAsync(
+            atLogin, new OidcSubjectResolutionContext(ClientId, ["openid", "profile"], [])));
+
+        Assert.Equal("org-a", afterRefresh.OrganizationId);
+    }
+
 }
