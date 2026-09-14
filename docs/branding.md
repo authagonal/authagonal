@@ -21,6 +21,35 @@ On startup, the SPA fetches `/branding.json`. If the file doesn't exist or is un
 - The "Powered by Authagonal" footer
 - Custom CSS for deeper styling
 
+## Organisation Name
+
+On a multi-tenant host that resolves an organisation for the request (e.g. a custom domain pinned
+to one customer), the `authagonal-boot` payload can carry a third member alongside `branding` and
+`providers`:
+
+```json
+{
+  "branding": { "appName": "Acme Corp", "...": "..." },
+  "providers": [],
+  "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
+}
+```
+
+`organization` is `null` (or the member is absent) when the request resolved to no organisation —
+a single-tenant deployment, or one with no custom-domain pin for this host. This library does not
+resolve an organisation for an anonymous, pre-authentication request itself (`OrganizationSelector`
+needs a signed-in `AuthUser`); a host that has its own pre-auth resolution — Authagonal Cloud pins
+one per custom domain — sets `organization` when it assembles the boot payload.
+
+When `organization.name` is present and differs from `branding.appName` (case-insensitive, trimmed
+— so an organisation named the same as the tenant does not produce "Acme / Signing in to Acme"),
+the login card renders a subtitle under the heading: "Signing in to {name}"
+(`data-testid="login-org-name"`, i18n key `login.signingInTo`). It is rendered once, by the shared
+`AuthLayout` header, so every route that mounts through it — sign in, register, forgot/reset
+password, the MFA challenge and setup pages, the device page, consent and agent-consent, grants,
+and account — shows it identically. Nothing renders, and the header keeps its normal spacing, when
+`organization` is absent, `null`, or its name matches `branding.appName`.
+
 ## Configuration
 
 Place a `branding.json` file in the `wwwroot/` directory (or mount it into the Docker container):

@@ -158,6 +158,67 @@ describe('welcomeTitle and welcomeSubtitle', () => {
 });
 
 // -------------------------------------------------------------------------------------------------
+// The organisation subtitle comes ONLY off the server-inlined boot payload (`#authagonal-boot`),
+// never a fetch — there is no per-request static file it could fall back to the way branding.json
+// backs branding. So these tests write the boot payload straight onto the document, the same shape
+// a host's HTML actually carries: `{ organization: { id, slug, name } | null }`.
+// -------------------------------------------------------------------------------------------------
+
+function withOrganizationBoot(organization: { id: string; slug: string; name: string } | null) {
+  const script = document.createElement('script');
+  script.type = 'application/json';
+  script.id = 'authagonal-boot';
+  script.textContent = JSON.stringify({ organization });
+  document.head.appendChild(script);
+}
+
+describe('organization subtitle', () => {
+  afterEach(() => {
+    document.getElementById('authagonal-boot')?.remove();
+  });
+
+  it('renders "Signing in to {name}" when the resolved organization differs from appName', () => {
+    withOrganizationBoot({ id: 'org_1', slug: 'acme', name: 'Acme Corp' });
+
+    render(
+      <MemoryRouter>
+        <BrandingContext.Provider value={branding({ appName: 'Authagonal' })}>
+          <AuthLayout><p>content</p></AuthLayout>
+        </BrandingContext.Provider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId('login-org-name').textContent).toBe('Signing in to Acme Corp');
+  });
+
+  it('renders nothing when the boot payload carries no organization', () => {
+    render(
+      <MemoryRouter>
+        <BrandingContext.Provider value={branding({ appName: 'Authagonal' })}>
+          <AuthLayout><p>content</p></AuthLayout>
+        </BrandingContext.Provider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId('login-org-name')).toBeNull();
+  });
+
+  it('renders nothing when the organization name equals appName, case-insensitive and trimmed', () => {
+    withOrganizationBoot({ id: 'org_1', slug: 'acme', name: '  Acme Corp  ' });
+
+    render(
+      <MemoryRouter>
+        <BrandingContext.Provider value={branding({ appName: 'acme corp' })}>
+          <AuthLayout><p>content</p></AuthLayout>
+        </BrandingContext.Provider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId('login-org-name')).toBeNull();
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
 // The per-mode branding colours are injected as a stylesheet, and a stylesheet has a cascade.
 //
 // `:root` and `.dark` carry the SAME specificity, and the injected rule is appended to <head> AFTER

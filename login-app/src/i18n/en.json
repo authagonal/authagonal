@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "Passwords do not match",
   "passwordWeakError": "Password does not meet strength requirements",
   "signInTitle": "Sign In — {{appName}}",
+  "login.signingInTo": "Signing in to {{name}}",
   "ruleMinLength": "At least {{count}} characters",
   "ruleUppercase": "Uppercase letter",
   "ruleLowercase": "Lowercase letter",

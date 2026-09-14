@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Outlet } from 'react-router';
 import { Trans, useTranslation } from 'react-i18next';
-import { BrandingContext, brandingDefaults, loadBranding, resolveLocalized, type BrandingConfig } from '../branding';
+import { BrandingContext, brandingDefaults, getOrganization, loadBranding, resolveLocalized, type BrandingConfig } from '../branding';
 import { useDarkMode } from '../hooks/useDarkMode';
 import { Card } from './ui/card';
 import { cn } from '@/lib/utils';
@@ -24,6 +24,13 @@ interface AuthLayoutProps {
 function isSafeCssColor(color: string): boolean {
   return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(color)
     || /^(?:rgb|rgba|hsl|hsla)\([0-9.,%\s/]+\)$/i.test(color);
+}
+
+// "Signing in to Acme" under "Acme" reads as a rendering bug, not a feature — so the subtitle is
+// suppressed whenever the organisation's name IS the app name, modulo the difference a tenant is
+// least likely to have intended (case, stray whitespace).
+function sameName(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
 // The picker's default list is the shipped-locale registry (i18n/index.ts DEFAULT_LANGUAGES) — a
@@ -147,9 +154,17 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
   // Rendered only when a tenant sets one. There is deliberately no default greeting: the pages carry
   // their own <CardTitle>, and inventing a heading above them would change every existing
   // deployment's login page to close a documentation gap.
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const welcomeTitle = resolveLocalized(branding.welcomeTitle, i18n.language);
   const welcomeSubtitle = resolveLocalized(branding.welcomeSubtitle, i18n.language);
+
+  // Organisation subtitle: server-resolved only (custom-domain pin, etc.) — never fetched, so a
+  // single synchronous read off the boot payload is enough; unlike branding there is no
+  // "load it ourselves" fallback because there is no per-request static file it could come from.
+  // Suppressed when the organisation IS the app (a single-tenant host, or an org named the same
+  // as its tenant) so the header never reads "Acme / Signing in to Acme".
+  const organization = getOrganization();
+  const showOrganization = !!organization?.name && !sameName(organization.name, branding.appName);
 
   useDarkMode();
 
@@ -230,6 +245,14 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
             </span>
           ) : (
             <h1 className="text-2xl font-bold tracking-tight" data-auth="app-name" style={{ color: 'var(--auth-heading)' }}>{branding.appName}</h1>
+          )}
+          {showOrganization && (
+            <p
+              className="mt-1 text-sm text-gray-500 dark:text-gray-400"
+              data-testid="login-org-name"
+            >
+              {t('login.signingInTo', { name: organization!.name })}
+            </p>
           )}
           {welcomeTitle && (
             <h2 className="mt-3 text-lg font-semibold tracking-tight" data-auth="welcome-title" style={{ color: 'var(--auth-heading)' }}>
