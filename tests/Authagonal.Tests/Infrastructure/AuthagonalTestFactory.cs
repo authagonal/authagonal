@@ -92,6 +92,13 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     public InMemoryRevokedTokenStore RevokedTokenStore { get; } = new();
     public InMemoryAgentProfileStore AgentProfileStore { get; } = new();
     public WritableOrganizationStore OrganizationStore { get; } = new();
+
+    /// <summary>
+    /// The host's tenant context. Mutable so a test can set <see cref="TestTenantContext.OrganizationId"/>
+    /// — the per-request organisation pin a multi-tenant host resolves from the hostname — before the
+    /// first <c>CreateClient()</c>.
+    /// </summary>
+    public TestTenantContext TenantContext { get; } = new(TestIssuer);
     public WritableOrganizationMembershipStore OrganizationMembershipStore { get; } = new();
     public TestEmailService EmailService { get; } = new();
     public TestAuthHook AuthHook { get; } = new();
@@ -359,8 +366,7 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
         services.AddSingleton<IOrganizationMembershipStore>(OrganizationMembershipStore);
 
         // Tenant context
-        services.AddSingleton<Authagonal.Core.Services.ITenantContext>(
-            new TestTenantContext(TestIssuer));
+        services.AddSingleton<Authagonal.Core.Services.ITenantContext>(TenantContext);
 
         // Extensibility test doubles. Every one of these is a TryAdd or a gate in the real registration.
         services.AddSingleton<IEmailService>(EmailService);

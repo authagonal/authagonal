@@ -549,6 +549,9 @@ public static class AuthagonalExtensions
         // Which organization a request is for, and whether the user and client may have it. Scoped
         // because the stores it reads are (the cloud resolves them per tenant, per request).
         services.AddScoped<OrganizationSelector>();
+        // The same question asked BEFORE anyone has signed in — home-realm discovery, the login page's
+        // provider list and /sso-check. Scoped for the same reason, and because it reads ITenantContext.
+        services.AddScoped<PreAuthOrganizationResolver>();
         // Subject resolver — maps ClaimsPrincipal / OidcSubject back to AuthUser via the user store.
         services.AddScoped<UserStoreOidcSubjectResolver>();
         services.AddScoped<IOidcSubjectResolver>(sp => sp.GetRequiredService<UserStoreOidcSubjectResolver>());

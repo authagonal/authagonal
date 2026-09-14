@@ -185,6 +185,7 @@ public static class OidcEndpoints
         Authagonal.Core.Services.ITenantContext tenantContext,
         IProvisioningOrchestrator provisioning,
         ISsoDomainStore ssoDomainStore,
+        IOrganizationMembershipStore memberships,
         IConfiguration configuration,
         IOptions<AuthOptions> authOptions,
         ILogger<Program> logger,
@@ -674,10 +675,24 @@ public static class OidcEndpoints
         // grant exists yet at this callback). NEVER emitted into a token: the resolver copies it to a
         // non-emitted OidcSubject field, and it's redeemed server-to-server on refresh. The cookie is
         // encrypted + httpOnly. Only when the connection opts in AND the upstream actually issued one.
+        // Which connection authenticated this session, unconditionally — not only when the upstream
+        // refresh token rides along. It is how the session says which IdP owns it, which an org-scoped
+        // connection makes load-bearing, and it costs one short claim. Everything that consumes it is
+        // additionally guarded on the refresh token actually being present.
+        federationClaims.Add(new Claim("upstream_connection_id", stateData.ConnectionId));
+
+        // An ORG-SCOPED connection binds this session to its organisation and makes the user a member of
+        // it. On the federation claims so it survives the MFA park/resume path, where the resumed sign-in
+        // mints org_id from exactly this claim.
+        if (!string.IsNullOrWhiteSpace(config.OrganizationId))
+        {
+            federationClaims.Add(await FederatedOrganizationBinding.BindAsync(
+                memberships, config.OrganizationId, user.Id, stateData.ConnectionId, logger, ct));
+        }
+
         if (config.RevalidateOnRefresh && !string.IsNullOrEmpty(upstreamRefreshToken))
         {
             federationClaims.Add(new Claim("upstream_refresh_token", upstreamRefreshToken));
-            federationClaims.Add(new Claim("upstream_connection_id", stateData.ConnectionId));
 
             // Seed the durable per-(user, connection, sid) store — the authoritative rotating copy every RP
             // grant reads and rotates, instead of each grant pinning this login-time cookie copy (which dies
@@ -732,8 +747,12 @@ public static class OidcEndpoints
             new(CookieSignInHelper.MfaAuthenticatedClaim, "true")
         };
 
-        if (!string.IsNullOrWhiteSpace(user.OrganizationId))
-            claims.Add(new Claim("org_id", user.OrganizationId));
+        // The connection's organisation OVERRIDES the account's own tag — see the SAML twin.
+        var organizationId = string.IsNullOrWhiteSpace(config.OrganizationId)
+            ? user.OrganizationId
+            : config.OrganizationId;
+        if (!string.IsNullOrWhiteSpace(organizationId))
+            claims.Add(new Claim("org_id", organizationId));
 
         // The same list the MFA branch parks — assembled once, above.
         claims.AddRange(federationClaims);

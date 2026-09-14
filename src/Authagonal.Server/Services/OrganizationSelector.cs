@@ -15,8 +15,12 @@ namespace Authagonal.Server.Services;
 /// <remarks>
 /// Precedence, highest first:
 /// <list type="number">
-///   <item>The <c>organization</c> authorize parameter (or, on a refresh, the organisation the grant
-///   was issued for), resolved as a slug and then as an id.</item>
+///   <item>On a refresh, the organisation the grant was issued for.</item>
+///   <item>The organisation an ORG-SCOPED SSO connection authenticated this session for — the
+///   <c>connection_org_id</c> cookie claim. It outranks everything a caller can ask for, because it is
+///   the one source that was PROVEN: the user authenticated at an IdP that belongs to exactly one
+///   organisation. A request that names a different one is refused rather than downgraded.</item>
+///   <item>The <c>organization</c> authorize parameter, resolved as a slug and then as an id.</item>
 ///   <item><see cref="OAuthClient.RestrictedToOrganizationIds"/> when it holds exactly one entry — a
 ///   per-customer application names its organisation once, in registration, and its relying party
 ///   never sends a parameter.</item>
@@ -52,6 +56,12 @@ public sealed class OrganizationSelector(
     /// The organisation a prior grant was issued for, carried across a refresh rotation. Resolved by
     /// ID ONLY, in a single point read.
     /// </param>
+    /// <param name="connectionOrganizationId">
+    /// The organisation an org-scoped SSO connection authenticated this session for, off the
+    /// <c>connection_org_id</c> cookie claim. An id this server stored on the connection, so it is
+    /// resolved by id only. Outranks <paramref name="requestedOrganization"/> and the client
+    /// restriction; a request that names a different organisation is refused.
+    /// </param>
     /// <exception cref="OrganizationAccessDeniedException">
     /// The request named an organisation that does not exist, is disabled, is not permitted for this
     /// client, or that the user is not an active member of.
@@ -70,7 +80,8 @@ public sealed class OrganizationSelector(
         OAuthClient? client,
         string? requestedOrganization,
         string? carriedOrganizationId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? connectionOrganizationId = null)
     {
         var restricted = client?.RestrictedToOrganizationIds ?? [];
 
@@ -94,6 +105,46 @@ public sealed class OrganizationSelector(
                 throw new OrganizationAccessDeniedException(
                     OidcRejection.AccessDenied,
                     "The organization this grant was issued for is no longer available.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(connectionOrganizationId))
+        {
+            // The session was authenticated at an IdP belonging to exactly one organisation, so this is
+            // the only source here that was proven rather than asserted by a caller. Treated as an
+            // explicit selection: the membership gate applies (the connection's own callback created the
+            // membership, so an active member passes and a SUSPENDED one is correctly refused), and it
+            // rides the grant so a refresh cannot silently re-derive a different organisation.
+            explicitlySelected = true;
+            organization = await organizations.GetAsync(connectionOrganizationId, ct);
+            if (organization is null)
+            {
+                // The organisation behind the connection that authenticated this session is gone.
+                // Refusing beats falling back to the account default, which would move the session to
+                // another customer without an error.
+                logger.LogInformation(
+                    "Refusing authorization for {SubjectId}: organization {OrganizationId}, which the "
+                    + "connection that authenticated this session belongs to, no longer exists",
+                    user.Id, connectionOrganizationId);
+                throw new OrganizationAccessDeniedException(
+                    OidcRejection.AccessDenied,
+                    "The organization this session was authenticated for is no longer available.");
+            }
+
+            // A request naming a DIFFERENT organisation is a conflict, not a choice: this session can
+            // only act for the organisation whose IdP vouched for it.
+            if (!string.IsNullOrWhiteSpace(requestedOrganization))
+            {
+                var requested = await ResolveBySlugThenIdAsync(requestedOrganization, ct);
+                if (requested is null || !string.Equals(requested.Id, organization.Id, StringComparison.Ordinal))
+                {
+                    logger.LogInformation(
+                        "Refusing authorization for {SubjectId} on client {ClientId}: the request named an "
+                        + "organization other than the one this session was authenticated for ({OrganizationId})",
+                        user.Id, client?.ClientId, organization.Id);
+                    throw new OrganizationAccessDeniedException(
+                        OidcRejection.AccessDenied,
+                        $"This session is authenticated for organization '{organization.Slug}' and may not be issued a token for another.");
+                }
             }
         }
         else if (!string.IsNullOrWhiteSpace(requestedOrganization))
@@ -223,7 +274,20 @@ public sealed class OrganizationSelector(
     /// id attempt is NOT: an id is opaque and compared ordinally, so lowercasing it would resolve a
     /// different organisation from the one named.
     /// </remarks>
-    private async Task<Organization?> ResolveBySlugThenIdAsync(string slugOrId, CancellationToken ct)
+    private Task<Organization?> ResolveBySlugThenIdAsync(string slugOrId, CancellationToken ct)
+        => ResolveBySlugThenIdAsync(organizations, slugOrId, ct);
+
+    /// <summary>
+    /// <inheritdoc cref="ResolveBySlugThenIdAsync(string, CancellationToken)" path="/summary"/>
+    /// </summary>
+    /// <remarks>
+    /// Static and public because <see cref="PreAuthOrganizationResolver"/> resolves the very same
+    /// caller-supplied parameter before anyone has signed in, and two copies of this rule would be two
+    /// chances for the pre- and post-authentication answers to disagree about which organisation a
+    /// request named.
+    /// </remarks>
+    public static async Task<Organization?> ResolveBySlugThenIdAsync(
+        IOrganizationStore organizations, string slugOrId, CancellationToken ct = default)
     {
         // A value carrying any uppercase character CANNOT be a slug: slugs are lowercase-only by
         // OrganizationSlug, which every store enforces at write time. Lowercasing it and asking the

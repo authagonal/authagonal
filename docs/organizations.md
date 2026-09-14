@@ -117,11 +117,15 @@ The parameter survives the round trip through the login UI, because the whole au
 
 The organization is resolved in this order:
 
-1. **The `organization` parameter** (or, on a refresh, the organization the grant was issued for).
-2. **`OAuthClient.RestrictedToOrganizationIds`, when it holds exactly one entry.** A per-customer application names its organization once, at registration, and its relying party never sends a parameter at all. This is the shape most single-instance-per-customer products want.
-3. **`AuthUser.OrganizationId`** — the account's own stored organization.
+1. **On a refresh, the organization the grant was issued for.**
+2. **The organization an [organisation-scoped SSO connection](self-service-sso#organisation-scoped-connections) authenticated this session for.** The only source here that was *proven* rather than asserted by a caller: the user signed in at an IdP that belongs to exactly one organization. A request naming a different one is refused with `access_denied` rather than quietly issued the other.
+3. **The `organization` parameter.**
+4. **`OAuthClient.RestrictedToOrganizationIds`, when it holds exactly one entry.** A per-customer application names its organization once, at registration, and its relying party never sends a parameter at all. This is the shape most single-instance-per-customer products want.
+5. **`AuthUser.OrganizationId`** — the account's own stored organization.
 
-Rules 1 and 2 are *explicit* selections and must satisfy membership. Rule 3 is not: the account record is itself the assertion of belonging, and demanding a second one would lock out every pre-existing user the moment the matching organization was created.
+Rules 1-4 are *explicit* selections and must satisfy membership. Rule 5 is not: the account record is itself the assertion of belonging, and demanding a second one would lock out every pre-existing user the moment the matching organization was created.
+
+Before anyone has authenticated — home-realm discovery, the login page's provider list, `/sso-check` — there is no user and no grant, so rules 3, 4 and then `ITenantContext.OrganizationId` are resolved on their own. See [Organisation-scoped connections](self-service-sso#organisation-scoped-connections).
 
 ## Restricting a client to an organization
 

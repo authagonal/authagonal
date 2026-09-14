@@ -25,6 +25,12 @@ public sealed class SqlSamlProviderStore(SqlTable table, EnvPartitioner partitio
         return results;
     }
 
+    public async Task<IReadOnlyList<SamlProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default)
+    {
+        var all = await GetAllAsync(ct).ConfigureAwait(false);
+        return [.. all.Where(c => string.Equals(c.OrganizationId, organizationId, StringComparison.Ordinal))];
+    }
+
     public Task UpsertAsync(SamlProviderConfig config, CancellationToken ct = default)
     {
         var row = new SqlRow(partitioner.PK(config.ConnectionId), ConfigSk)

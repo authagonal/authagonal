@@ -49,6 +49,8 @@ public static class SsoEndpoints
     private static async Task<IResult> CreateSamlConnection(
         CreateSamlRequest request,
         ISamlProviderStore samlStore,
+        IOidcProviderStore oidcStore,
+        IOrganizationStore organizations,
         ISsoDomainStore ssoDomainStore,
         ISecretProvider secretProvider,
         IAuditLogger audit,
@@ -81,6 +83,10 @@ public static class SsoEndpoints
         if (ValidateNameIdFormat(request.NameIdFormat) is { } nameIdError)
             return nameIdError;
 
+        var organizationId = string.IsNullOrWhiteSpace(request.OrganizationId) ? null : request.OrganizationId;
+        if (await ValidateOrganizationAsync(organizationId, organizations, ct) is { } orgError)
+            return orgError;
+
         var connectionId = Guid.NewGuid().ToString("N");
         var now = DateTimeOffset.UtcNow;
 
@@ -95,6 +101,7 @@ public static class SsoEndpoints
             NameIdFormat = request.NameIdFormat,
             SignAuthnRequests = request.SignAuthnRequests,
             AllowUnsolicitedResponses = request.AllowUnsolicitedResponses,
+            OrganizationId = organizationId,
             AllowedDomains = request.AllowedDomains ?? [],
             JitProvisioningEnabled = request.JitProvisioningEnabled,
             ChallengeMfaAfterLogin = request.ChallengeMfaAfterLogin ?? true,
@@ -108,22 +115,27 @@ public static class SsoEndpoints
         config.SpCertificate = await secretProvider.ProtectAsync(
             $"saml-{connectionId}-sp-key", Services.Saml.SamlSpKey.CreateCertificate(config.EntityId), ct);
 
-        if (await ValidateDomainsAsync(config.AllowedDomains, connectionId, ssoDomainStore, ct) is { } domainError)
+        if (await ValidateDomainsAsync(config.AllowedDomains, connectionId, organizationId, ssoDomainStore, samlStore, oidcStore, ct) is { } domainError)
             return domainError;
 
         await samlStore.UpsertAsync(config, ct);
         config.SpCertificate = null; // server-only — never returned to API callers
 
-        // Register SSO domains
-        foreach (var domain in config.AllowedDomains)
+        // Register SSO domains — TENANT-LEVEL connections only. An org-scoped connection's domains are
+        // matched within its own organisation (see ValidateDomainsAsync); writing them to the
+        // tenant-wide index would route every request in the tenant to one organisation's IdP.
+        if (organizationId is null)
         {
-            await ssoDomainStore.UpsertAsync(new SsoDomain
+            foreach (var domain in config.AllowedDomains)
             {
-                Domain = domain.ToLowerInvariant(),
-                ProviderType = "saml",
-                ConnectionId = connectionId,
-                Scheme = $"saml-{connectionId}"
-            }, ct);
+                await ssoDomainStore.UpsertAsync(new SsoDomain
+                {
+                    Domain = domain.ToLowerInvariant(),
+                    ProviderType = "saml",
+                    ConnectionId = connectionId,
+                    Scheme = $"saml-{connectionId}"
+                }, ct);
+            }
         }
 
         await audit.LogAsync(AdminActor.Of(http), "saml_connection.created", "saml_connection", connectionId,
@@ -149,6 +161,8 @@ public static class SsoEndpoints
         string connectionId,
         UpdateSamlRequest request,
         ISamlProviderStore samlStore,
+        IOidcProviderStore oidcStore,
+        IOrganizationStore organizations,
         ISsoDomainStore ssoDomainStore,
         IAuditLogger audit,
         HttpContext http,
@@ -159,11 +173,28 @@ public static class SsoEndpoints
             return Results.NotFound(new { error = "not_found", error_description = $"SAML connection '{connectionId}' not found" });
 
         // Partial update — only fields supplied on the wire are modified.
+        //
+        // Scope first, because it decides which namespace the domains are validated in AND whether the
+        // stored index rows survive. An empty string moves a connection back to tenant level; null (the
+        // field absent) leaves the scope alone.
+        var scopeChanged = request.OrganizationId is not null;
+        if (scopeChanged)
+        {
+            var newOrganizationId = string.IsNullOrWhiteSpace(request.OrganizationId) ? null : request.OrganizationId;
+            if (await ValidateOrganizationAsync(newOrganizationId, organizations, ct) is { } orgError)
+                return orgError;
+            scopeChanged = !string.Equals(config.OrganizationId, newOrganizationId, StringComparison.Ordinal);
+            config.OrganizationId = newOrganizationId;
+        }
+
         var domainsChanged = request.AllowedDomains is not null;
         if (domainsChanged)
         {
             config.AllowedDomains = request.AllowedDomains!;
-            if (await ValidateDomainsAsync(config.AllowedDomains, connectionId, ssoDomainStore, ct) is { } domainError)
+        }
+        if (domainsChanged || scopeChanged)
+        {
+            if (await ValidateDomainsAsync(config.AllowedDomains, connectionId, config.OrganizationId, ssoDomainStore, samlStore, oidcStore, ct) is { } domainError)
                 return domainError;
         }
         if (request.JitProvisioningEnabled.HasValue)
@@ -216,20 +247,27 @@ public static class SsoEndpoints
         await samlStore.UpsertAsync(config, ct);
         config.SpCertificate = null; // server-only — never returned to API callers
 
-        // Re-register domain mappings only when the domain list actually changed —
+        // Re-register domain mappings only when the domain list or the scope actually changed —
         // toggling JIT shouldn't churn the SsoDomain table.
-        if (domainsChanged)
+        //
+        // The scope half is what removes a connection from the tenant-wide index when it is moved from
+        // tenant level to an organisation: the delete runs either way, and only a tenant-level
+        // connection is written back.
+        if (domainsChanged || scopeChanged)
         {
             await ssoDomainStore.DeleteByConnectionAsync(connectionId, ct);
-            foreach (var domain in config.AllowedDomains)
+            if (config.OrganizationId is null)
             {
-                await ssoDomainStore.UpsertAsync(new SsoDomain
+                foreach (var domain in config.AllowedDomains)
                 {
-                    Domain = domain.ToLowerInvariant(),
-                    ProviderType = "saml",
-                    ConnectionId = connectionId,
-                    Scheme = $"saml-{connectionId}"
-                }, ct);
+                    await ssoDomainStore.UpsertAsync(new SsoDomain
+                    {
+                        Domain = domain.ToLowerInvariant(),
+                        ProviderType = "saml",
+                        ConnectionId = connectionId,
+                        Scheme = $"saml-{connectionId}"
+                    }, ct);
+                }
             }
         }
 
@@ -269,6 +307,8 @@ public static class SsoEndpoints
     private static async Task<IResult> CreateOidcConnection(
         CreateOidcRequest request,
         IOidcProviderStore oidcStore,
+        ISamlProviderStore samlStore,
+        IOrganizationStore organizations,
         ISsoDomainStore ssoDomainStore,
         ISecretProvider secretProvider,
         IAuditLogger audit,
@@ -325,6 +365,10 @@ public static class SsoEndpoints
         if (!string.IsNullOrEmpty(request.InteractionPath) && !request.InteractionPath.StartsWith('/'))
             return Results.BadRequest(new { error = "invalid_request", error_description = "InteractionPath must start with '/'" });
 
+        var organizationId = string.IsNullOrWhiteSpace(request.OrganizationId) ? null : request.OrganizationId;
+        if (await ValidateOrganizationAsync(organizationId, organizations, ct) is { } orgError)
+            return orgError;
+
         var connectionId = Guid.NewGuid().ToString("N");
         var now = DateTimeOffset.UtcNow;
 
@@ -341,6 +385,7 @@ public static class SsoEndpoints
             ClientId = request.ClientId,
             ClientSecret = protectedSecret,
             RedirectUrl = request.RedirectUrl,
+            OrganizationId = organizationId,
             AllowedDomains = request.AllowedDomains ?? [],
             PassthroughParams = request.PassthroughParams ?? [],
             JitProvisioningEnabled = request.JitProvisioningEnabled,
@@ -349,20 +394,24 @@ public static class SsoEndpoints
             CreatedAt = now
         };
 
-        if (await ValidateDomainsAsync(config.AllowedDomains, connectionId, ssoDomainStore, ct) is { } domainError)
+        if (await ValidateDomainsAsync(config.AllowedDomains, connectionId, organizationId, ssoDomainStore, samlStore, oidcStore, ct) is { } domainError)
             return domainError;
 
         await oidcStore.UpsertAsync(config, ct);
 
-        foreach (var domain in config.AllowedDomains)
+        // Tenant-level connections only — see the SAML twin above.
+        if (organizationId is null)
         {
-            await ssoDomainStore.UpsertAsync(new SsoDomain
+            foreach (var domain in config.AllowedDomains)
             {
-                Domain = domain.ToLowerInvariant(),
-                ProviderType = "oidc",
-                ConnectionId = connectionId,
-                Scheme = $"oidc-{connectionId}"
-            }, ct);
+                await ssoDomainStore.UpsertAsync(new SsoDomain
+                {
+                    Domain = domain.ToLowerInvariant(),
+                    ProviderType = "oidc",
+                    ConnectionId = connectionId,
+                    Scheme = $"oidc-{connectionId}"
+                }, ct);
+            }
         }
 
         await audit.LogAsync(AdminActor.Of(http), "oidc_connection.created", "oidc_connection", connectionId,
@@ -539,19 +588,81 @@ public static class SsoEndpoints
         });
     }
 
+    /// <summary>
+    /// Shape-checks each domain and refuses one already claimed WITHIN THE SAME SCOPE.
+    /// </summary>
+    /// <remarks>
+    /// A tenant-level connection (<paramref name="organizationId"/> null) is checked against the
+    /// tenant-wide <see cref="ISsoDomainStore"/> index, exactly as it always was. An org-scoped
+    /// connection is checked against the other connections of its OWN organisation, because its domains
+    /// never reach that index — so a domain may legitimately appear once at tenant level and once per
+    /// organisation, and only a second claim inside one scope is a conflict.
+    /// <para>
+    /// The org-scoped side reads both provider stores because the two protocols share one domain
+    /// namespace within an organisation, the same way the tenant-wide index holds one row per domain
+    /// regardless of which protocol wrote it.
+    /// </para>
+    /// </remarks>
     private static async Task<IResult?> ValidateDomainsAsync(
-        IEnumerable<string> domains, string connectionId, ISsoDomainStore ssoDomainStore, CancellationToken ct)
+        IEnumerable<string> domains,
+        string connectionId,
+        string? organizationId,
+        ISsoDomainStore ssoDomainStore,
+        ISamlProviderStore samlStore,
+        IOidcProviderStore oidcStore,
+        CancellationToken ct)
     {
+        // Materialised once: an org-scoped check would otherwise re-list both stores per domain.
+        HashSet<string>? claimedInOrganization = null;
+        if (organizationId is not null)
+        {
+            claimedInOrganization = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var saml in await samlStore.ListByOrganizationAsync(organizationId, ct))
+            {
+                if (string.Equals(saml.ConnectionId, connectionId, StringComparison.Ordinal)) continue;
+                foreach (var d in saml.AllowedDomains) claimedInOrganization.Add(d.Trim());
+            }
+            foreach (var oidc in await oidcStore.ListByOrganizationAsync(organizationId, ct))
+            {
+                if (string.Equals(oidc.ConnectionId, connectionId, StringComparison.Ordinal)) continue;
+                foreach (var d in oidc.AllowedDomains) claimedInOrganization.Add(d.Trim());
+            }
+        }
+
         foreach (var raw in domains)
         {
             var domain = raw.Trim().ToLowerInvariant();
             if (!IsValidDomain(domain))
                 return Results.BadRequest(new { error = "invalid_domain", error_description = $"Invalid domain: '{raw}'" });
 
+            if (claimedInOrganization is not null)
+            {
+                if (claimedInOrganization.Contains(domain))
+                    return Results.BadRequest(new { error = "domain_claimed", error_description = $"Domain '{domain}' is already mapped to another SSO connection in this organization" });
+                continue;
+            }
+
             var existing = await ssoDomainStore.GetAsync(domain, ct);
             if (existing is not null && !string.Equals(existing.ConnectionId, connectionId, StringComparison.Ordinal))
                 return Results.BadRequest(new { error = "domain_claimed", error_description = $"Domain '{domain}' is already mapped to another SSO connection" });
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Refuses an <c>OrganizationId</c> that names no organisation. A connection pinned to a
+    /// non-existent organisation is a connection nothing can ever reach: pre-authentication resolution
+    /// validates the organisation before it will offer one, so the connection would simply never be
+    /// offered and never route a domain — a silent misconfiguration with no error anywhere.
+    /// </summary>
+    private static async Task<IResult?> ValidateOrganizationAsync(
+        string? organizationId, IOrganizationStore organizations, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(organizationId)) return null;
+        if (!OrganizationIdentifier.IsValid(organizationId))
+            return Results.BadRequest(new { error = "invalid_request", error_description = $"OrganizationId must be 1-{OrganizationIdentifier.MaxLength} characters of letters, digits, '.', '_', '~' or '-'." });
+        if (await organizations.GetAsync(organizationId, ct) is null)
+            return Results.BadRequest(new { error = "unknown_organization", error_description = $"Organization '{organizationId}' does not exist" });
         return null;
     }
 
@@ -581,6 +692,14 @@ public static class SsoEndpoints
         public string? NameIdFormat { get; set; }
         /// <summary>Force signed AuthnRequests; null = sign only when the IdP metadata requests it. F54.</summary>
         public bool? SignAuthnRequests { get; set; }
+
+        /// <summary>
+        /// Scope this connection to one organisation — it is then offered only when that organisation is
+        /// selected, its <c>AllowedDomains</c> are matched only within it (and are NOT written to the
+        /// tenant-wide SSO domain index), and everyone who signs in through it is made a member of it.
+        /// Null or omitted = a tenant-level connection, the historic and default behaviour.
+        /// </summary>
+        public string? OrganizationId { get; set; }
         public List<string>? AllowedDomains { get; set; }
 
         /// <summary>
@@ -616,6 +735,13 @@ public static class SsoEndpoints
     /// </summary>
     public sealed class UpdateSamlRequest
     {
+        /// <summary>
+        /// Move this connection between tenant level and an organisation. Null (absent) = leave the
+        /// scope unchanged; <c>""</c> = back to tenant level; an organisation id = scope it there.
+        /// Changing it rewrites the tenant-wide domain index accordingly — an org-scoped connection's
+        /// domains are removed from it, a connection returned to tenant level re-registers them.
+        /// </summary>
+        public string? OrganizationId { get; set; }
         public List<string>? AllowedDomains { get; set; }
         public bool? JitProvisioningEnabled { get; set; }
         /// <summary>Still route users through the local MFA challenge after federated login (F42);
@@ -648,6 +774,14 @@ public static class SsoEndpoints
         public string ClientId { get; set; } = "";
         public string ClientSecret { get; set; } = "";
         public string RedirectUrl { get; set; } = "";
+
+        /// <summary>
+        /// Scope this connection to one organisation — it is then offered only when that organisation is
+        /// selected, its <c>AllowedDomains</c> are matched only within it (and are NOT written to the
+        /// tenant-wide SSO domain index), and everyone who signs in through it is made a member of it.
+        /// Null or omitted = a tenant-level connection, the historic and default behaviour.
+        /// </summary>
+        public string? OrganizationId { get; set; }
         public List<string>? AllowedDomains { get; set; }
         public List<string>? PassthroughParams { get; set; }
         /// <summary>Opt this connection into JIT provisioning (auto-create unknown federated users on

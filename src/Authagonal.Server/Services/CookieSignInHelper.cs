@@ -18,6 +18,26 @@ public static class CookieSignInHelper
     public const string AuthTimeClaim = "auth_time";
 
     /// <summary>
+    /// Cookie claim naming the organisation an ORG-SCOPED SSO connection authenticated this session
+    /// for. Absent on every other sign-in.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from the <c>org_id</c> claim, which this helper also mints and which may equally come
+    /// from the account's own <see cref="AuthUser.OrganizationId"/>. The two are not interchangeable:
+    /// this one is an ASSERTION — the user proved their identity at an IdP that belongs to exactly one
+    /// organisation — and <c>OrganizationSelector</c> lets it outrank the <c>organization</c> parameter
+    /// and the client's restriction because of it. A claim that could also be a legacy account tag could
+    /// not be given that authority.
+    /// <para>
+    /// It rides through the MFA park/resume path in <see cref="PendingFederatedSession"/> like every
+    /// other federation binding, and it is what <c>org_id</c> is minted from below when present — so a
+    /// user with a legacy account tag who signs in through an org-scoped connection gets the
+    /// connection's organisation, not the tag's.
+    /// </para>
+    /// </remarks>
+    public const string ConnectionOrganizationClaim = "connection_org_id";
+
+    /// <summary>
     /// Authentication-property key recording when this session began, in Unix seconds.
     /// </summary>
     /// <remarks>
@@ -65,6 +85,17 @@ public static class CookieSignInHelper
         string? sessionId = null)
     {
         var name = $"{user.FirstName} {user.LastName}".Trim();
+
+        // An org-scoped connection's organisation OVERRIDES the account's own tag: the session was
+        // authenticated at that organisation's IdP, and the tag is a downstream provisioning artefact
+        // that may name a different one. Read from the parked claims because this method is also the
+        // resume path for a federated login that was held on an MFA challenge.
+        var connectionOrganizationId = extraClaims?
+            .FirstOrDefault(c => c.Type == ConnectionOrganizationClaim)?.Value;
+        var organizationId = string.IsNullOrWhiteSpace(connectionOrganizationId)
+            ? user.OrganizationId
+            : connectionOrganizationId;
+
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id),
@@ -81,8 +112,8 @@ public static class CookieSignInHelper
         if (mfaAuthenticated)
             claims.Add(new Claim(MfaAuthenticatedClaim, "true"));
 
-        if (!string.IsNullOrWhiteSpace(user.OrganizationId))
-            claims.Add(new Claim("org_id", user.OrganizationId));
+        if (!string.IsNullOrWhiteSpace(organizationId))
+            claims.Add(new Claim("org_id", organizationId));
 
         // Merged, not overwritten, and only for types this helper did not already mint — so a parked
         // `sid`/`sub` cannot displace the ones above, while `saml_name_id`, `session_max_exp`,

@@ -167,6 +167,7 @@ public static class SamlEndpoints
         Authagonal.Core.Services.ISecretProvider secretProvider,
         IProvisioningOrchestrator provisioning,
         ISsoDomainStore ssoDomainStore,
+        IOrganizationMembershipStore memberships,
         IConfiguration configuration,
         IOptions<AuthOptions> authOptions,
         IOptions<CacheOptions> cacheOptions,
@@ -740,6 +741,14 @@ public static class SamlEndpoints
             federationClaims.Add(new Claim("saml_name_id_format", parseResult.NameIdFormat));
         if (!string.IsNullOrEmpty(parseResult.SessionIndex))
             federationClaims.Add(new Claim("saml_session_index", parseResult.SessionIndex));
+        // An ORG-SCOPED connection binds this session to its organisation and makes the user a member of
+        // it. Added to the federation claims rather than to the sign-in list below so it survives the MFA
+        // park/resume path, where the resumed sign-in mints org_id from exactly this claim.
+        if (!string.IsNullOrWhiteSpace(config.OrganizationId))
+        {
+            federationClaims.Add(await FederatedOrganizationBinding.BindAsync(
+                memberships, config.OrganizationId, user.Id, connectionId, logger, ct));
+        }
         // The IdP's own session bound, carried onto the cookie as session_max_exp — the claim the subject
         // resolver reads, which clamps every access, id and refresh token issued from this session.
         if (parseResult.SessionNotOnOrAfter is { } idpSessionBound)
@@ -770,8 +779,14 @@ public static class SamlEndpoints
             new(CookieSignInHelper.MfaAuthenticatedClaim, "true")
         };
 
-        if (!string.IsNullOrWhiteSpace(user.OrganizationId))
-            claims.Add(new Claim("org_id", user.OrganizationId));
+        // The connection's organisation OVERRIDES the account's own tag: this session was authenticated
+        // at that organisation's IdP, while the tag is a downstream provisioning artefact that may name a
+        // different one. CookieSignInHelper applies the identical rule on the MFA resume path.
+        var organizationId = string.IsNullOrWhiteSpace(config.OrganizationId)
+            ? user.OrganizationId
+            : config.OrganizationId;
+        if (!string.IsNullOrWhiteSpace(organizationId))
+            claims.Add(new Claim("org_id", organizationId));
 
         // The same list the MFA branch parks — assembled once, above.
         claims.AddRange(federationClaims);

@@ -1,5 +1,94 @@
 # Changelog
 
+## [0.29.0], 2026-09-14
+
+### Added
+
+- **SSO connections can belong to an organisation.** A tenant that serves many customer
+  organisations could only hold ONE connection per email domain: `AllowedDomains` drives the
+  tenant-wide `SsoDomain` index, whose key is the domain, so two customers could not both bring
+  an IdP for `contoso.com` — and every connection was offered on every login screen the tenant
+  served, so one customer's "Continue with Contoso Entra" button appeared on another's. Both
+  provider configs now carry `OrganizationId` (null = a tenant-level connection, which is what
+  every existing connection reads back as, and the only shape this library had until now).
+  A connection that names one:
+  - is **offered only when that organisation is selected** — never on the tenant's own login
+    screen, and never to a request that resolved to no organisation, even one whose `login_hint`
+    matches its domains exactly;
+  - has its domains **matched within that organisation only**. It is deliberately not written to
+    the tenant-wide `SsoDomain` index, so one domain may be claimed once at tenant level and once
+    per organisation. A second claim inside one organisation is still refused (`domain_claimed`),
+    across both protocols. Moving a connection into an organisation removes its index rows; moving
+    it back (`"organizationId": ""` on the update endpoint) re-registers them;
+  - **makes everyone who signs in through it a member.** The SAML ACS and the OIDC callback stamp
+    the connection's organisation as `org_id`, overriding the account's own
+    `AuthUser.OrganizationId` — a downstream provisioning artefact, not an assertion about this
+    sign-in — and create an active membership when the user holds none. Without it every user of a
+    self-service connection would authenticate successfully and then be refused a token by
+    `Organization.RequireMembershipForTokens`, with nothing in the product able to create the row
+    they were missing. An EXISTING membership is never modified: a `suspended` row stays suspended,
+    so signing in again cannot restore access an administrator revoked.
+
+  `/connect/authorize` resolves the organisation BEFORE authentication — the `organization`
+  parameter, then a client restricted to exactly one, then the new `ITenantContext.OrganizationId`
+  — and consults its connections ahead of every tenant-wide home-realm rule, because a customer's
+  own IdP has to win over a tenant-level connection claiming the same domain and because an
+  org-scoped connection is invisible to the index. With one resolved: `idp_hint` selects within it
+  (SAML included, which the tenant-wide hint path cannot reach); one connection and no
+  contradicting `login_hint` goes straight to it; several are told apart by the hinted email
+  domain; no match falls through to exactly today's behaviour. The redirect carries the same
+  connection interstitial and the same federation-error loop-breaker the `idp_hint` path already
+  had, and can only ever name a registered connection of that organisation — resolution refuses a
+  disabled organisation, an unknown one, and one the client's `RestrictedToOrganizationIds`
+  forbids, each by resolving to no organisation rather than by erroring in front of the login
+  screen.
+
+  `OrganizationSelector` gains the session's connection organisation as its second-highest source,
+  above the `organization` parameter and the client restriction: it is the only one that was proven
+  rather than asserted by a caller. A request naming a different organisation is refused with
+  `access_denied` instead of being quietly downgraded.
+
+  `/api/auth/providers` and `/api/auth/sso-check` take an `organization` query parameter (falling
+  back to `ITenantContext.OrganizationId`) and resolve it the same way, so the login card and the
+  authorize endpoint cannot route one address to two different IdPs. With an organisation, its own
+  button connections are listed first and `sso-check` matches its domains before the tenant index;
+  the providers payload gains **`autoChallenge`**, naming the single connection an organisation has
+  so a login app can skip the card entirely. It is advisory — the authorize endpoint performs the
+  same auto-challenge itself. Admin create/update take and return `organizationId`; an organisation
+  that does not exist is `400 unknown_organization`. Documented in docs/self-service-sso.md
+  ("Organisation-scoped connections"), docs/organizations.md and docs/admin-api.md.
+
+- **`ITenantContext.OrganizationId`** — the organisation a host resolves per request, before
+  authentication (a per-organisation hostname or custom domain). A default interface member
+  returning `null`, so it is **not** a breaking change: an existing `ITenantContext` implementation
+  in another host keeps compiling untouched, and `null` — what every single-tenant deployment
+  reports — is the behaviour this library had everywhere before. It is the lowest-precedence
+  pre-authentication source and never widens access: the organisation it names is still checked for
+  existence, for `Enabled`, and against the client's `RestrictedToOrganizationIds`.
+
+### Changed
+
+- **`upstream_connection_id` is set on every OIDC federation cookie**, not only when the connection
+  opts into `RevalidateOnRefresh`, so a session always records which IdP owns it. Every existing
+  consumer is additionally guarded on the upstream refresh token being present, so nothing changes
+  for a connection that does not revalidate — except that the already-degraded revalidation
+  diagnostic now performs one connection point read per refresh of such a session (it still warns
+  only for a connection that asked to revalidate).
+
+### Fixed
+
+- **A failed federation reached by `login_hint` looped until the browser gave up.** The tenant-wide
+  home-realm rule sends a request whose `login_hint` domain is in the `SsoDomain` index straight to
+  that connection. A federation that fails redirects back to the authorize URL with `error` appended
+  — and this rule re-fired on that URL, sending the browser to the same IdP again, round after round,
+  until the user-agent reported "too many redirects" instead of the failure. It now falls through to
+  the login card when the request carries an `error`, which is the recoverable outcome for this rule
+  specifically: the card is still reachable, it may offer another connection, and a `login_hint` is a
+  shortcut past it rather than a demand for that IdP. (The `idp_hint` path and the new
+  organisation-scoped path instead reflect the error to the relying party, because for those the IdP
+  named *is* the only way in.) The error stays on the returnUrl, so completing the sign-in still
+  lands back at `/connect/authorize`.
+
 ## [0.28.2], 2026-09-14
 
 ### Fixed

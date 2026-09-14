@@ -57,6 +57,17 @@ public sealed class SamlProviderConfig
     /// </remarks>
     public bool AllowUnsolicitedResponses { get; set; }
 
+    /// <summary>
+    /// The organisation this connection belongs to; null for a tenant-level connection (the default,
+    /// and what every existing connection reads back as). When set, the connection belongs to that
+    /// organisation: it is offered only when that organisation is selected, its
+    /// <see cref="AllowedDomains"/> are matched only within that organisation — it is deliberately NOT
+    /// written to the tenant-wide <c>SsoDomain</c> index, so the same domain may be claimed once at
+    /// tenant level and once per organisation — and users who sign in through it are members of it
+    /// (the ACS stamps <c>org_id</c> and creates the membership when one is absent).
+    /// </summary>
+    public string? OrganizationId { get; set; }
+
     public List<string> AllowedDomains { get; set; } = [];
 
     /// <summary>

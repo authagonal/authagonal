@@ -27,6 +27,12 @@ public sealed class DynamoSamlProviderStore(DynamoTable table, EnvPartitioner pa
         return results;
     }
 
+    public async Task<IReadOnlyList<SamlProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default)
+    {
+        var all = await GetAllAsync(ct).ConfigureAwait(false);
+        return [.. all.Where(c => string.Equals(c.OrganizationId, organizationId, StringComparison.Ordinal))];
+    }
+
     public Task UpsertAsync(SamlProviderConfig config, CancellationToken ct = default)
     {
         var item = Dyn.Item(partitioner.PK(config.ConnectionId), ConfigSk);

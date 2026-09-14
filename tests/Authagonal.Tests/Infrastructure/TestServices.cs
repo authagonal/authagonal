@@ -7,6 +7,13 @@ public sealed class TestTenantContext(string issuer) : ITenantContext
 {
     public string TenantId => "test";
     public string Issuer => issuer;
+
+    /// <summary>
+    /// Stands in for a multi-tenant host that pins an organisation per request (a custom domain, a
+    /// per-organisation hostname). Null by default, which is what every single-tenant deployment
+    /// reports and what keeps every pre-existing test on the tenant-wide path.
+    /// </summary>
+    public string? OrganizationId { get; set; }
 }
 
 
