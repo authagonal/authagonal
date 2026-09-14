@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.29.0], 2026-09-14
+## [Unreleased]
 
 ### Added
 
@@ -74,6 +74,20 @@
   for a connection that does not revalidate — except that the already-degraded revalidation
   diagnostic now performs one connection point read per refresh of such a session (it still warns
   only for a connection that asked to revalidate).
+
+### Fixed
+
+- **A failed federation reached by `login_hint` looped until the browser gave up.** The tenant-wide
+  home-realm rule sends a request whose `login_hint` domain is in the `SsoDomain` index straight to
+  that connection. A federation that fails redirects back to the authorize URL with `error` appended
+  — and this rule re-fired on that URL, sending the browser to the same IdP again, round after round,
+  until the user-agent reported "too many redirects" instead of the failure. It now falls through to
+  the login card when the request carries an `error`, which is the recoverable outcome for this rule
+  specifically: the card is still reachable, it may offer another connection, and a `login_hint` is a
+  shortcut past it rather than a demand for that IdP. (The `idp_hint` path and the new
+  organisation-scoped path instead reflect the error to the relying party, because for those the IdP
+  named *is* the only way in.) The error stays on the returnUrl, so completing the sign-in still
+  lands back at `/connect/authorize`.
 
 ## [0.28.2], 2026-09-14
 

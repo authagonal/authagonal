@@ -181,6 +181,20 @@ public static class AuthorizeEndpoint
                 var idpHint = source.Get("idp_hint");
                 var loginHint = source.Get("login_hint");
 
+                // A failed federation round redirects back to this URL with error params appended. Every
+                // home-realm rule below re-federates without being asked to, so each of them has to notice
+                // this or it loops forever ("too many redirects") instead of reporting the failure.
+                //
+                // Read from the LIVE request query, never from `source`: for a PAR request `source` is the
+                // pushed payload, which by construction cannot carry an error the federation return appended
+                // to the authorize URL — reading `source` there would miss it and loop anyway.
+                //
+                // One variable rather than the same three lines in three places: these rules are tried in
+                // order, so a rule that forgot the check would be reached only for the requests the rules
+                // above it did not claim — which is exactly the shape of defect that survives review.
+                var federationReturnError = httpContext.Request.Query["error"].ToString();
+                var federationReturned = !string.IsNullOrWhiteSpace(federationReturnError);
+
                 // ── Organisation-scoped home-realm discovery ────────────────────────────────────
                 //
                 // An organisation resolved BEFORE authentication (the `organization` parameter, a client
@@ -235,17 +249,14 @@ public static class AuthorizeEndpoint
 
                     if (target is not null)
                     {
-                        // A failed federation round redirects back here with error params appended, and
-                        // this path re-federates without being asked to — so without this it would loop
-                        // forever ("too many redirects") instead of reporting the failure. Read from the
-                        // LIVE request query rather than `source`, for the same reason the idp_hint path
-                        // below does: a PAR `source` is the pushed payload and never carries it.
-                        var orgFederationError = httpContext.Request.Query["error"].ToString();
-                        if (!string.IsNullOrWhiteSpace(orgFederationError))
+                        // The organisation's IdP is the only way into this organisation, so a failure
+                        // there is reported to the relying party rather than dropped onto a login card
+                        // that offers nothing else — the same call the idp_hint path makes below.
+                        if (federationReturned)
                         {
                             var orgFederationErrorDescription = httpContext.Request.Query["error_description"].ToString();
                             return AuthorizeRequestSupport.BuildErrorRedirect(
-                                redirectUri, orgFederationError,
+                                redirectUri, federationReturnError,
                                 string.IsNullOrWhiteSpace(orgFederationErrorDescription) ? "Federated login failed" : orgFederationErrorDescription,
                                 state, tenantContext.Issuer);
                         }
@@ -271,18 +282,13 @@ public static class AuthorizeEndpoint
 
                 if (!string.IsNullOrWhiteSpace(idpHint))
                 {
-                    // A failed federation round redirects back here with error params appended.
-                    // Re-federating would loop forever ("too many redirects") — return the error to
-                    // the relying party instead, per OAuth (redirect_uri is already validated above).
-                    // Read from the LIVE request query, not `source`: for a PAR request `source` is the
-                    // pushed payload, which never carries the error the federation return appends to the
-                    // authorize URL — reading `source` there would miss it and loop anyway.
-                    var federationError = httpContext.Request.Query["error"].ToString();
-                    if (!string.IsNullOrWhiteSpace(federationError))
+                    // The relying party DEMANDED this IdP, so there is nothing to fall back to: return
+                    // the error to it instead, per OAuth (redirect_uri is already validated above).
+                    if (federationReturned)
                     {
                         var federationErrorDescription = httpContext.Request.Query["error_description"].ToString();
                         return AuthorizeRequestSupport.BuildErrorRedirect(
-                            redirectUri, federationError,
+                            redirectUri, federationReturnError,
                             string.IsNullOrWhiteSpace(federationErrorDescription) ? "Federated login failed" : federationErrorDescription,
                             state, tenantContext.Issuer);
                     }
@@ -312,9 +318,23 @@ public static class AuthorizeEndpoint
                 // card would only 409 a password attempt for it anyway (sso_required), and product
                 // flows that know the user (invite acceptance) shouldn't detour through an
                 // interactive card. Mirrors /sso-check's resolution; loginHint rides along so the
-                // IdP can prefill. Federation failures surface through the SAML/OIDC endpoints'
-                // own error redirects, same as the card-initiated path.
-                if (!string.IsNullOrWhiteSpace(loginHint) && loginHint.Contains('@'))
+                // IdP can prefill.
+                //
+                // …unless this request IS a federation that just failed and bounced back here. This rule
+                // fires on a hint the relying party sent for convenience, not on anything it asked to
+                // federate, and it re-fired on the returned URL — so the IdP bounced back, this sent the
+                // browser to the IdP again, and the round repeated until the user-agent gave up with "too
+                // many redirects". The two rules above it have refused this since they were written; this
+                // one never did.
+                //
+                // It falls through to the login card rather than reflecting the error to the relying
+                // party, which is the opposite of what those two do, because the situations are opposite:
+                // an idp_hint or an organisation's sole IdP is the only way in, so a failure there is
+                // terminal and belongs to the RP. A login_hint is a shortcut past a card that is still
+                // perfectly reachable — it may offer another connection, and the user may not be an SSO
+                // user at all — so the recoverable outcome is to show it. The error stays on the returnUrl
+                // that rides along, so finishing the sign-in still lands back here.
+                if (!federationReturned && !string.IsNullOrWhiteSpace(loginHint) && loginHint.Contains('@'))
                 {
                     var hintDomain = Authagonal.Core.Services.EmailDomain.Of(loginHint);
                     if (!string.IsNullOrWhiteSpace(hintDomain))

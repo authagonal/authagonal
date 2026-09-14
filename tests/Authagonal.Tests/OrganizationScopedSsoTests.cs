@@ -492,6 +492,29 @@ public sealed class OrganizationScopedSsoTests : IAsyncLifetime
         Assert.StartsWith("/login", await AuthorizeLocationAsync("login_hint=bob%40acme.test"));
     }
 
+    /// The same loop-breaker, on the tenant-wide domain-index path. This rule federates on a hint the
+    /// relying party sent for convenience, so it re-fired on the URL the failed federation bounced back
+    /// to and the round repeated until the user-agent gave up. Unlike the idp_hint and organisation
+    /// rules, which reflect the error to the relying party because their IdP was the only way in, this
+    /// one falls through to the login card: the card is still reachable, may offer another connection,
+    /// and the user may not be an SSO user at all.
+    [Fact]
+    public async Task Authorize_TenantWideHint_AFailedFederationFallsThroughToTheLoginCard()
+    {
+        var tenant = await CreateSamlAsync("Tenant IdP", organizationId: null, domains: ["shared.test"]);
+        var id = tenant.GetProperty("connectionId").GetString()!;
+
+        var location = await AuthorizeLocationAsync(
+            "login_hint=bob%40shared.test&error=access_denied&error_description=nope");
+
+        Assert.DoesNotContain($"/saml/{id}/login", location);
+        Assert.StartsWith("/login", location);
+
+        // …and without the error the very same request still federates, so the rule is gated, not gone.
+        Assert.StartsWith(
+            $"/saml/{id}/login", await AuthorizeLocationAsync("login_hint=bob%40shared.test"));
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
