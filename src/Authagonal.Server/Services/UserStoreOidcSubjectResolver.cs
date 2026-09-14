@@ -94,12 +94,19 @@ public sealed class UserStoreOidcSubjectResolver(
                 upstreamRefreshToken = stored;
         }
 
+        // The organisation an ORG-SCOPED SSO connection authenticated this session for. Proven, not
+        // asserted by the caller, so it outranks the `organization` parameter and the client's
+        // restriction inside the selector — see OrganizationSelector's precedence list.
+        var connectionOrganizationId =
+            authenticatedPrincipal.FindFirstValue(CookieSignInHelper.ConnectionOrganizationClaim);
+
         try
         {
             var subject = await BuildSubjectAsync(
                 user, client, sessionMaxExpiresAt, sessionId, federationClaims,
                 upstreamRefreshToken, upstreamConnectionId, authTime, ct,
-                requestedOrganization: context.RequestedOrganization);
+                requestedOrganization: context.RequestedOrganization,
+                connectionOrganizationId: connectionOrganizationId);
             return OidcSubjectResult.Allow(subject);
         }
         catch (OrganizationAccessDeniedException ex)
@@ -172,6 +179,9 @@ public sealed class UserStoreOidcSubjectResolver(
         {
             // The connection is only loaded in this degraded branch, so the extra read costs nothing on a
             // healthy refresh — and nothing at all for a non-federated one, which has no connection id.
+            // Since the connection id rides every OIDC-federated cookie (not only the RevalidateOnRefresh
+            // ones), this is one point read per refresh of a federated session that holds no upstream
+            // token; the warning below still fires only for a connection that asked to revalidate.
             OidcProviderConfig? degradedConfig = null;
             try { degradedConfig = await oidcProviderStore.GetAsync(priorSubject.UpstreamConnectionId, ct); }
             catch (Exception ex)
@@ -402,6 +412,11 @@ public sealed class UserStoreOidcSubjectResolver(
     /// so it resolves by id only — never as a slug, or a later organisation taking that value as its
     /// slug would capture the grant.
     /// </param>
+    /// <param name="connectionOrganizationId">
+    /// The organisation an org-scoped SSO connection authenticated this session for, off the cookie.
+    /// Trailing for the same reason as the two above — every existing positional caller keeps
+    /// compiling. Null on the device and admin-mint paths, which have no federation cookie to read.
+    /// </param>
     /// <exception cref="OrganizationAccessDeniedException">
     /// The organisation does not exist, is disabled, is not permitted for this client, or the user is
     /// not an active member of it. Both resolver entry points turn this into an
@@ -418,7 +433,8 @@ public sealed class UserStoreOidcSubjectResolver(
         DateTimeOffset? authTime = null,
         CancellationToken ct = default,
         string? requestedOrganization = null,
-        string? carriedOrganizationId = null)
+        string? carriedOrganizationId = null,
+        string? connectionOrganizationId = null)
     {
         // SCIM group → role mappings (empty store = no-op). Fetch the user's groups once,
         // used for both the optional groups claim and effective-role resolution.
@@ -446,7 +462,7 @@ public sealed class UserStoreOidcSubjectResolver(
         var organization = organizationSelector is null
             ? new OrganizationSelection { OrganizationId = user.OrganizationId }
             : await organizationSelector.SelectAsync(
-                user, client, requestedOrganization, carriedOrganizationId, ct);
+                user, client, requestedOrganization, carriedOrganizationId, ct, connectionOrganizationId);
 
         // …and the roles that organization grants, unioned in last. Only an EXPLICITLY selected
         // organization with an ACTIVE membership contributes any (see OrganizationSelector), so a
