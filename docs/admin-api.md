@@ -267,7 +267,9 @@ PUT    /api/v1/saml/connections/{connectionId}     # Update (partial — only su
 DELETE /api/v1/saml/connections/{connectionId}     # Delete
 ```
 
-Create requires `connectionName`, `entityId`, and **exactly one of** `metadataLocation` (a metadata URL) or `metadataXml` (pasted IdP metadata, for IdPs without a metadata URL, it is parse-validated and condensed at save). Optional: `nameIdFormat` (omit for the emailAddress default, `"none"` to omit NameIDPolicy, recommended for ADFS, or a NameID format URN), `signAuthnRequests`, `iconUrl`, `allowedDomains`, `disableJitProvisioning`. Every connection gets a server-generated SP keypair; it is never returned by the API. See [SAML](saml) for details.
+Create requires `connectionName`, `entityId`, and **exactly one of** `metadataLocation` (a metadata URL) or `metadataXml` (pasted IdP metadata, for IdPs without a metadata URL, it is parse-validated and condensed at save). Optional: `nameIdFormat` (omit for the emailAddress default, `"none"` to omit NameIDPolicy, recommended for ADFS, or a NameID format URN), `signAuthnRequests`, `iconUrl`, `allowedDomains`, `disableJitProvisioning`, `organizationId`. Every connection gets a server-generated SP keypair; it is never returned by the API. See [SAML](saml) for details.
+
+`organizationId` scopes the connection to one [organization](organizations): it is offered only when that organization is selected, its `allowedDomains` are matched only within it (and are *not* written to the tenant-wide SSO domain index), and everyone who signs in through it becomes a member of it. Omitted or `null` = a tenant-level connection. An organization that does not exist is `400 unknown_organization`. On update, `null` (the field absent) leaves the scope alone, `""` returns the connection to tenant level, and either direction rewrites the domain index accordingly. See [Organisation-scoped connections](self-service-sso#organisation-scoped-connections).
 
 ### OIDC Providers
 
@@ -277,7 +279,7 @@ GET    /api/v1/oidc/connections/{connectionId}     # Get one
 DELETE /api/v1/oidc/connections/{connectionId}     # Delete
 ```
 
-Create requires `connectionName`, `metadataLocation`, `clientId`, `clientSecret`, `redirectUrl`. Optional: `iconUrl`, `allowedDomains`, `passthroughParams`. The client secret is protected at rest and never returned. See [OIDC Federation](oidc-federation).
+Create requires `connectionName`, `metadataLocation`, `clientId`, `clientSecret`, `redirectUrl`. Optional: `iconUrl`, `allowedDomains`, `passthroughParams`, `organizationId` (same meaning as on a SAML connection, above). The client secret is protected at rest and never returned. See [OIDC Federation](oidc-federation).
 
 ### SSO Domains
 
