@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.2], 2026-09-14
+
+### Fixed
+
+- **AzureProvider: `ReindexUserAsync` deserialised `RolesJson` after re-encrypting the entity,
+  throwing `JsonException` for every user holding a role and leaving the reverse role/organisation
+  membership indexes unbuilt; the PII backfill therefore failed and retried every cycle.**
+
 ## [0.28.1], 2026-09-14
 
 ### Added
