@@ -40,7 +40,7 @@ public class ReindexBackfillTests(AzuriteFixture azurite)
 
     private readonly TableServiceClient _svc = new(azurite.ConnectionString);
 
-    private TableUserStore NewStore(string prefix, IFieldCipher? cipher, IIndexTokenizer? tokenizer)
+    private TableUserStore NewStore(string prefix, IFieldCipher? cipher, IIndexTokenizer? tokenizer, bool withMembershipIndex = false)
     {
         TableClient T(string name)
         {
@@ -49,7 +49,9 @@ public class ReindexBackfillTests(AzuriteFixture azurite)
             return c;
         }
         return new TableUserStore(T("Users"), T("Emails"), T("Logins"), T("ExtIds"), T("FirstNames"), T("LastNames"),
-            EnvPartitioner.Live, fieldCipher: cipher, indexTokenizer: tokenizer, userEmailDomainsTable: T("EmailDomains"));
+            EnvPartitioner.Live, fieldCipher: cipher, indexTokenizer: tokenizer, userEmailDomainsTable: T("EmailDomains"),
+            userRolesTable: withMembershipIndex ? T("Roles") : null,
+            userOrganizationsTable: withMembershipIndex ? T("Organizations") : null);
     }
 
     private async Task<bool> RowExists<T>(string table, string pk, string rk) where T : class, ITableEntity
@@ -122,6 +124,53 @@ public class ReindexBackfillTests(AzuriteFixture azurite)
         Assert.Equal("u1", got!.Id);
         Assert.Equal("ada@acme.test", got.Email);
         Assert.Equal("Lovelace", got.LastName);
+    }
+
+    /// <summary>
+    /// Regression test for the bug where <c>ReindexUserAsync</c> re-encrypted the entity (rewriting
+    /// <c>RolesJson</c> to a ciphertext token in place) and only THEN deserialised roles off that same
+    /// entity to drive the role-index backfill — throwing <see cref="System.Text.Json.JsonException"/>
+    /// for every user holding a non-empty role list, before the organization-membership sync a few
+    /// lines later was ever reached.
+    /// </summary>
+    [Fact]
+    public async Task Reindex_BackfillsRoleAndOrganizationMembershipIndexes_WithoutThrowing()
+    {
+        var prefix = $"backfillrole{Guid.NewGuid():N}";
+        // Legacy state: created before encryption AND before the role/org membership indexes existed —
+        // plaintext profile carrying a role, no reverse-index rows anywhere yet.
+        var plain = NewStore(prefix, cipher: null, tokenizer: null);
+        await plain.CreateAsync(new AuthUser
+        {
+            Id = "u1",
+            Email = "staff@acme.test",
+            NormalizedEmail = "STAFF@ACME.TEST",
+            FirstName = "Grace",
+            LastName = "Hopper",
+            IsActive = true,
+            Roles = ["staff-admin"],
+            OrganizationId = "org-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+
+        // Turn encryption on, wire the role/org membership indexes, and backfill the cold row. Before
+        // the fix this throws JsonException("'v' is an invalid start of a value") deserialising the
+        // ciphertext RolesJson that EncryptEntityAsync just wrote.
+        var enc = NewStore(prefix, new FakeCipher(), new FakeTokenizer(), withMembershipIndex: true);
+        await enc.ReindexUserAsync("u1");
+
+        // Role membership index backfilled: the user now shows up in the role listing.
+        var members = await enc.ListUsersInRoleAsync("staff-admin");
+        Assert.Equal(new[] { "u1" }, members.Select(u => u.Id).ToArray());
+
+        // Organization membership index backfilled too — step 6 of the same method, same entity.
+        Assert.True(await RowExists<UserOrganizationEntity>(
+            $"{prefix}Organizations", UserOrganizationEntity.KeyFor("org-1"), "u1"));
+
+        // The role and organization both still round-trip off the profile itself.
+        var got = await enc.GetAsync("u1");
+        Assert.Equal(new[] { "staff-admin" }, got!.Roles);
+        Assert.Equal("org-1", got.OrganizationId);
     }
 
     [Fact]

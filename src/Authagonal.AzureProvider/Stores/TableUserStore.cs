@@ -1220,6 +1220,10 @@ public sealed class TableUserStore(
         var normalizedEmail = entity.NormalizedEmail;
         var normFirst = Normalize(entity.FirstName);
         var normLast = Normalize(entity.LastName);
+        // Roles must be captured from the plaintext RolesJson BEFORE EncryptEntityAsync below rewrites
+        // it to a ciphertext token in place — reading it off `entity` afterwards deserialises ciphertext
+        // and throws. CustomAttributesJson is protected the same way but nothing downstream reads it.
+        var roles = entity.ToModel(_partitioner).Roles;
 
         // 1. Re-encrypt the profile in place (plaintext → ciphertext under the current cipher; idempotent).
         await EncryptEntityAsync(entity, ct);
@@ -1234,7 +1238,7 @@ public sealed class TableUserStore(
         //    without it the index only ever describes accounts touched since it shipped, and a role
         //    granted years ago is invisible. Upsert-only: reindex adds what the user holds now and
         //    never removes, so it cannot race a concurrent grant into deleting a live membership.
-        foreach (var role in entity.ToModel(_partitioner).Roles)
+        foreach (var role in roles)
         {
             await WriteRoleIndexAsync(role, userId, ct);
         }
