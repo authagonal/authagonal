@@ -165,6 +165,27 @@ public sealed class SsoProviderListResponse
 {
     [JsonPropertyName("providers")] public IEnumerable<SsoProviderInfo> Providers { get; set; } = [];
 
+    /// <summary>
+    /// The single connection the login app should go straight to, without rendering the card at all.
+    /// Null (and omitted) whenever there is a choice to make — which is every request that resolves to
+    /// no organisation, and every organisation holding zero or more than one connection.
+    /// </summary>
+    /// <remarks>
+    /// Set only when a pre-authentication organisation resolved AND it owns exactly one connection: the
+    /// password form would then offer these users a credential they do not have, and <c>/sso-check</c>
+    /// would answer the same connection for every address they could type. It carries the whole
+    /// <see cref="SsoProviderInfo"/> rather than a bare id so the caller has the <c>loginUrl</c> to
+    /// follow — the connection may be domain-routed or <c>ShowOnLogin=false</c>, in which case it is
+    /// deliberately absent from <see cref="Providers"/> and there would be nothing to look it up in.
+    /// <para>
+    /// Advisory. Nothing server-side depends on a client honouring it: <c>/connect/authorize</c> performs
+    /// the same auto-challenge itself, so a login app that ignores this field still reaches the same IdP.
+    /// </para>
+    /// </remarks>
+    [JsonPropertyName("autoChallenge")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SsoProviderInfo? AutoChallenge { get; set; }
+
     /// <summary>Cloudflare Turnstile site key when configured; null = Turnstile disabled (UI renders no widget).</summary>
     [JsonPropertyName("turnstileSiteKey")] public string? TurnstileSiteKey { get; set; }
 }

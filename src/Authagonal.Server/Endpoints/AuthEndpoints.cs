@@ -1792,11 +1792,20 @@ public static class AuthEndpoints
         IOidcProviderStore oidcStore,
         ISamlProviderStore samlStore,
         ITurnstileKeyProvider turnstileKeys,
+        PreAuthOrganizationResolver preAuthOrganizations,
+        string? organization,
         CancellationToken ct)
     {
+        // Which organisation this login screen is for. The query parameter is what the login app carries
+        // over from the authorize URL it is returning to; with none, a host that pins an organisation per
+        // request (ITenantContext.OrganizationId) still gets one. There is no client here, so the
+        // client-restriction rule simply does not apply.
+        var resolved = await preAuthOrganizations.ResolveAsync(organization, client: null, ct);
+
         // The sitekey the browser renders must be the one paired with the secret this request will verify
         // against — on a multi-tenant host that is per-hostname, so both come from the same provider.
-        var response = await BuildProvidersResponseAsync(oidcStore, samlStore, turnstileKeys.SiteKey, ct);
+        var response = await BuildProvidersResponseAsync(
+            oidcStore, samlStore, turnstileKeys.SiteKey, ct, resolved?.Id);
         return TypedResults.Json(response, AuthagonalJsonContext.Default.SsoProviderListResponse);
     }
 
@@ -1812,11 +1821,20 @@ public static class AuthEndpoints
     /// <c>window.__AUTHAGONAL_BOOT__</c> assignment, which this host's own CSP —
     /// <c>default-src 'self'</c>, no <c>unsafe-inline</c>, no nonce — blocks.
     /// </remarks>
+    /// <param name="organizationId">
+    /// The organisation this request resolved to before authentication, when it resolved to one. Its own
+    /// connections are listed FIRST and its single connection (if it has exactly one) is named in
+    /// <see cref="SsoProviderListResponse.AutoChallenge"/>. Null — the default, and every request in a
+    /// deployment with no organisations — produces byte-for-byte the payload this method always produced.
+    /// A host inlining this payload should pass what <c>PreAuthOrganizationResolver</c> resolved rather
+    /// than a value off the request, so the boot payload and <c>/connect/authorize</c> agree.
+    /// </param>
     public static async Task<SsoProviderListResponse> BuildProvidersResponseAsync(
         IOidcProviderStore oidcStore,
         ISamlProviderStore samlStore,
         string? turnstileSiteKey,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? organizationId = null)
     {
         // Render a "Continue with {name}" button only for connections that are NOT domain-routed and
         // not marked hidden (ShowOnLogin). A connection with AllowedDomains is reached email-first via
@@ -1828,8 +1846,12 @@ public static class AuthEndpoints
         var samlTask = samlStore.GetAllAsync(ct);
         var oidc = await oidcTask;
         var saml = await samlTask;
+
+        // An ORG-SCOPED connection is never a tenant-level button: it belongs to one organisation and is
+        // offered only when that organisation is selected. Excluded here unconditionally and added back
+        // below for the organisation that owns it.
         var result = oidc
-            .Where(p => p.AllowedDomains.Count == 0 && p.ShowOnLogin)
+            .Where(p => p.OrganizationId is null && p.AllowedDomains.Count == 0 && p.ShowOnLogin)
             .Select(p => new SsoProviderInfo
             {
                 ConnectionId = p.ConnectionId,
@@ -1839,7 +1861,7 @@ public static class AuthEndpoints
                 LoginUrl = $"/oidc/{p.ConnectionId}/login"
             })
             .Concat(saml
-                .Where(p => p.AllowedDomains.Count == 0)
+                .Where(p => p.OrganizationId is null && p.AllowedDomains.Count == 0)
                 .Select(p => new SsoProviderInfo
                 {
                     ConnectionId = p.ConnectionId,
@@ -1849,12 +1871,59 @@ public static class AuthEndpoints
                     LoginUrl = $"/saml/{p.ConnectionId}/login"
                 }))
             .ToList();
-        return new SsoProviderListResponse { Providers = result, TurnstileSiteKey = turnstileSiteKey };
+
+        SsoProviderInfo? autoChallenge = null;
+        if (organizationId is not null)
+        {
+            // Already read above — filtered here rather than re-listed, so resolving an organisation
+            // costs this payload no extra store round trip.
+            var organizationConnections = oidc
+                .Where(p => string.Equals(p.OrganizationId, organizationId, StringComparison.Ordinal))
+                .Select(p => (Info: new SsoProviderInfo
+                {
+                    ConnectionId = p.ConnectionId,
+                    Name = p.ConnectionName,
+                    Type = "oidc",
+                    IconUrl = p.IconUrl,
+                    LoginUrl = $"/oidc/{p.ConnectionId}/login"
+                }, Button: p.AllowedDomains.Count == 0 && p.ShowOnLogin))
+                .Concat(saml
+                    .Where(p => string.Equals(p.OrganizationId, organizationId, StringComparison.Ordinal))
+                    .Select(p => (Info: new SsoProviderInfo
+                    {
+                        ConnectionId = p.ConnectionId,
+                        Name = p.ConnectionName,
+                        Type = "saml",
+                        IconUrl = p.IconUrl,
+                        LoginUrl = $"/saml/{p.ConnectionId}/login"
+                    }, Button: p.AllowedDomains.Count == 0)))
+                .ToList();
+
+            // The organisation's own buttons FIRST: a user who arrived through an organisation is there
+            // to sign in to it, and the tenant's own connections are the fallback below them.
+            result.InsertRange(0, organizationConnections.Where(c => c.Button).Select(c => c.Info));
+
+            // Exactly one connection means there is no choice to present — including a domain-routed or
+            // hidden one, which is why this is not read back out of the list above.
+            if (organizationConnections.Count == 1)
+                autoChallenge = organizationConnections[0].Info;
+        }
+
+        return new SsoProviderListResponse
+        {
+            Providers = result,
+            AutoChallenge = autoChallenge,
+            TurnstileSiteKey = turnstileSiteKey,
+        };
     }
 
     private static async Task<IResult> SsoCheckAsync(
         string? email,
+        string? organization,
         ISsoDomainStore ssoDomainStore,
+        ISamlProviderStore samlStore,
+        IOidcProviderStore oidcStore,
+        PreAuthOrganizationResolver preAuthOrganizations,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(email))
@@ -1863,6 +1932,31 @@ public static class AuthEndpoints
         var domain = Authagonal.Core.Services.EmailDomain.Of(email);
         if (string.IsNullOrWhiteSpace(domain))
             return TypedResults.Json(new SsoCheckResponse { SsoRequired = false }, AuthagonalJsonContext.Default.SsoCheckResponse);
+
+        // An organisation's own connections are consulted BEFORE the tenant-wide index, and are absent
+        // from it by construction. Same order and same rule as /connect/authorize, so the card and the
+        // authorize endpoint cannot send one address to two different IdPs.
+        var resolved = await preAuthOrganizations.ResolveAsync(organization, client: null, ct);
+        if (resolved is not null)
+        {
+            var orgConnections = await PreAuthOrganizationResolver.ListConnectionsAsync(
+                samlStore, oidcStore, resolved.Id, ct);
+            var match = orgConnections.FirstOrDefault(c => c.ClaimsDomain(domain))
+                // One connection claiming no domain at all claims the whole organisation, which is the
+                // same rule that makes it the authorize endpoint's auto-challenge.
+                ?? (orgConnections.Count == 1 && orgConnections[0].AllowedDomains.Count == 0 ? orgConnections[0] : null);
+
+            if (match is not null)
+            {
+                return TypedResults.Json(new SsoCheckResponse
+                {
+                    SsoRequired = true,
+                    ProviderType = match.Type,
+                    ConnectionId = match.ConnectionId,
+                    RedirectUrl = match.LoginUrl,
+                }, AuthagonalJsonContext.Default.SsoCheckResponse);
+            }
+        }
 
         var ssoDomain = await ssoDomainStore.GetAsync(domain, ct);
         if (ssoDomain is null)
