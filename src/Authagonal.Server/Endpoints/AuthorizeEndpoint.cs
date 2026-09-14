@@ -25,6 +25,10 @@ public static class AuthorizeEndpoint
             IGrantStore grantStore,
             IOidcProviderStore oidcProviderStore,
             ISsoDomainStore ssoDomainStore,
+            // Explicit for the same reason as IScopeRoleGate below: an unresolvable service on a GET
+            // binds as a body parameter instead, which surfaces as an opaque empty 400.
+            [FromServices] ISamlProviderStore samlProviderStore,
+            [FromServices] PreAuthOrganizationResolver preAuthOrganizations,
             UserStoreOidcSubjectResolver subjectResolver,
             // Explicit: an unresolvable service on a GET binds as a body parameter instead, which
             // surfaces as an opaque empty 400 rather than a missing-dependency error.
@@ -175,6 +179,96 @@ public static class AuthorizeEndpoint
                 // it here — if it's unknown, that endpoint surfaces a 404 rather than
                 // silently falling back to the login UI.
                 var idpHint = source.Get("idp_hint");
+                var loginHint = source.Get("login_hint");
+
+                // ── Organisation-scoped home-realm discovery ────────────────────────────────────
+                //
+                // An organisation resolved BEFORE authentication (the `organization` parameter, a client
+                // restricted to exactly one, or a host that pins one per request) narrows federation to
+                // that organisation's OWN connections. Those connections are absent from the tenant-wide
+                // SsoDomain index by construction, so nothing below this point can find them — and it
+                // runs first deliberately: a customer's own IdP must win over a tenant-level connection
+                // that happens to claim the same email domain.
+                //
+                // Everything it can reach is a registered connection of an organisation the client is
+                // permitted to use and that is enabled (PreAuthOrganizationResolver refuses the rest and
+                // returns null, which falls through to exactly today's behaviour). No new redirect target
+                // enters the endpoint.
+                var preAuthOrganization = await preAuthOrganizations.ResolveAsync(request.Organization, client, ct);
+                if (preAuthOrganization is not null)
+                {
+                    var orgConnections = await PreAuthOrganizationResolver.ListConnectionsAsync(
+                        samlProviderStore, oidcProviderStore, preAuthOrganization.Id, ct);
+
+                    OrganizationConnection? target = null;
+                    if (!string.IsNullOrWhiteSpace(idpHint))
+                    {
+                        // An explicit hint selects within the organisation. One naming something else is
+                        // NOT refused here — it falls through to the tenant-wide idp_hint path below,
+                        // which is what such a request has always done.
+                        target = orgConnections.FirstOrDefault(
+                            c => string.Equals(c.ConnectionId, idpHint, StringComparison.Ordinal));
+                    }
+                    else
+                    {
+                        var hintDomain = !string.IsNullOrWhiteSpace(loginHint) && loginHint.Contains('@')
+                            ? Authagonal.Core.Services.EmailDomain.Of(loginHint)
+                            : null;
+
+                        if (orgConnections.Count == 1)
+                        {
+                            // The organisation has exactly one IdP, so the login card can only offer a
+                            // password attempt this connection's users do not have. Go straight to it —
+                            // unless a login_hint names a domain the connection explicitly does not claim,
+                            // which is the one case where the request contradicts the auto-challenge. A
+                            // connection listing NO domains claims the whole organisation.
+                            var only = orgConnections[0];
+                            if (hintDomain is null || only.AllowedDomains.Count == 0 || only.ClaimsDomain(hintDomain))
+                                target = only;
+                        }
+                        else if (hintDomain is not null)
+                        {
+                            // Several: the hinted domain is what tells them apart.
+                            target = orgConnections.FirstOrDefault(c => c.ClaimsDomain(hintDomain));
+                        }
+                    }
+
+                    if (target is not null)
+                    {
+                        // A failed federation round redirects back here with error params appended, and
+                        // this path re-federates without being asked to — so without this it would loop
+                        // forever ("too many redirects") instead of reporting the failure. Read from the
+                        // LIVE request query rather than `source`, for the same reason the idp_hint path
+                        // below does: a PAR `source` is the pushed payload and never carries it.
+                        var orgFederationError = httpContext.Request.Query["error"].ToString();
+                        if (!string.IsNullOrWhiteSpace(orgFederationError))
+                        {
+                            var orgFederationErrorDescription = httpContext.Request.Query["error_description"].ToString();
+                            return AuthorizeRequestSupport.BuildErrorRedirect(
+                                redirectUri, orgFederationError,
+                                string.IsNullOrWhiteSpace(orgFederationErrorDescription) ? "Federated login failed" : orgFederationErrorDescription,
+                                state, tenantContext.Issuer);
+                        }
+
+                        // The same connection interstitial the idp_hint path renders — a connection that
+                        // declares one declares it wherever it is reached from.
+                        if (!string.IsNullOrWhiteSpace(target.InteractionPath))
+                        {
+                            var orgInteractionAppUrl = configuration["LoginAppUrl"] ?? "/login";
+                            return Results.Redirect(
+                                $"{orgInteractionAppUrl.TrimEnd('/')}{target.InteractionPath}" +
+                                $"?returnUrl={Uri.EscapeDataString(authorizeRelativeUrl)}" +
+                                $"&connection={Uri.EscapeDataString(target.ConnectionId)}");
+                        }
+
+                        var orgFederationLoginUrl =
+                            $"{target.LoginUrl}?returnUrl={Uri.EscapeDataString(authorizeRelativeUrl)}";
+                        if (!string.IsNullOrWhiteSpace(loginHint))
+                            orgFederationLoginUrl += $"&loginHint={Uri.EscapeDataString(loginHint)}";
+                        return Results.Redirect(orgFederationLoginUrl);
+                    }
+                }
+
                 if (!string.IsNullOrWhiteSpace(idpHint))
                 {
                     // A failed federation round redirects back here with error params appended.
@@ -213,8 +307,6 @@ public static class AuthorizeEndpoint
                         $"?returnUrl={Uri.EscapeDataString(authorizeRelativeUrl)}";
                     return Results.Redirect(federationLoginUrl);
                 }
-
-                var loginHint = source.Get("login_hint");
 
                 // A hinted email whose domain is SSO-governed goes STRAIGHT to its IdP — the login
                 // card would only 409 a password attempt for it anyway (sso_required), and product

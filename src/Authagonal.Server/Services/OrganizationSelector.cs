@@ -223,7 +223,20 @@ public sealed class OrganizationSelector(
     /// id attempt is NOT: an id is opaque and compared ordinally, so lowercasing it would resolve a
     /// different organisation from the one named.
     /// </remarks>
-    private async Task<Organization?> ResolveBySlugThenIdAsync(string slugOrId, CancellationToken ct)
+    private Task<Organization?> ResolveBySlugThenIdAsync(string slugOrId, CancellationToken ct)
+        => ResolveBySlugThenIdAsync(organizations, slugOrId, ct);
+
+    /// <summary>
+    /// <inheritdoc cref="ResolveBySlugThenIdAsync(string, CancellationToken)" path="/summary"/>
+    /// </summary>
+    /// <remarks>
+    /// Static and public because <see cref="PreAuthOrganizationResolver"/> resolves the very same
+    /// caller-supplied parameter before anyone has signed in, and two copies of this rule would be two
+    /// chances for the pre- and post-authentication answers to disagree about which organisation a
+    /// request named.
+    /// </remarks>
+    public static async Task<Organization?> ResolveBySlugThenIdAsync(
+        IOrganizationStore organizations, string slugOrId, CancellationToken ct = default)
     {
         // A value carrying any uppercase character CANNOT be a slug: slugs are lowercase-only by
         // OrganizationSlug, which every store enforces at write time. Lowercasing it and asking the
