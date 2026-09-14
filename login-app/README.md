@@ -287,6 +287,8 @@ import { useTranslation } from 'react-i18next';
 | `BrandingContext` | React context for branding config |
 | `useBranding()` | Hook to read branding config |
 | `resolveLocalized(value, lang)` | Resolve a `LocalizedString` for a language |
+| `getBoot()` | Read the host-inlined `#authagonal-boot` payload (`{ branding, providers, organization }`), if any |
+| `getOrganization()` | The `organization` resolved for this request from the boot payload, or `null` — see [Branding: Organisation Name](../docs/branding.md#organisation-name) |
 
 ### i18n
 

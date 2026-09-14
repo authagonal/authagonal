@@ -66,9 +66,27 @@ const defaults: BrandingConfig = {
  * `default-src 'self'` with no `unsafe-inline` and no nonce, so it would block
  * the assignment form on the page that needs it. See `getBoot` below.
  */
+/**
+ * The organisation a multi-tenant host resolved for this request (e.g. via a custom-domain pin),
+ * carried on the boot payload so the login card can say which customer the visitor is signing
+ * into. `name` is the value shown to the visitor; `slug`/`id` are carried for hosts that want them
+ * but are not rendered.
+ */
+export interface OrganizationInfo {
+  id: string;
+  slug: string;
+  name: string;
+}
+
 export interface AuthagonalBoot {
   branding?: Partial<BrandingConfig>;
   providers?: unknown;
+  /**
+   * The organisation resolved for this request, or `null` when the request resolved to none.
+   * Absent entirely on a host that predates organisations, or one that never sets it — treated
+   * the same as `null`.
+   */
+  organization?: OrganizationInfo | null;
 }
 
 export function getBoot(): AuthagonalBoot | undefined {
@@ -82,6 +100,16 @@ export function getBoot(): AuthagonalBoot | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The organisation resolved for this request, read straight off the inlined boot payload.
+ * `null` when there is no boot payload, it carries no `organization` member, or the member is
+ * explicitly `null` — this SPA never fetches organisation on its own the way it does branding,
+ * since there is no per-request static equivalent of `branding.json` to fall back to.
+ */
+export function getOrganization(): OrganizationInfo | null {
+  return getBoot()?.organization ?? null;
 }
 
 export async function loadBranding(): Promise<BrandingConfig> {

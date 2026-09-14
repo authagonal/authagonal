@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "两次输入的密码不一致",
   "passwordWeakError": "密码不符合强度要求",
   "signInTitle": "登录 — {{appName}}",
+  "login.signingInTo": "正在登录 {{name}}",
   "ruleMinLength": "至少 {{count}} 个字符",
   "ruleUppercase": "大写字母",
   "ruleLowercase": "小写字母",

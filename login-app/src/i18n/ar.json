@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "كلمتا المرور غير متطابقتين",
   "passwordWeakError": "كلمة المرور لا تستوفي متطلبات القوة",
   "signInTitle": "تسجيل الدخول — ⁨{{appName}}⁩",
+  "login.signingInTo": "تسجيل الدخول إلى ⁨{{name}}⁩",
   "ruleMinLength": "⁨{{count}}⁩ حرفًا على الأقل",
   "ruleUppercase": "حرف كبير",
   "ruleLowercase": "حرف صغير",

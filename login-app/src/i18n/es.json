@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "Las contraseñas no coinciden",
   "passwordWeakError": "La contraseña no cumple con los requisitos de seguridad",
   "signInTitle": "Iniciar sesión — {{appName}}",
+  "login.signingInTo": "Iniciando sesión en {{name}}",
   "ruleMinLength": "Al menos {{count}} caracteres",
   "ruleUppercase": "Letra mayúscula",
   "ruleLowercase": "Letra minúscula",

@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "As senhas não coincidem",
   "passwordWeakError": "A senha não atende aos requisitos de segurança",
   "signInTitle": "Entrar — {{appName}}",
+  "login.signingInTo": "A entrar em {{name}}",
   "ruleMinLength": "Pelo menos {{count}} caracteres",
   "ruleUppercase": "Letra maiúscula",
   "ruleLowercase": "Letra minúscula",

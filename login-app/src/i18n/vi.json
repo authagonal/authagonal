@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "Mật khẩu không khớp",
   "passwordWeakError": "Mật khẩu không đáp ứng yêu cầu về độ mạnh",
   "signInTitle": "Đăng nhập — {{appName}}",
+  "login.signingInTo": "Đang đăng nhập vào {{name}}",
   "ruleMinLength": "Ít nhất {{count}} ký tự",
   "ruleUppercase": "Chữ cái viết hoa",
   "ruleLowercase": "Chữ cái viết thường",

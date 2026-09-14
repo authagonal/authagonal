@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.28.1], 2026-09-14
+
+### Added
+
+- **Login app shows the organisation name when a request resolves to an organisation.** The
+  `authagonal-boot` payload's `organization` member (`{ id, slug, name }` or `null` — set by a
+  multi-tenant host that resolves one per request, e.g. by custom domain; this library has no
+  pre-authentication organisation resolution of its own) now reaches the SPA's `AuthagonalBoot`
+  type and a new `getOrganization()` export. `AuthLayout` — the shared header behind every route
+  (sign in, register, password reset, MFA, device, consent/agent-consent, grants, account) —
+  renders "Signing in to {name}" under the heading (`data-testid="login-org-name"`, i18n key
+  `login.signingInTo`) whenever `organization.name` is present and differs, case-insensitively and
+  trimmed, from `branding.appName`; nothing renders, and header spacing is unchanged, otherwise.
+  `login.signingInTo` ships in `en.json` only for now — see docs/branding.md.
+
 ## [0.28.0], 2026-09-13
 
 ### Fixed
