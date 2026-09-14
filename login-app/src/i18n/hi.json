@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "पासवर्ड मेल नहीं खाते",
   "passwordWeakError": "पासवर्ड मजबूती की आवश्यकताओं को पूरा नहीं करता है",
   "signInTitle": "साइन इन — {{appName}}",
+  "login.signingInTo": "{{name}} में साइन इन हो रहा है",
   "ruleMinLength": "कम से कम {{count}} वर्ण",
   "ruleUppercase": "बड़ा अक्षर",
   "ruleLowercase": "छोटा अक्षर",

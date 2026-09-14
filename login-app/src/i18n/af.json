@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "Wagwoorde stem nie ooreen nie",
   "passwordWeakError": "Wagwoord voldoen nie aan die sterktevereistes nie",
   "signInTitle": "Meld aan — {{appName}}",
+  "login.signingInTo": "Meld aan by {{name}}",
   "ruleMinLength": "Ten minste {{count}} karakters",
   "ruleUppercase": "Hoofletter",
   "ruleLowercase": "Kleinletter",

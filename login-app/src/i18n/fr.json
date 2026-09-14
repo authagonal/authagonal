@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "Les mots de passe ne correspondent pas",
   "passwordWeakError": "Le mot de passe ne répond pas aux exigences de robustesse",
   "signInTitle": "Connexion — {{appName}}",
+  "login.signingInTo": "Connexion à {{name}}",
   "ruleMinLength": "Au moins {{count}} caractères",
   "ruleUppercase": "Lettre majuscule",
   "ruleLowercase": "Lettre minuscule",

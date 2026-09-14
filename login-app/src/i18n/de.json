@@ -42,6 +42,7 @@
   "passwordsDoNotMatch": "Passwörter stimmen nicht überein",
   "passwordWeakError": "Passwort erfüllt nicht die Stärkeanforderungen",
   "signInTitle": "Anmelden — {{appName}}",
+  "login.signingInTo": "Anmeldung bei {{name}}",
   "ruleMinLength": "Mindestens {{count}} Zeichen",
   "ruleUppercase": "Großbuchstabe",
   "ruleLowercase": "Kleinbuchstabe",
