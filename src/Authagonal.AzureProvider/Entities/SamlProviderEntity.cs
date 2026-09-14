@@ -32,6 +32,11 @@ public sealed class SamlProviderEntity : ITableEntity
     /// which is the safe direction: an existing connection keeps refusing them until an operator opts in.
     /// </summary>
     public bool AllowUnsolicitedResponses { get; set; }
+    /// <summary>
+    /// <see cref="SamlProviderConfig.OrganizationId"/>. Rows written before this column existed read
+    /// null — a tenant-level connection, which is exactly what every one of them is.
+    /// </summary>
+    public string? OrganizationId { get; set; }
     public required string AllowedDomainsJson { get; set; }
     public string? IconUrl { get; set; }
     /// <summary>
@@ -61,6 +66,7 @@ public sealed class SamlProviderEntity : ITableEntity
         SpCertificate = config.SpCertificate,
         SignAuthnRequests = config.SignAuthnRequests,
         AllowUnsolicitedResponses = config.AllowUnsolicitedResponses,
+        OrganizationId = config.OrganizationId,
         AllowedDomainsJson = JsonSerializer.Serialize(config.AllowedDomains, AzureJsonContext.Default.ListString),
         IconUrl = config.IconUrl,
         DisableJitProvisioning = config.DisableJitProvisioning,
@@ -91,6 +97,7 @@ public sealed class SamlProviderEntity : ITableEntity
         SpCertificate = SpCertificate,
         SignAuthnRequests = SignAuthnRequests,
         AllowUnsolicitedResponses = AllowUnsolicitedResponses,
+        OrganizationId = OrganizationId,
         AllowedDomains = JsonSerializer.Deserialize(AllowedDomainsJson, AzureJsonContext.Default.ListString) ?? [],
         IconUrl = IconUrl,
         DisableJitProvisioning = DisableJitProvisioning ?? false,

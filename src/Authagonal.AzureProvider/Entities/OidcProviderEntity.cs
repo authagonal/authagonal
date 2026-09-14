@@ -20,6 +20,11 @@ public sealed class OidcProviderEntity : ITableEntity
     public required string ClientId { get; set; }
     public required string ClientSecret { get; set; }
     public required string RedirectUrl { get; set; }
+    /// <summary>
+    /// <see cref="OidcProviderConfig.OrganizationId"/>. Rows written before this column existed read
+    /// null — a tenant-level connection, which is exactly what every one of them is.
+    /// </summary>
+    public string? OrganizationId { get; set; }
     public required string AllowedDomainsJson { get; set; }
     public string? IconUrl { get; set; }
     public bool DisableJitProvisioning { get; set; }
@@ -50,6 +55,7 @@ public sealed class OidcProviderEntity : ITableEntity
         ClientId = config.ClientId,
         ClientSecret = config.ClientSecret,
         RedirectUrl = config.RedirectUrl,
+        OrganizationId = config.OrganizationId,
         AllowedDomainsJson = JsonSerializer.Serialize(config.AllowedDomains, AzureJsonContext.Default.ListString),
         IconUrl = config.IconUrl,
         DisableJitProvisioning = config.DisableJitProvisioning,
@@ -87,6 +93,7 @@ public sealed class OidcProviderEntity : ITableEntity
         ClientId = ClientId,
         ClientSecret = ClientSecret,
         RedirectUrl = RedirectUrl,
+        OrganizationId = OrganizationId,
         AllowedDomains = JsonSerializer.Deserialize(AllowedDomainsJson, AzureJsonContext.Default.ListString) ?? [],
         IconUrl = IconUrl,
         DisableJitProvisioning = DisableJitProvisioning,

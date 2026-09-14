@@ -27,6 +27,12 @@ public sealed class DynamoOidcProviderStore(DynamoTable table, EnvPartitioner pa
         return results;
     }
 
+    public async Task<IReadOnlyList<OidcProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default)
+    {
+        var all = await GetAllAsync(ct).ConfigureAwait(false);
+        return [.. all.Where(c => string.Equals(c.OrganizationId, organizationId, StringComparison.Ordinal))];
+    }
+
     public Task UpsertAsync(OidcProviderConfig config, CancellationToken ct = default)
     {
         var item = Dyn.Item(partitioner.PK(config.ConnectionId), ConfigSk);

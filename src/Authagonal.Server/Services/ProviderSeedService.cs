@@ -64,6 +64,7 @@ public sealed class ProviderSeedService(
             config.MetadataLocation = seed.MetadataLocation ?? (existing?.MetadataLocation is { Length: > 0 } m ? m
                 : throw new InvalidOperationException(
                     $"SAML provider '{seed.ConnectionId}' is missing required MetadataLocation"));
+            config.OrganizationId = seed.OrganizationId ?? existing?.OrganizationId;
             config.AllowedDomains = seed.AllowedDomains ?? existing?.AllowedDomains ?? [];
             config.JitProvisioningEnabled = seed.JitProvisioningEnabled;
             config.ChallengeMfaAfterLogin = seed.ChallengeMfaAfterLogin;
@@ -75,15 +76,22 @@ public sealed class ProviderSeedService(
 
             await samlStore.UpsertAsync(config, ct);
 
-            foreach (var domain in config.AllowedDomains)
+            // Only a TENANT-LEVEL connection claims a domain tenant-wide. An org-scoped one's domains
+            // are matched within its organisation, so writing them here would hand every request in the
+            // tenant to one organisation's IdP — and would collide with the tenant-level connection that
+            // may legitimately hold the same domain.
+            if (config.OrganizationId is null)
             {
-                await ssoDomainStore.UpsertAsync(new SsoDomain
+                foreach (var domain in config.AllowedDomains)
                 {
-                    Domain = domain.ToLowerInvariant(),
-                    ProviderType = "saml",
-                    ConnectionId = config.ConnectionId,
-                    Scheme = $"saml-{config.ConnectionId}"
-                }, ct);
+                    await ssoDomainStore.UpsertAsync(new SsoDomain
+                    {
+                        Domain = domain.ToLowerInvariant(),
+                        ProviderType = "saml",
+                        ConnectionId = config.ConnectionId,
+                        Scheme = $"saml-{config.ConnectionId}"
+                    }, ct);
+                }
             }
 
             logger.LogInformation("Seeded SAML provider {Id} ({Name})", config.ConnectionId, config.ConnectionName);
@@ -145,6 +153,7 @@ public sealed class ProviderSeedService(
                 // not be right for every tenant sharing a connection. Kept as supplied so an existing row
                 // round-trips unchanged; a supplied value that is not the derived one is warned about below.
                 RedirectUrl = seed.RedirectUrl ?? "",
+                OrganizationId = seed.OrganizationId ?? existingOidc?.OrganizationId,
                 AllowedDomains = seed.AllowedDomains ?? [],
                 JitProvisioningEnabled = seed.JitProvisioningEnabled,
                 UseUpstreamSubjectAsUserId = seed.UseUpstreamSubjectAsUserId,
@@ -164,15 +173,19 @@ public sealed class ProviderSeedService(
 
             await oidcStore.UpsertAsync(config, ct);
 
-            foreach (var domain in config.AllowedDomains)
+            // Tenant-level connections only — see the SAML half above.
+            if (config.OrganizationId is null)
             {
-                await ssoDomainStore.UpsertAsync(new SsoDomain
+                foreach (var domain in config.AllowedDomains)
                 {
-                    Domain = domain.ToLowerInvariant(),
-                    ProviderType = "oidc",
-                    ConnectionId = config.ConnectionId,
-                    Scheme = $"oidc-{config.ConnectionId}"
-                }, ct);
+                    await ssoDomainStore.UpsertAsync(new SsoDomain
+                    {
+                        Domain = domain.ToLowerInvariant(),
+                        ProviderType = "oidc",
+                        ConnectionId = config.ConnectionId,
+                        Scheme = $"oidc-{config.ConnectionId}"
+                    }, ct);
+                }
             }
 
             logger.LogInformation("Seeded OIDC provider {Id} ({Name})", config.ConnectionId, config.ConnectionName);
@@ -185,6 +198,8 @@ public sealed class ProviderSeedService(
         public string? ConnectionName { get; set; }
         public string? EntityId { get; set; }
         public string? MetadataLocation { get; set; }
+        /// <summary>Scope this connection to one organisation; null (default) = tenant-level.</summary>
+        public string? OrganizationId { get; set; }
         public List<string>? AllowedDomains { get; set; }
         public bool JitProvisioningEnabled { get; set; }
         public bool ChallengeMfaAfterLogin { get; set; } = true;
@@ -203,6 +218,8 @@ public sealed class ProviderSeedService(
         public string? ClientId { get; set; }
         public string? ClientSecret { get; set; }
         public string? RedirectUrl { get; set; }
+        /// <summary>Scope this connection to one organisation; null (default) = tenant-level.</summary>
+        public string? OrganizationId { get; set; }
         public List<string>? AllowedDomains { get; set; }
         public bool JitProvisioningEnabled { get; set; }
         public bool UseUpstreamSubjectAsUserId { get; set; }

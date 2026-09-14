@@ -525,6 +525,10 @@ public sealed class InMemorySamlProviderStore : ISamlProviderStore
     public Task<IReadOnlyList<SamlProviderConfig>> GetAllAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<SamlProviderConfig>>(_providers.Values.Select(Clone).ToList());
 
+    public Task<IReadOnlyList<SamlProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<SamlProviderConfig>>(
+            [.. _providers.Values.Where(c => string.Equals(c.OrganizationId, organizationId, StringComparison.Ordinal)).Select(Clone)]);
+
     public Task UpsertAsync(SamlProviderConfig config, CancellationToken ct = default)
     {
         _providers[config.ConnectionId] = Clone(config);
@@ -547,6 +551,10 @@ public sealed class InMemoryOidcProviderStore : IOidcProviderStore
 
     public Task<IReadOnlyList<OidcProviderConfig>> GetAllAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<OidcProviderConfig>>(_providers.Values.ToList());
+
+    public Task<IReadOnlyList<OidcProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<OidcProviderConfig>>(
+            [.. _providers.Values.Where(c => string.Equals(c.OrganizationId, organizationId, StringComparison.Ordinal))]);
 
     public Task UpsertAsync(OidcProviderConfig config, CancellationToken ct = default)
     {

@@ -44,6 +44,12 @@ public sealed class TableOidcProviderStore(TableClient oidcProvidersTable, EnvPa
         return results;
     }
 
+    public async Task<IReadOnlyList<OidcProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default)
+    {
+        var all = await GetAllAsync(ct);
+        return [.. all.Where(c => string.Equals(c.OrganizationId, organizationId, StringComparison.Ordinal))];
+    }
+
     public async Task UpsertAsync(OidcProviderConfig config, CancellationToken ct = default)
     {
         var entity = OidcProviderEntity.FromModel(config);
