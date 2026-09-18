@@ -218,7 +218,7 @@ jobs:
       # anything in the pipeline noticing. Failing here costs a release; not failing here ships it to
       # everyone who pulls the tag.
       - name: Build server image for scanning
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           load: true
@@ -245,7 +245,7 @@ jobs:
           severity: HIGH,CRITICAL
 
       - name: Build and push server image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
@@ -255,7 +255,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push migration image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile.migration
@@ -304,7 +304,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_AUTHAGONAL_TOKEN }}
 
       - name: Build and push demo server image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: demos/custom-server/Dockerfile
@@ -314,7 +314,7 @@ jobs:
           no-cache: true
 
       - name: Build and push demo sample API image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: demos/sample-app/SampleApp.Api/Dockerfile
@@ -325,7 +325,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=demo-sample-api
 
       - name: Build and push demo frontend image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: demos/sample-app/frontend/Dockerfile
