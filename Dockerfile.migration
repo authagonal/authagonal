@@ -26,6 +26,9 @@ RUN dotnet publish tools/Authagonal.Migration.Cli/ -c Release -o /app/publish --
 # aspnet (not runtime): the engine references Authagonal.Server, which needs the ASP.NET shared framework.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:207cc51496778557731c81ff670333d8ade4a4fec22768fd1be8e78474a84ecf
 WORKDIR /app
+# Patch the OS layer at build time: a base image lagging its distro otherwise fails the blocking
+# Trivy gate with no source change (libssl3t64 CVE-2026-84782 on v0.30.0).
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/publish .
 # Runs as a non-root user. The image ran as root, so a remote-code-execution bug anywhere in the
 # identity provider began with uid 0 inside the container — and with it the ability to write the

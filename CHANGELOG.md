@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1], 2026-10-03
+
+### Fixed
+- The `authagonal/authagonal-server` and migration Docker images now run `apt-get upgrade` in their runtime stage.
+  The v0.30.0 image failed the release Trivy gate on libssl3t64 (CVE-2026-84782) in the pinned aspnet base image,
+  so no 0.30.0 image was pushed. The 0.30.0 NuGet and npm packages published normally; 0.30.1 is otherwise identical.
+
 ## [0.30.0], 2026-10-03
 
 ### Added
