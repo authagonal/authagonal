@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.30.0], unreleased
+
+### Added
+
+- **Cursor paging for organisations and their members.** `IOrganizationStore.ListPageAsync(cursor,
+  limit)` and `IOrganizationMembershipStore.ListByOrganizationPageAsync(organizationId, cursor,
+  limit)` return an `OrganizationPage` / `OrganizationMembershipPage` (`Items` + `NextCursor`, null
+  on the last page). The cursor is opaque and keyset-based: it names the last key returned
+  (organisation id / member user id, ascending ordinal order) and the next page starts strictly
+  after it, so a row added or removed between reads never shifts or repeats a page the way an
+  offset would. `limit` is clamped to 1..200. A malformed cursor throws `ArgumentException`, which
+  a host maps to a 400. Both members ship with DEFAULT implementations that sort and slice the
+  existing unpaged listings, so no custom store breaks; the Azure Table stores override them with a
+  server-side `PartitionKey eq pk and RowKey gt after` query that reads one page, so a large tenant
+  is no longer loaded whole for one admin screen. `KeysetCursor` is public for other providers that
+  want to override the same way.
+- **Organisations can hold verified email domains.** `Organization.Domains` is a list of
+  `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`. `Domain` is stored
+  normalised (trimmed, lowercase, no trailing dot). The library stores the claim and reads
+  `VerifiedAt`; proving control (DNS) is the host's job. Persisted by every provider: Azure in a new
+  `DomainsJson` column on the organisation row (not written when empty), SQL and DynamoDB inside the
+  existing JSON document. Rows written before this release read back with an empty list.
+
+### Changed
+
+- **`Organization.AllowAutoMembership` is now enforced.** It was stored and documented as inert.
+  When an organisation is EXPLICITLY selected (a carried refresh grant, the `organization`
+  authorize parameter, an org-scoped connection, or a client restricted to exactly that
+  organisation) and the user holds no active membership, `OrganizationSelector` makes them a member
+  when ALL of these hold: the organisation is enabled, `AllowAutoMembership` is on,
+  `AuthUser.EmailConfirmed` is true, and the email's domain (after the last `@`, lowercased) EXACTLY
+  equals one of the organisation's domains with `VerifiedAt` set. No subdomain matching. A missing
+  row is created active with no roles; an `invited` row is promoted to active keeping its roles and
+  inviter. A `suspended` row is never promoted. Applies at authorize and on every refresh, so while
+  the flag is on, DELETING a qualifying member's row does not keep them out (they rejoin on their
+  next token); suspension does. An organisation inherited from the account's own
+  `AuthUser.OrganizationId` never auto-joins. Each auto-join is logged at Information.
+
 ## [0.29.0], 2026-09-14
 
 ### Added
