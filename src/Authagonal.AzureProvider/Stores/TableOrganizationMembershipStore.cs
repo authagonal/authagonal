@@ -51,6 +51,33 @@ public sealed class TableOrganizationMembershipStore(
         return results;
     }
 
+    /// <summary>
+    /// Server-side keyset page over the org-partitioned table: <c>PartitionKey eq pk and RowKey gt
+    /// after</c> (RowKey = user id), reading at most one row past the page.
+    /// </summary>
+    public async Task<OrganizationMembershipPage> ListByOrganizationPageAsync(
+        string organizationId, string? cursor, int limit, CancellationToken ct = default)
+    {
+        var after = KeysetCursor.Decode(cursor);
+        var take = KeysetCursor.ClampLimit(limit);
+        var pk = partitioner.PK(OrganizationMembershipEntity.OrgPartition(organizationId));
+
+        var filter = after is null
+            ? TableClient.CreateQueryFilter($"PartitionKey eq {pk}")
+            : TableClient.CreateQueryFilter($"PartitionKey eq {pk} and RowKey gt {after}");
+
+        var window = new List<OrganizationMembership>(take + 1);
+        await foreach (var entity in organizationMembersTable.QueryAsync<OrganizationMembershipEntity>(
+            filter, maxPerPage: take + 1, cancellationToken: ct))
+        {
+            window.Add(entity.ToModel());
+            if (window.Count > take) break;
+        }
+
+        var (items, next) = KeysetCursor.Page(window, m => m.UserId, take);
+        return new OrganizationMembershipPage(items, next);
+    }
+
     public async Task UpsertAsync(OrganizationMembership membership, CancellationToken ct = default)
     {
         var orgRow = OrganizationMembershipEntity.FromModelForOrganization(membership);

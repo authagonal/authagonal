@@ -47,6 +47,53 @@ public class DynamoOrganizationStoreTests(DynamoFixture dynamo)
     // ----- IOrganizationStore ------------------------------------------------------
 
     [Fact]
+    public async Task OrganizationStore_RoundTrips_Domains()
+    {
+        var store = await NewOrgStoreAsync("dom");
+        var created = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var verified = created.AddHours(2);
+        await store.UpsertAsync(new Organization
+        {
+            Id = "org-dom",
+            Slug = "domains",
+            DisplayName = "Domains",
+            Domains =
+            [
+                new OrganizationDomain { Domain = " Acme.COM. ", VerificationToken = "tok-1", CreatedAt = created, VerifiedAt = verified },
+                new OrganizationDomain { Domain = "pending.example", VerificationToken = "tok-2", CreatedAt = created },
+            ],
+        });
+
+        var read = (await store.GetAsync("org-dom"))!;
+        Assert.Equal(2, read.Domains.Count);
+        Assert.Equal("acme.com", read.Domains[0].Domain);
+        Assert.Equal("tok-1", read.Domains[0].VerificationToken);
+        Assert.Equal(created, read.Domains[0].CreatedAt);
+        Assert.Equal(verified, read.Domains[0].VerifiedAt);
+        Assert.Equal("pending.example", read.Domains[1].Domain);
+        Assert.Null(read.Domains[1].VerifiedAt);
+    }
+
+    [Fact]
+    public async Task OrganizationStore_ItemWithoutDomains_ReadsBackEmpty()
+    {
+        var orgsTable = await T("legacyDomOrgs");
+        var store = new DynamoOrganizationStore(orgsTable, await T("legacyDomOrgSlugs"), EnvPartitioner.Live);
+        // A document written before Organization.Domains existed: no "domains" key at all.
+        await orgsTable.PutAsync(new Dictionary<string, AttributeValue>
+        {
+            ["pk"] = new AttributeValue { S = EnvPartitioner.Live.PK("org") },
+            ["sk"] = new AttributeValue { S = "org-legacy" },
+            ["data"] = new AttributeValue { S = """{"id":"org-legacy","slug":"legacy","displayName":"Legacy","enabled":true}""" },
+        });
+
+        var read = await store.GetAsync("org-legacy");
+        Assert.NotNull(read);
+        Assert.NotNull(read!.Domains);
+        Assert.Empty(read.Domains);
+    }
+
+    [Fact]
     public async Task OrganizationStore_RoundTrips_EveryField()
     {
         var store = await NewOrgStoreAsync("rt");

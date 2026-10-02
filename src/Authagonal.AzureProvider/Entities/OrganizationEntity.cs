@@ -18,6 +18,13 @@ public sealed class OrganizationEntity : ITableEntity
     public required string DisplayName { get; set; }
     public string? MetadataJson { get; set; }
     public string? BrandingJson { get; set; }
+
+    /// <summary>
+    /// <see cref="Organization.Domains"/> as JSON. Null when the organisation has none, and absent on
+    /// every row written before the property existed; both read back as an empty list.
+    /// </summary>
+    public string? DomainsJson { get; set; }
+
     public bool Enabled { get; set; } = true;
     public bool AllowAutoMembership { get; set; }
     public bool RequireMembershipForTokens { get; set; } = true;
@@ -35,6 +42,9 @@ public sealed class OrganizationEntity : ITableEntity
             ? null
             : JsonSerializer.Serialize(org.Metadata, AzureJsonContext.Default.DictionaryStringString),
         BrandingJson = org.BrandingJson,
+        DomainsJson = org.Domains.Count == 0
+            ? null
+            : JsonSerializer.Serialize(org.Domains, AzureJsonContext.Default.ListOrganizationDomain),
         Enabled = org.Enabled,
         AllowAutoMembership = org.AllowAutoMembership,
         RequireMembershipForTokens = org.RequireMembershipForTokens,
@@ -51,6 +61,9 @@ public sealed class OrganizationEntity : ITableEntity
             ? []
             : JsonSerializer.Deserialize(MetadataJson, AzureJsonContext.Default.DictionaryStringString) ?? [],
         BrandingJson = BrandingJson,
+        Domains = string.IsNullOrEmpty(DomainsJson)
+            ? []
+            : JsonSerializer.Deserialize(DomainsJson, AzureJsonContext.Default.ListOrganizationDomain) ?? [],
         Enabled = Enabled,
         AllowAutoMembership = AllowAutoMembership,
         RequireMembershipForTokens = RequireMembershipForTokens,

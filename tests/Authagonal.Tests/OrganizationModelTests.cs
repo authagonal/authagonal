@@ -34,6 +34,30 @@ public sealed class OrganizationModelTests
         Assert.False(org.AllowAutoMembership);
         Assert.Empty(org.Metadata);
         Assert.Null(org.BrandingJson);
+        Assert.Empty(org.Domains);
+    }
+
+    /// Domains is never null, so every reader (and the auto-membership check) can enumerate it without
+    /// a guard — even after a deserializer or a caller assigns null.
+    [Fact]
+    public void Organization_Domains_NullAssignsEmpty()
+    {
+        var org = new Organization { Id = "org-1", Slug = "acme", DisplayName = "Acme", Domains = null! };
+        Assert.NotNull(org.Domains);
+        Assert.Empty(org.Domains);
+    }
+
+    /// A domain is stored in one form whoever wrote it, so an exact comparison against an email's
+    /// lowercased domain part is a correct comparison.
+    [Theory]
+    [InlineData("acme.com", "acme.com")]
+    [InlineData("  Acme.COM  ", "acme.com")]
+    [InlineData("acme.com.", "acme.com")]
+    [InlineData(" EU.Acme.Com. ", "eu.acme.com")]
+    public void OrganizationDomain_IsNormalisedOnAssignment(string input, string stored)
+    {
+        Assert.Equal(stored, new OrganizationDomain { Domain = input }.Domain);
+        Assert.Equal(stored, OrganizationDomain.Normalize(input));
     }
 
     /// Membership defaults to active, so a row written by a provisioning sync that says nothing about

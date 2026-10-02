@@ -116,6 +116,62 @@ public abstract class SqlOrganizationStoreTestsBase : IAsyncLifetime
     // ── IOrganizationStore ───────────────────────────────────────────────────────
 
     [Fact]
+    public async Task OrganizationStore_RoundTripsDomains()
+    {
+        var store = await NewOrgStoreAsync();
+        var created = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var verified = created.AddHours(2);
+        var org = Org("o-dom", "domains");
+        org.Domains =
+        [
+            new OrganizationDomain { Domain = " Acme.COM. ", VerificationToken = "tok-1", CreatedAt = created, VerifiedAt = verified },
+            new OrganizationDomain { Domain = "pending.example", VerificationToken = "tok-2", CreatedAt = created },
+        ];
+        await store.UpsertAsync(org);
+
+        var read = (await store.GetAsync("o-dom"))!;
+        Assert.Equal(2, read.Domains.Count);
+        Assert.Equal("acme.com", read.Domains[0].Domain);
+        Assert.Equal("tok-1", read.Domains[0].VerificationToken);
+        Assert.Equal(created, read.Domains[0].CreatedAt);
+        Assert.Equal(verified, read.Domains[0].VerifiedAt);
+        Assert.Equal("pending.example", read.Domains[1].Domain);
+        Assert.Null(read.Domains[1].VerifiedAt);
+    }
+
+    [Fact]
+    public async Task OrganizationStore_RowWithoutDomains_ReadsBackEmpty()
+    {
+        var (store, organizations, _) = await NewOrgStoreWithTablesAsync();
+        // A document written before Organization.Domains existed: no "domains" key at all.
+        await organizations.PutAsync(new SqlRow(Live.PK("org"), "o-legacy")
+        {
+            Data = """{"id":"o-legacy","slug":"legacy","displayName":"Legacy","enabled":true}""",
+        });
+
+        var read = await store.GetAsync("o-legacy");
+        Assert.NotNull(read);
+        Assert.NotNull(read!.Domains);
+        Assert.Empty(read.Domains);
+    }
+
+    [Fact]
+    public async Task OrganizationStore_PagesThroughTheDefaultImplementation()
+    {
+        var store = await NewOrgStoreAsync();
+        foreach (var i in Enumerable.Range(0, 5))
+            await store.UpsertAsync(Org($"o-page-{i}", $"page-{i}"));
+
+        Authagonal.Core.Stores.IOrganizationStore s = store;
+        var first = await s.ListPageAsync(null, 3);
+        Assert.Equal(["o-page-0", "o-page-1", "o-page-2"], first.Items.Select(o => o.Id));
+        Assert.NotNull(first.NextCursor);
+        var second = await s.ListPageAsync(first.NextCursor, 3);
+        Assert.Equal(["o-page-3", "o-page-4"], second.Items.Select(o => o.Id));
+        Assert.Null(second.NextCursor);
+    }
+
+    [Fact]
     public async Task OrganizationStore_RoundTripsCreateGetAndList()
     {
         var store = await NewOrgStoreAsync();

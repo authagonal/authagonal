@@ -53,6 +53,33 @@ public sealed class TableOrganizationStore(
         return results;
     }
 
+    /// <summary>
+    /// Server-side keyset page: <c>PartitionKey eq pk and RowKey gt after</c>, reading at most one row
+    /// past the page (which only proves a next page exists). Rows come back in RowKey order within the
+    /// single partition, so no client-side sort is needed and a large tenant is never loaded whole.
+    /// </summary>
+    public async Task<OrganizationPage> ListPageAsync(string? cursor, int limit, CancellationToken ct = default)
+    {
+        var after = KeysetCursor.Decode(cursor);
+        var take = KeysetCursor.ClampLimit(limit);
+        var pk = partitioner.PK(OrganizationEntity.OrganizationsPartition);
+
+        var filter = after is null
+            ? TableClient.CreateQueryFilter($"PartitionKey eq {pk}")
+            : TableClient.CreateQueryFilter($"PartitionKey eq {pk} and RowKey gt {after}");
+
+        var window = new List<Organization>(take + 1);
+        await foreach (var entity in organizationsTable.QueryAsync<OrganizationEntity>(
+            filter, maxPerPage: take + 1, cancellationToken: ct))
+        {
+            window.Add(entity.ToModel());
+            if (window.Count > take) break;
+        }
+
+        var (items, next) = KeysetCursor.Page(window, o => o.Id, take);
+        return new OrganizationPage(items, next);
+    }
+
     public async Task UpsertAsync(Organization organization, CancellationToken ct = default)
     {
         // R7: the pattern lives once, in Core, so every provider and the in-memory reference enforce

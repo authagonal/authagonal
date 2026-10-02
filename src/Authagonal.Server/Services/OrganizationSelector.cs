@@ -33,11 +33,19 @@ namespace Authagonal.Server.Services;
 /// check. Organisations become load-bearing only once someone creates one.
 /// </para>
 /// <para>
-/// Membership is demanded only for an EXPLICIT selection (rules 1 and 2). When the organisation came
+/// Membership is demanded only for an EXPLICIT selection (rules 1 to 4). When the organisation came
 /// from the account's own record, that record is the assertion of belonging, and demanding a second
 /// one would lock out every pre-existing user the moment an operator created the matching
 /// organisation. <see cref="Organization.Enabled"/> and the client restriction are enforced however
 /// the organisation was chosen.
+/// </para>
+/// <para>
+/// An explicit selection is also where <see cref="Organization.AllowAutoMembership"/> is enforced: a
+/// user with no active membership whose CONFIRMED email is under one of the organisation's VERIFIED
+/// <see cref="Organization.Domains"/> (exact match) is made a member before the gate runs, on authorize
+/// and on refresh alike. A suspended membership is never promoted, so suspension — not deletion — is
+/// how an administrator keeps a qualifying user out. The account-tag fallback (rule 5) never
+/// auto-joins.
 /// </para>
 /// </remarks>
 public sealed class OrganizationSelector(
@@ -243,6 +251,15 @@ public sealed class OrganizationSelector(
         var activeMember = membership is not null &&
             string.Equals(membership.Status, MembershipStatus.Active, StringComparison.Ordinal);
 
+        // Auto-membership: an explicitly selected organisation that admits users from a verified email
+        // domain makes a qualifying non-member a member here, before the gate, so everything below
+        // (the gate, the roles union) sees the row exactly as if an administrator had written it.
+        if (explicitlySelected && !activeMember && QualifiesForAutoMembership(organization, user, membership))
+        {
+            membership = await AutoJoinAsync(organization, user, membership, ct);
+            activeMember = true;
+        }
+
         if (explicitlySelected && organization.RequireMembershipForTokens && !activeMember)
         {
             throw new OrganizationAccessDeniedException(
@@ -338,6 +355,89 @@ public sealed class OrganizationSelector(
         }
 
         return grantable;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="user"/> may join <paramref name="organization"/> without an invitation:
+    /// see <see cref="Organization.AllowAutoMembership"/> for the rule this implements.
+    /// </summary>
+    /// <remarks>
+    /// Only a missing row or an <see cref="MembershipStatus.Invited"/> one can be promoted. A
+    /// <see cref="MembershipStatus.Suspended"/> row is an administrator's decision to keep this person
+    /// out, and an auto-join that overrode it would make suspension meaningless; any status this
+    /// version does not recognise is left alone for the same reason.
+    /// </remarks>
+    private static bool QualifiesForAutoMembership(
+        Organization organization, AuthUser user, OrganizationMembership? existing)
+    {
+        if (!organization.Enabled || !organization.AllowAutoMembership) return false;
+        if (existing is not null &&
+            !string.Equals(existing.Status, MembershipStatus.Invited, StringComparison.Ordinal))
+            return false;
+
+        // An unconfirmed address proves nothing about who controls it: anyone can register as
+        // ceo@acme.com.
+        if (!user.EmailConfirmed) return false;
+
+        var emailDomain = EmailDomainOf(user.Email);
+        if (emailDomain is null) return false;
+
+        // EXACT match only. A subdomain may be delegated to someone the organisation does not control.
+        foreach (var domain in organization.Domains)
+        {
+            if (domain.VerifiedAt is not null &&
+                string.Equals(domain.Domain, emailDomain, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>The part of <paramref name="email"/> after its last <c>@</c>, lowercased; null if none.</summary>
+    private static string? EmailDomainOf(string? email)
+    {
+        if (string.IsNullOrEmpty(email)) return null;
+        var at = email.LastIndexOf('@');
+        if (at < 0 || at == email.Length - 1) return null;
+        return email[(at + 1)..].ToLowerInvariant();
+    }
+
+    private async Task<OrganizationMembership> AutoJoinAsync(
+        Organization organization, AuthUser user, OrganizationMembership? existing, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var joined = existing is null
+            ? new OrganizationMembership
+            {
+                OrganizationId = organization.Id,
+                UserId = user.Id,
+                Status = MembershipStatus.Active,
+                Roles = [],
+                InvitedByUserId = null,
+                JoinedAt = now,
+                CreatedAt = now,
+            }
+            : new OrganizationMembership
+            {
+                // An accepted invitation: keep who invited them, when, and the roles they were offered.
+                OrganizationId = existing.OrganizationId,
+                UserId = existing.UserId,
+                Status = MembershipStatus.Active,
+                Roles = [.. existing.Roles],
+                InvitedByUserId = existing.InvitedByUserId,
+                InvitedAt = existing.InvitedAt,
+                JoinedAt = now,
+                CreatedAt = existing.CreatedAt,
+                UpdatedAt = now,
+            };
+
+        await memberships.UpsertAsync(joined, ct);
+
+        logger.LogInformation(
+            "Auto-joined {SubjectId} to organization {OrganizationId} through a verified email domain ({PriorStatus})",
+            user.Id, organization.Id, existing is null ? "no prior membership" : "invitation accepted");
+
+        return joined;
     }
 
     private static void RequireClientPermits(

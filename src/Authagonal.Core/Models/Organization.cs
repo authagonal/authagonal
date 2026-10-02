@@ -98,13 +98,44 @@ public sealed class Organization
     public bool RequireMembershipForTokens { get; set; } = true;
 
     /// <summary>
-    /// Whether a user whose email domain matches one this organisation has verified may become a
-    /// member without an invitation. Off by default, mirroring
+    /// Whether a user whose confirmed email address is under a domain this organisation has verified
+    /// becomes a member without an invitation. Off by default, mirroring
     /// <see cref="SamlProviderConfig.AllowUninvitedJit"/> — self-service joining is a decision, not a
-    /// default. Nothing in this library acts on it yet; it is the host's provisioning surface that
-    /// will.
+    /// default.
     /// </summary>
+    /// <remarks>
+    /// Enforced at token issuance (<c>OrganizationSelector</c>), at authorize and on every refresh
+    /// alike. When this organisation is EXPLICITLY selected — a carried grant, the
+    /// <c>organization</c> authorize parameter, an org-scoped connection, or a client restricted to
+    /// exactly this organisation — and the user holds no active membership, the user is admitted when
+    /// ALL of these hold: the organisation is <see cref="Enabled"/>, this flag is on,
+    /// <see cref="AuthUser.EmailConfirmed"/> is true, and the part of <see cref="AuthUser.Email"/>
+    /// after its last <c>@</c>, lowercased, EXACTLY equals a <see cref="Domains"/> entry with a
+    /// non-null <see cref="OrganizationDomain.VerifiedAt"/> (no subdomain matching). Admission writes
+    /// the membership: a new active row with no roles, or an <see cref="MembershipStatus.Invited"/>
+    /// row promoted to active with its roles kept.
+    /// <para>
+    /// A <see cref="MembershipStatus.Suspended"/> row is NEVER promoted, and that is the only way to
+    /// keep a qualifying user out while this flag is on: DELETING their membership does not, because
+    /// they rejoin on their next authorization or refresh. An organisation inherited from the
+    /// account's own <see cref="AuthUser.OrganizationId"/> (not explicitly selected) never auto-joins.
+    /// </para>
+    /// </remarks>
     public bool AllowAutoMembership { get; set; }
+
+    /// <summary>
+    /// Email domains this organisation has claimed. Only entries with a non-null
+    /// <see cref="OrganizationDomain.VerifiedAt"/> count for <see cref="AllowAutoMembership"/>; the
+    /// library stores the claims and the host performs verification. Never null: a stored row written
+    /// before this property existed reads back as empty, and assigning null stores empty.
+    /// </summary>
+    public List<OrganizationDomain> Domains
+    {
+        get => _domains;
+        set => _domains = value ?? [];
+    }
+
+    private List<OrganizationDomain> _domains = [];
 
     public DateTimeOffset CreatedAt { get; set; }
 
