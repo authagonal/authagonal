@@ -6,32 +6,42 @@ locale: fr
 
 # Provisionnement TCC
 
-Authagonal provisionne les utilisateurs dans les applications en aval en utilisant le modèle **Try-Confirm-Cancel (TCC)**. Cela garantit que toutes les applications sont d'accord avant qu'un utilisateur obtienne l'accès, avec un retour en arrière propre si une application refuse.
+Authagonal provisionne les utilisateurs dans les applications en aval selon le modèle **Try-Confirm-Cancel (TCC)**. Celui-ci garantit que toutes les applications donnent leur accord avant qu'un utilisateur obtienne l'accès, avec une annulation propre si l'une d'elles refuse.
 
-## Quand le provisionnement s'exécute
+## Quand le provisionnement s'exécute {#when-provisioning-runs}
 
-Le provisionnement s'exécute automatiquement chaque fois qu'un utilisateur est créé, quel que soit le chemin de création :
+Le provisionnement s'exécute automatiquement à chaque création d'utilisateur, quelle que soit la voie de création :
 
-| Point d'accès | Déclencheur |
+| Point de terminaison | Déclencheur |
 |---|---|
-| `POST /api/v1/profile/` | Création d'utilisateur par l'administrateur |
+| `POST /api/v1/profile/` | Création d'un utilisateur par un administrateur |
 | `POST /api/auth/register` | Inscription en libre-service |
 | SAML ACS (`POST /saml/{id}/acs`) | Première connexion SSO (nouvel utilisateur) |
-| OIDC callback (`GET /oidc/callback`) | Première connexion SSO (nouvel utilisateur) |
-| SCIM (`POST /scim/v2/Users`) | Provisionnement du fournisseur d'identité |
-| `GET /connect/authorize` | Première autorisation via un client avec `ProvisioningApps` |
+| Callback OIDC (`GET /oidc/callback`) | Première connexion SSO (nouvel utilisateur) |
+| SCIM (`POST /scim/v2/Users`) | Provisionnement par le fournisseur d'identité |
+| `GET /connect/authorize` | Première autorisation via un client doté de `ProvisioningApps` |
 
-Les combinaisons application/utilisateur déjà provisionnées sont ignorées (suivies dans la table `UserProvisions`).
+Les combinaisons application/utilisateur déjà provisionnées sont ignorées (suivi dans la table `UserProvisions`).
 
-Les chemins de création d'utilisateur provisionnent dans **chaque application configurée**. Le point d'accès d'autorisation provisionne uniquement dans la liste `ProvisioningApps` du client.
+Les voies de création d'utilisateur provisionnent dans **toutes les applications configurées**. Le point de terminaison d'autorisation ne provisionne que dans la liste `ProvisioningApps` du client.
 
-**En cas de rejet :** Si une application de provisionnement rejette l'utilisateur lors de la phase Try, l'utilisateur est supprimé et le point d'accès renvoie `422 Unprocessable Entity` avec le motif du rejet. Cela empêche la création d'utilisateurs à moitié créés.
+**En cas de refus :** si une application de provisionnement refuse l'utilisateur lors de la phase Try (ou si un rappel échoue), l'utilisateur nouvellement créé est supprimé. Cela évite les utilisateurs à moitié créés. Ce que voit l'appelant dépend de la voie :
 
-## Configuration
+| Voie | Réponse |
+|---|---|
+| Création par un administrateur (`POST /api/v1/profile/`), inscription en libre-service | `422 Unprocessable Entity` avec le motif du refus |
+| SAML ACS, callback OIDC | `400 Bad Request`, `{ "error": "provisioning_rejected", "message": "..." }` |
+| Création SCIM | `400` SCIM, `scimType: invalidValue`, avec un message fixe (le texte de l'application en aval n'est pas renvoyé au fournisseur d'identité) |
+| Confirmation de la réclamation d'un compte sans mot de passe | `400 provisioning_rejected` en JSON, ou une redirection vers `/login?error=provisioning_rejected&error_description=...` pour un clic dans le navigateur (voir [Promouvoir un utilisateur](user-upgrade)) |
+| `GET /connect/authorize` | Redirection vers le client avec `error=access_denied` |
 
-### 1. Définir les applications de provisionnement
+La requête de création par un administrateur accepte `skipProvisioning: true`, destiné à un appelant first-party qui est lui-même la cible du provisionnement et ne souhaite pas que son propre rappel soit invoqué alors qu'il est en train de configurer l'utilisateur. Rien n'est alors provisionné et aucune application n'est appelée pour cet utilisateur.
 
-Dans `appsettings.json` :
+## Configuration {#configuration}
+
+### 1. Définir les applications de provisionnement {#1-define-provisioning-apps}
+
+Dans `appsettings.json` :
 
 ```json
 {
@@ -45,30 +55,30 @@ Dans `appsettings.json` :
 }
 ```
 
-`TryTimeoutSeconds` est facultatif (60 par défaut). Augmentez-le lorsque l'application en aval effectue un vrai travail pendant Try. Confirm et Cancel utilisent toujours un délai d'attente court et fixe (10 secondes) et ne sont pas configurables ; ils doivent toujours être peu coûteux.
+`TryTimeoutSeconds` est facultatif (60 par défaut). Augmentez-le lorsque l'application en aval effectue un vrai travail pendant le Try. Confirm, Cancel et Deprovision utilisent toujours un délai d'expiration court et fixe (10 secondes), non réglable ; ces appels doivent toujours rester peu coûteux.
 
-### 2. Assigner des applications aux clients
+La section de configuration `ProvisioningApps` n'est lue que si aucun `IProvisioningAppStore` n'est enregistré. Les fournisseurs Azure Table, AWS et SQL en enregistrent chacun un, et la bibliothèque résout alors les applications depuis ce stockage (voir [Résolution personnalisée des applications](#custom-app-resolution)) ; avec un fournisseur persistant, définissez donc les applications via l'API d'administration plutôt que dans `appsettings.json`.
 
-Chaque client déclare dans quelles applications ses utilisateurs doivent être provisionnés, via le champ `provisioningApps` de l'enregistrement du client. Définissez-le via l'API d'administration des clients (la configuration d'amorçage `Clients` ne comporte pas ce champ) :
+### 2. Affecter des applications aux clients {#2-assign-apps-to-clients}
+
+Chaque client déclare dans quelles applications ses utilisateurs doivent être provisionnés, via le champ `provisioningApps` de l'enregistrement du client. Définissez-le via l'API d'administration des clients (la configuration d'initialisation `Clients` ne porte pas ce champ). La création d'un client lie l'enregistrement complet, et `PUT /api/v1/clients/{clientId}` fusionne les champs envoyés avec le client stocké ; une requête qui ne porte que `provisioningApps` laisse donc le reste du client inchangé :
 
 ```
 PUT /api/v1/clients/web-app
 {
-  "clientId": "web-app",
-  "provisioningApps": ["my-backend"],
-  ...
+  "provisioningApps": ["my-backend"]
 }
 ```
 
-Lorsqu'un utilisateur s'autorise via `web-app`, il est provisionné dans `my-backend` s'il ne l'a pas déjà été.
+Lorsqu'un utilisateur donne son autorisation via `web-app`, il est provisionné dans `my-backend` s'il ne l'a pas déjà été.
 
-## Protocole TCC
+## Protocole TCC {#tcc-protocol}
 
-Authagonal effectue trois types d'appels HTTP vers votre point d'accès de provisionnement. Tous utilisent `POST` avec des corps JSON et `Authorization: Bearer {ApiKey}`.
+Authagonal effectue trois types d'appels HTTP vers votre point de terminaison de provisionnement. Tous utilisent `POST` avec un corps JSON et `Authorization: Bearer {ApiKey}`.
 
-### Phase 1 : Try
+### Phase 1 : Try {#phase-1-try}
 
-**Requête :** `POST {CallbackUrl}/try`
+**Requête :** `POST {CallbackUrl}/try`
 
 ```json
 {
@@ -82,39 +92,28 @@ Authagonal effectue trois types d'appels HTTP vers votre point d'accès de provi
 }
 ```
 
-Les champs nuls (y compris `customAttributes` lorsque l'utilisateur n'en a aucun) sont omis de la charge utile.
+Les champs nuls (y compris `customAttributes` lorsque l'utilisateur n'en a pas) sont omis de la charge utile.
 
-**Réponses attendues :**
+**Réponses attendues :**
 
 | Statut | Corps | Signification |
 |---|---|---|
 | `200` | `{ "approved": true }` | L'utilisateur peut être provisionné. L'application crée un enregistrement **en attente**. |
-| `200` | `{ "approved": false, "reason": "..." }` | L'utilisateur est rejeté. Aucun enregistrement créé. |
-| Non-2xx | N'importe | Traité comme un échec. |
+| `200` | `{ "approved": false, "reason": "..." }` | L'utilisateur est refusé. Aucun enregistrement n'est créé. |
+| `2xx` | Corps vide ou illisible | Traité comme une approbation. |
+| Hors 2xx | Quelconque | Traité comme un échec. |
 
-Le `transactionId` identifie cette tentative de provisionnement. Votre application doit le stocker à côté de l'enregistrement en attente.
+Renvoyez une valeur `approved` explicite. Une réponse dont le corps ne peut pas être lu comme du JSON vaut approbation ; un point de terminaison mal configuré qui répond `200` avec une page HTML approuve donc tous les utilisateurs.
 
-Une réponse approuvée peut également renvoyer `organizationId` et/ou `customAttributes`. Authagonal les fusionne dans l'utilisateur : `organizationId` n'est appliqué que si l'utilisateur n'en possède pas déjà un (les applications suivantes de la même transaction voient l'affectation antérieure), et les entrées de `customAttributes` sont fusionnées clé par clé. Les deux se propagent dans les tokens (revendication `org_id` ; attributs personnalisés via la configuration du scope `UserClaims`).
+Le `transactionId` identifie cette tentative de provisionnement. Votre application doit le conserver avec l'enregistrement en attente.
 
-### Phase 2 : Confirm
+Une réponse d'approbation peut aussi renvoyer `organizationId`, `customAttributes` et `emailVerified`. Authagonal les fusionne dans l'utilisateur : `organizationId` n'est appliqué que si l'utilisateur n'en a pas déjà un (les applications suivantes dans la même transaction voient l'affectation précédente), les entrées de `customAttributes` sont fusionnées clé par clé, et `emailVerified: true` marque l'adresse e-mail de l'utilisateur comme confirmée (utilisez-le lorsque l'application en aval a déjà vérifié l'adresse ; l'inscription en libre-service omet alors l'e-mail de vérification). `organizationId` comme les attributs se retrouvent dans les jetons (revendication `org_id` ; attributs personnalisés via la configuration `UserClaims` des scopes). Les valeurs fusionnées sont enregistrées dans l'utilisateur une fois que toutes les applications ont confirmé.
 
-Appelé uniquement si **toutes** les applications ont renvoyé `approved: true` lors de la phase try.
+### Phase 2 : Confirm {#phase-2-confirm}
 
-**Requête :** `POST {CallbackUrl}/confirm`
+Appelée uniquement si **toutes** les applications ont renvoyé `approved: true` lors de la phase Try.
 
-```json
-{
-  "transactionId": "a1b2c3d4..."
-}
-```
-
-**Réponse attendue :** `200` (n'importe quel corps). Votre application promeut l'enregistrement en attente en confirmé.
-
-### Phase 3 : Cancel
-
-Appelé si le try d'**une** application a été rejeté ou a échoué, pour nettoyer les applications qui ont réussi lors de la phase try.
-
-**Requête :** `POST {CallbackUrl}/cancel`
+**Requête :** `POST {CallbackUrl}/confirm`
 
 ```json
 {
@@ -122,11 +121,25 @@ Appelé si le try d'**une** application a été rejeté ou a échoué, pour nett
 }
 ```
 
-**Réponse attendue :** `200` (n'importe quel corps). Votre application supprime l'enregistrement en attente.
+**Réponse attendue :** `2xx` (corps quelconque). Votre application fait passer l'enregistrement en attente à l'état confirmé. Une réponse hors 2xx ou un délai dépassé (10 secondes) compte comme un échec de confirmation.
 
-L'annulation est effectuée au mieux : si elle échoue, Authagonal enregistre l'erreur et continue. Votre application devrait **nettoyer les enregistrements non confirmés après un TTL** (par exemple, 1 heure) comme filet de sécurité.
+### Phase 3 : Cancel {#phase-3-cancel}
 
-## Diagramme de flux
+Appelée si le Try d'**une quelconque** application a été refusé ou a échoué, afin de nettoyer les applications dont le Try a réussi.
+
+**Requête :** `POST {CallbackUrl}/cancel`
+
+```json
+{
+  "transactionId": "a1b2c3d4..."
+}
+```
+
+**Réponse attendue :** `200` (corps quelconque). Votre application supprime l'enregistrement en attente.
+
+Cancel est exécuté au mieux : s'il échoue, Authagonal journalise l'erreur et poursuit. Par sécurité, votre application doit **purger les enregistrements non confirmés au-delà d'une durée de vie** (par exemple 1 heure).
+
+## Diagramme de flux {#flow-diagram}
 
 ```
 Authorize Endpoint
@@ -147,7 +160,7 @@ Authorize Endpoint
     └─ Redirect to client
 ```
 
-### En cas d'échec
+### En cas d'échec {#on-failure}
 
 ```
     ├─ TRY A ──────────► App A: create pending record
@@ -161,30 +174,57 @@ Authorize Endpoint
     └─ Redirect with error=access_denied
 ```
 
-### En cas d'échec partiel de confirmation
+### En cas d'échec partiel de la confirmation {#on-partial-confirm-failure}
 
-Si certaines confirmations réussissent mais qu'une échoue, les applications confirmées avec succès ont leurs enregistrements de provisionnement stockés (donc elles ne seront pas retentées). L'utilisateur voit une erreur et peut réessayer ; seule l'application échouée sera tentée la prochaine fois.
+Si une confirmation échoue, Authagonal annule l'ensemble de la transaction :
 
-## Résolution d'applications personnalisée
+1. Les applications qui n'ont pas encore été confirmées reçoivent `POST {CallbackUrl}/cancel`.
+2. Les applications déjà confirmées **dans cette transaction** font l'objet d'une compensation avec `DELETE {CallbackUrl}/users/{userId}` (le même appel que pour le [déprovisionnement](#deprovisioning)), et leurs enregistrements de provisionnement sont supprimés. Les applications dans lesquelles l'utilisateur avait été provisionné par une transaction antérieure ne sont pas touchées.
+3. Une erreur de provisionnement est levée, et la voie appelante supprime l'utilisateur nouvellement créé (ou, pour le point de terminaison d'autorisation, répond par une erreur).
 
-Par défaut, les applications de provisionnement sont lues depuis la section de configuration `ProvisioningApps` via `ConfigProvisioningAppProvider`. Remplacez `IProvisioningAppProvider` pour résoudre les applications dynamiquement, par exemple depuis une base de données ou par tenant :
+Les enregistrements de provisionnement ne sont stockés qu'une fois toutes les confirmations réussies ; une nouvelle tentative reprend donc toutes les applications. La compensation est exécutée au mieux : un `DELETE` en échec est journalisé, et le compte dans l'application peut nécessiter une suppression manuelle.
+
+## Résolution personnalisée des applications {#custom-app-resolution}
+
+La bibliothèque choisit pour vous la source des applications :
+
+- Lorsqu'un `IProvisioningAppStore` est enregistré, ce que font tous les fournisseurs Azure Table, AWS et SQL, les applications proviennent du stockage (`StoreProvisioningAppProvider`) et sont gérées via l'API d'administration décrite ci-dessous.
+- Sinon, elles sont lues depuis la section de configuration `ProvisioningApps` (`ConfigProvisioningAppProvider`).
+
+Enregistrez votre propre `IProvisioningAppProvider` avant `AddAuthagonal` pour résoudre les applications autrement, par exemple par locataire ; l'implémentation par défaut de la bibliothèque n'est ajoutée que si aucune n'est enregistrée :
 
 ```csharp
 builder.Services.AddSingleton<IProvisioningAppProvider, MyAppProvider>();
 builder.Services.AddAuthagonal(builder.Configuration);
 ```
 
-Le fournisseur renvoie une liste d'applications et leurs URLs de callback. Le `TccProvisioningOrchestrator` appelle Try/Confirm/Cancel sur chacune.
+Le fournisseur renvoie une liste d'applications et leurs URL de rappel. Le `TccProvisioningOrchestrator` appelle Try/Confirm/Cancel sur chacune.
 
-Pour des opérations CRUD à l'exécution sans fournisseur personnalisé, la bibliothèque fournit `StoreProvisioningAppProvider`, adossé à `IProvisioningAppStore`. Enregistrez-le explicitement (même modèle que ci-dessus) et gérez les applications via l'API d'administration à `/api/v1/provisioning/apps` (list/create/update/delete, plus `POST /{appId}/test` pour sonder le point d'accès Try d'une application).
+> **Par défaut, `CallbackUrl` doit être routable publiquement.** Authagonal la valide lors de son écriture, puis à nouveau à chaque requête qu'il émet, en refusant les cibles loopback, RFC1918, link-local et `.internal`/`.local` (un rappel de provisionnement est une URL que le serveur va chercher). Une application de provisionnement exécutée au sein de votre propre réseau est un déploiement pris en charge : nommez-la dans [`Auth:AllowedInternalTargets`](configuration#outbound-fetches-ssrf-guard).
 
-## Déprovisionnement
+### API d'administration {#admin-api}
 
-Lorsqu'un utilisateur est supprimé via l'API d'administration (`DELETE /api/v1/profile/{userId}`), Authagonal appelle `DELETE {CallbackUrl}/users/{userId}` sur chaque application dans laquelle l'utilisateur a été provisionné. C'est effectué au mieux : les échecs sont enregistrés mais ne bloquent pas la suppression.
+Les applications conservées dans le stockage se gèrent sur `/api/v1/provisioning/apps` (politique `IdentityAdmin` ; chaque modification est auditée) :
 
-## Implémentation des points d'accès en amont
+| Route | Comportement |
+|---|---|
+| `GET /` | `{ "apps": [{ "appId", "name", "callbackUrl", "hasApiKey", "tryTimeoutSeconds" }], "limit": n }`. La clé d'API n'est jamais renvoyée, seulement `hasApiKey`. `limit` est le quota d'applications, nul en l'absence de quota. |
+| `POST /` | Création. `name` et `callbackUrl` sont obligatoires ; `apiKey` et `tryTimeoutSeconds` sont facultatifs. Un `appId` de 12 caractères est généré. Au-delà du quota, `400 provisioning_app_limit`. |
+| `PUT /{appId}` | Remplace `name`, `callbackUrl` et `tryTimeoutSeconds` (`name` et `callbackUrl` sont de nouveau obligatoires). Un `apiKey` omis ou nul laisse la clé inchangée ; une chaîne vide l'efface. `404 app_not_found` pour une application inconnue. |
+| `DELETE /{appId}` | `{ "removed": true }`. |
+| `POST /{appId}/test` | Envoie à l'application un Try avec un utilisateur de test fixe (`test-user`, `test@example.com`), avec un délai d'expiration de 10 secondes. Renvoie `{ "success", "statusCode", "body" }` (corps tronqué à 1000 caractères). Les échecs de connexion renvoient `success: false, statusCode: 0` plutôt qu'un statut d'erreur. |
 
-### Exemple minimal (Node.js/Express)
+`callbackUrl` doit être une URL `http` ou `https` absolue pointant vers un hôte externe, comme décrit ci-dessus. `tryTimeoutSeconds` est borné entre 5 et 300 secondes. L'`appId` est la valeur qu'un client liste dans `provisioningApps`.
+
+## Déprovisionnement {#deprovisioning}
+
+Lorsqu'un utilisateur est supprimé via l'API d'administration (`DELETE /api/v1/profile/{userId}`) ou déprovisionné via SCIM (`DELETE /scim/v2/Users/{id}`, une suppression logique qui désactive l'utilisateur), Authagonal appelle `DELETE {CallbackUrl}/users/{userId}` sur chaque application dans laquelle l'utilisateur avait été provisionné, avec un délai d'expiration de 10 secondes, et supprime l'enregistrement de provisionnement. Cette opération est exécutée au mieux : les échecs sont journalisés mais ne bloquent pas la suppression. Une application qui n'est plus configurée est ignorée avec un avertissement.
+
+`ReprovisionAsync` sur `IProvisioningOrchestrator` relance Try et Confirm pour chaque application, même lorsque l'utilisateur y est déjà provisionné. La bibliothèque l'utilise lorsqu'un compte sans mot de passe est réclamé (voir [Promouvoir un utilisateur](user-upgrade)) ; une simple reconnexion ne le fait jamais.
+
+## Implémenter les points de terminaison en amont {#implementing-the-upstream-endpoints}
+
+### Exemple minimal (Node.js/Express) {#minimal-example-nodejsexpress}
 
 ```javascript
 const pending = new Map(); // transactionId → user data

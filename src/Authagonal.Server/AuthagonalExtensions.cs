@@ -1317,7 +1317,7 @@ public static class AuthagonalExtensions
         }
 
         // Request localization
-        var supportedCultures = new[] { "en", "zh-Hans", "de", "fr", "es", "vi", "pt" };
+        var supportedCultures = SupportedLocales.All;
         app.UseRequestLocalization(options =>
         {
             options.SetDefaultCulture("en");

@@ -202,7 +202,7 @@ const title = resolveLocalized(branding.welcomeTitle, i18n.language) ?? 'Default
 
 ## i18n
 
-Built-in support for 10 languages (plus a Klingon easter egg):
+Built-in support for 11 languages (plus a Klingon easter egg):
 
 | Code | Language |
 |---|---|
@@ -216,6 +216,7 @@ Built-in support for 10 languages (plus a Klingon easter egg):
 | `ar` | Arabic (RTL) |
 | `af` | Afrikaans |
 | `hi` | Hindi |
+| `ja` | Japanese |
 | `tlh` | Klingon (novelty; hidden from default pickers) |
 
 Language is auto-detected from the browser and persisted to `localStorage`. Force a language via query string: `?lng=es`.

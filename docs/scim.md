@@ -77,6 +77,8 @@ Two rules:
   (see [Provisioning](provisioning.md)), so an explicit credential binding wins, and the `/try` payload
   carries the bound value so a downstream app can see which customer the sync came from.
 
+When `organizationId` names an existing [organization](organizations), the create also writes an `active` membership of it (no roles) and audits `scim.organization_member_added`, so the user is not then refused a token by the organization's membership gate. An id that names no organization stays a bare `org_id` tag, which is what tokens minted before organizations existed do. Like the tag, the membership is written on creation only.
+
 > **Tagging is not isolation.** Ownership is enforced per **client**, not per token. Two tokens issued
 > against the same client are one identity with two secrets, and each can read, rename, deactivate and
 > delete what the other created. That is fine when one party holds them all. If mutually untrusted
@@ -87,18 +89,18 @@ Two rules:
 `allowedEmailDomains` is the only control over **which** users a SCIM credential can provision. Set it.
 
 Omitting it produces an unrestricted token, and unrestricted is wider than it sounds. A SCIM-created user is
-written with `EmailConfirmed = true` — the address is treated as proven from that moment on — so an
+written with `EmailConfirmed = true` (the address is treated as proven from that moment on), so an
 unrestricted connector can create `ceo@some-other-company.example` as a pre-verified account. When the real
 owner later signs in through federation, a record with no existing external logins is adopted rather than
 refused, so their sign-in binds to that account; and because `ScimProvisionedByClientId` still names the
-connector that created it, that connector keeps full ownership of the object — it can read the profile, rename
+connector that created it, that connector keeps full ownership of the object: it can read the profile, rename
 the `userName`, deactivate it (which revokes every grant), or delete it, which purges the user's passkeys and
 group memberships and tombstones the row so the legitimate connector for that domain gets 404 on every
 operation.
 
 A token that omits the field logs a warning at mint time naming the token id.
 
-Supply bare domains — `acme.example`, not `@acme.example` or an address. A value that could never match is
+Supply bare domains (`acme.example`, not `@acme.example`, and not an address). A value that could never match is
 refused rather than stored, because a bound that permits nothing looks identical to a misconfigured connector.
 
 Operators can also set a bound in configuration:
@@ -115,7 +117,7 @@ Operators can also set a bound in configuration:
 
 The two are **intersected**, and an empty list from either source means "no bound from this source". So both
 empty is unrestricted; either one alone applies on its own; and when both are set, only domains in both are
-permitted — minting a token can narrow an operator's configured bound but never widen it.
+permitted: minting a token can narrow an operator's configured bound but never widen it.
 
 Enforced on create, `PUT` and `PATCH` alike, so a rename cannot move an account into a domain the credential
 is not allowed to provision.
@@ -244,7 +246,7 @@ operator; use `organizationId` on the token instead.
 - Creating a user whose `userName` or `externalId` already exists returns a SCIM `409` conflict. Email changes via PUT or PATCH are conflict-checked the same way.
 
 ### User deactivation
-- `DELETE /scim/v2/Users/{id}` **tombstones** the resource: it deactivates the user, keeps the local record, and stamps `ScimDeletedAt`. A subsequent `GET /scim/v2/Users/{id}` returns **404**, as RFC 7644 §3.6 requires ("the service provider MUST return a 404 for all operations associated with the previously deleted resource"). Do not confirm a deprovision by reading the resource back and expecting `active: false` — the read is a 404, and that is success.
+- `DELETE /scim/v2/Users/{id}` **tombstones** the resource: it deactivates the user, keeps the local record, and stamps `ScimDeletedAt`. A subsequent `GET /scim/v2/Users/{id}` returns **404**, as RFC 7644 §3.6 requires ("the service provider MUST return a 404 for all operations associated with the previously deleted resource"). Do not confirm a deprovision by reading the resource back and expecting `active: false`. The read is a 404, and that is success.
 - The record is retained rather than erased so a re-hire can be re-created: the tombstone releases the `userName`/`externalId` a new resource needs, while the local account, its audit history and its group memberships survive.
 - `PATCH` with `active = false` also deactivates the user.
 - Deactivated users cannot log in via password, SAML, or OIDC.
@@ -255,7 +257,7 @@ operator; use `organizationId` on the token instead.
 The full RFC 7644 §3.4.2.2 filter grammar is supported.
 
 **Operators:** `eq`, `ne`, `co`, `sw`, `ew`, `gt`, `ge`, `lt`, `le`, and `pr` (presence).
-**Logical:** `and`, `or`, `not (...)`, with parenthesised grouping — `and` binds tighter than `or`.
+**Logical:** `and`, `or`, `not (...)`, with parenthesised grouping. `and` binds tighter than `or`.
 **Paths:** sub-attributes (`name.givenName`), multi-valued attributes (`emails.value`), value paths (`emails[type eq "work"].value`) and URN-prefixed names (`urn:ietf:params:scim:schemas:core:2.0:User:userName`).
 
 ```
@@ -268,22 +270,22 @@ meta.lastModified gt "2026-01-01T00:00:00Z"
 
 Semantics follow the RFC: string comparison is case-insensitive, a multi-valued attribute matches when any element matches, and an absent attribute makes every comparison false except `ne`. Input that is not a valid SCIM filter is rejected with `400` and `scimType: invalidFilter`, naming the problem.
 
-**Performance.** `userName eq` and `externalId eq` — the lookups Entra and Okta issue before every create or update — are resolved via indexed point lookups rather than a listing scan, so they stay fast at any user count. Every other filter is evaluated while paging through the client's users, bounded: user PII is encrypted at rest and searchable only through blind indexes, so richer predicates cannot be pushed down to storage. Under cursor pagination `totalResults` is **omitted** while `nextCursor` is present, and is the exact total once `nextCursor` is absent — see Pagination.
+**Performance.** `userName eq` and `externalId eq` (the lookups Entra and Okta issue before every create or update) are resolved via indexed point lookups rather than a listing scan, so they stay fast at any user count. Every other filter is evaluated while paging through the client's users, bounded: user PII is encrypted at rest and searchable only through blind indexes, so richer predicates cannot be pushed down to storage. Under cursor pagination `totalResults` is **omitted** while `nextCursor` is present, and is the exact total once `nextCursor` is absent. See Pagination.
 
 ### Pagination
 User listings use **cursor pagination**. Each page of `GET /scim/v2/Users` returns a `nextCursor` property in the list response; pass it back as `?cursor=` to fetch the next page. When `nextCursor` is absent, the listing is complete. Page size is controlled by `count` (default 100, maximum 200).
 
-Requesting `startIndex` greater than 1 on the Users endpoint returns a `400` error directing you to cursor pagination; offset paging past the first page is not offered. `totalResults` is **omitted entirely** while `nextCursor` is present, and carries the exact total only on the final page. It deliberately does not report the returned page's size: a syncing client that read `totalResults`, saw it equal the number of resources it had just received, and concluded it held the whole directory silently under-read the tenant. Drive the loop off `nextCursor`, never off `totalResults` — and treat an absent `totalResults` as "not yet known", not as zero.
+Requesting `startIndex` greater than 1 on the Users endpoint returns a `400` error directing you to cursor pagination; offset paging past the first page is not offered. `totalResults` is **omitted entirely** while `nextCursor` is present, and carries the exact total only on the final page. It deliberately does not report the returned page's size: a syncing client that read `totalResults`, saw it equal the number of resources it had just received, and concluded it held the whole directory silently under-read the tenant. Drive the loop off `nextCursor`, never off `totalResults`, and treat an absent `totalResults` as "not yet known", not as zero.
 
 **Group listings are cursor-paginated too.** `GET /scim/v2/Groups` returns a `nextCursor` on both its filtered
 and unfiltered forms; follow it the same way. `startIndex` is still accepted on Groups for clients already using
 it, but it is **not advertised** in `ServiceProviderConfig` and should not be relied on: `pagination.index` is a
-claim about the provider, not about one collection, and `/Users` does not support it — so the only value that is
+claim about the provider, not about one collection, and `/Users` does not support it, so the only value that is
 true everywhere is `false`. Use cursors, which work on both.
 
 A filtered group listing scans in bounded windows rather than materialising the whole tenant, so it can return
 an empty page while matches still exist further on. When that happens it returns a `nextCursor` and **omits**
-`totalResults` — an empty page with a cursor means "keep going", and an empty page with no cursor means the
+`totalResults`: an empty page with a cursor means "keep going", and an empty page with no cursor means the
 filtered set really is empty. Do not treat the first empty page as the end of the collection.
 
 `count=0` returns `totalResults` with no resources (RFC 7644 §3.4.2.4) on both collections, and a negative

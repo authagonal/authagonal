@@ -4,13 +4,13 @@ title: Serveur personnalisé
 locale: fr
 ---
 
-# Démarrage rapide du serveur personnalisé
+# Démarrage rapide d'un serveur personnalisé
 
-Ce guide explique comment héberger Authagonal en tant que bibliothèque dans votre propre projet ASP.NET Core, puis personnaliser l'interface de connexion avec vos propres composants React.
+Ce guide explique comment héberger Authagonal comme bibliothèque dans votre propre projet ASP.NET Core, puis comment personnaliser l'interface de connexion avec vos propres composants React.
 
-## Partie 1 : Configuration du serveur
+## Partie 1 : mise en place du serveur {#part-1-server-setup}
 
-### Créer le projet
+### Créer le projet {#create-the-project}
 
 ```bash
 dotnet new web -n MyAuthServer
@@ -21,7 +21,7 @@ dotnet add package Authagonal.Server
 dotnet add package Authagonal.AzureProvider
 ```
 
-Votre fichier `.csproj` doit contenir :
+Votre `.csproj` doit contenir :
 
 ```xml
 <ItemGroup>
@@ -30,16 +30,16 @@ Votre fichier `.csproj` doit contenir :
 </ItemGroup>
 ```
 
-`Authagonal.AzureProvider` fournit les magasins Azure Table Storage que `AddAuthagonal` câble à partir de la configuration `Storage:*`. Pour héberger plutôt sur AWS, référencez `Authagonal.AwsProvider` et appelez `AddAuthagonalAwsStorage(...)` avant `AddAuthagonal`, voir [Installation → backend AWS](installation#aws-backend).
+`Authagonal.AzureProvider` fournit les stores Azure Table Storage que `AddAuthagonal` branche à partir de la configuration `Storage:*`. Pour héberger sur AWS à la place, référencez `Authagonal.AwsProvider` et appelez `AddAuthagonalAwsStorage(...)` avant `AddAuthagonal` : voir [Installation → Backend AWS](installation#aws-backend).
 
-### Configurer Program.cs
+### Configurer Program.cs {#configure-programcs}
 
-La configuration minimale comprend trois appels : `AddAuthagonal`, `UseAuthagonal` et `MapAuthagonalEndpoints`.
+La mise en place minimale tient en trois appels : `AddAuthagonal`, `UseAuthagonal` et `MapAuthagonalEndpoints`.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Register custom services BEFORE AddAuthagonal — yours take precedence
+// 1. Register custom services BEFORE AddAuthagonal (yours take precedence)
 builder.Services.AddSingleton<IAuthHook, AuditAuthHook>();
 builder.Services.AddSingleton<IEmailService, ConsoleEmailService>();
 
@@ -58,7 +58,7 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
-### Configurer appsettings.json
+### Configurer appsettings.json {#configure-appsettingsjson}
 
 ```json
 {
@@ -85,22 +85,22 @@ app.Run();
 
 | Clé | Description |
 |---|---|
-| `Issuer` | L'URL publique de votre serveur d'authentification. Utilisée dans les tokens et la découverte OIDC. |
-| `Storage:ConnectionString` | Chaîne de connexion Azure Table Storage. |
-| `Clients` | Tableau de clients OAuth injectés au démarrage. |
+| `Issuer` | L'URL publique de votre serveur d'authentification. Utilisée dans les jetons et dans la découverte OIDC. |
+| `Storage:ConnectionString` | Chaîne de connexion Azure Table Storage. Vous pouvez aussi définir `Storage:TableServiceUri` pour vous authentifier avec une identité managée ; l'un des deux est obligatoire. |
+| `Clients` | Tableau des clients OAuth initialisés au démarrage. |
 
-### Points d'extension
+### Points d'extension {#extensibility-points}
 
-Enregistrez vos implémentations **avant** d'appeler `AddAuthagonal()` : Authagonal utilise `TryAdd`, donc vos enregistrements ont la priorité.
+Enregistrez vos implémentations **avant** d'appeler `AddAuthagonal()` : Authagonal utilise `TryAdd`, donc vos enregistrements l'emportent. `IAuthHook` fait exception par nature : vous pouvez en enregistrer plusieurs et tous s'exécutent, et le hook intégré qui ne fait rien n'est ajouté que si vous n'en enregistrez aucun.
 
-| Interface | Fonction | Défaut |
+| Interface | Rôle | Par défaut |
 |---|---|---|
-| `IEmailService` | Envoi d'e-mails de vérification et de réinitialisation de mot de passe | Expéditeur Resend intégré lorsque `Email:ResendApiKey` est défini ; sinon no-op (ignore silencieusement) |
-| `IAuthHook` | Intercepter ou auditer les événements de connexion, d'inscription et de token | Aucune opération |
-| `IProvisioningOrchestrator` | Provisionner les utilisateurs dans les applications en aval lors de l'autorisation | Provisionnement TCC |
-| `ISecretProvider` | Résoudre les secrets client | Texte brut (ou Key Vault avec `SecretProvider:VaultUri`) |
+| `IEmailService` | Envoyer les e-mails de vérification, de réinitialisation du mot de passe et d'avis de compte existant | Expéditeur Resend intégré lorsque `Email:ResendApiKey` est défini ; sinon aucune action (les messages sont ignorés sans avertissement) |
+| `IAuthHook` | Contrôler ou auditer les événements de connexion, d'inscription et de jeton | Aucune action |
+| `IProvisioningOrchestrator` | Provisionner les utilisateurs dans les applications en aval au moment de l'autorisation | Provisionnement TCC |
+| `ISecretProvider` | Résoudre les secrets des clients | Texte en clair (ou Key Vault avec `SecretProvider:VaultUri`) |
 
-#### Exemple : hook d'audit
+#### Exemple : hook d'audit {#example-audit-hook}
 
 ```csharp
 using Authagonal.Core.Models;
@@ -125,7 +125,7 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
     public Task OnLoginFailedAsync(string email, string reason,
         CancellationToken ct = default)
     {
-        logger.LogWarning("Failed login: {Email} — {Reason}", email, reason);
+        logger.LogWarning("Failed login: {Email}: {Reason}", email, reason);
         return Task.CompletedTask;
     }
 
@@ -154,9 +154,9 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
 }
 ```
 
-L'interface possède d'autres membres optionnels avec des implémentations par défaut no-op (`OnMfaVerifyFailedAsync`, `OnEmailConfirmedAsync`, `OnMfaEnrolledAsync`, `OnMfaCredentialRemovedAsync`, `OnRecoveryCodesRegeneratedAsync`, `OnPasswordChangedAsync`), à surcharger uniquement si vous avez besoin de ces événements.
+L'interface comporte d'autres membres optionnels dont l'implémentation par défaut ne fait rien (`OnMfaVerifyFailedAsync`, `OnEmailConfirmedAsync`, `OnMfaEnrolledAsync`, `OnMfaCredentialRemovedAsync`, `OnRecoveryCodesRegeneratedAsync`, `OnPasswordChangedAsync`, `OnTokenIssuingAsync`, `OnDelegationMintedAsync`, `OnApprovalRequestedAsync`, `OnApprovalResolvedAsync`, `OnAgentConsentChangedAsync`, `OnConsentRevokedAsync`, `OnCapabilityTicketRedeemedAsync`) ; ne les surchargez que si vous avez besoin de ces événements.
 
-#### Exemple : service d'e-mail
+#### Exemple : service d'e-mail {#example-email-service}
 
 ```csharp
 using Authagonal.Core.Services;
@@ -179,19 +179,21 @@ public class ConsoleEmailService(ILogger<ConsoleEmailService> logger) : IEmailSe
 }
 ```
 
-> **L'e-mail est le piège d'intégration le plus courant.** Si vous n'enregistrez aucun `IEmailService` et ne définissez pas `Email:ResendApiKey`, les e-mails de vérification et de réinitialisation de mot de passe sont ignorés silencieusement, et comme le contrôle de connexion sur email confirmé est activé par défaut, les utilisateurs auto-inscrits ne peuvent jamais se connecter (`UseAuthagonal` avertit au démarrage). L'expéditeur Resend intégré s'active automatiquement lorsque `Email:ResendApiKey` + `Email:SenderEmail` sont configurés ; pour le dev/test, `Auth:AutoConfirmEmailDomains` ignore la vérification pour les domaines listés. Voir [Configuration → Email](configuration#email).
+`IEmailService` dispose aussi d'une méthode optionnelle `SendAccountExistsEmailAsync(email, signInUrl, ct)` (qui ne fait rien par défaut), appelée lorsque quelqu'un s'inscrit avec une adresse qui possède déjà un compte.
 
-### Ajouter des endpoints personnalisés
+> **L'e-mail est le piège d'intégration le plus courant.** Si vous n'enregistrez aucun `IEmailService` et ne définissez pas `Email:ResendApiKey`, les e-mails de vérification et de réinitialisation du mot de passe sont ignorés sans avertissement ; et comme l'exigence d'un e-mail confirmé pour se connecter est activée par défaut, les utilisateurs inscrits par eux-mêmes ne peuvent jamais se connecter (`UseAuthagonal` émet un avertissement au démarrage). L'expéditeur Resend intégré s'active automatiquement lorsque `Email:ResendApiKey` + `Email:SenderEmail` sont configurés ; en développement et en test, `Auth:AutoConfirmEmailDomains` saute la vérification pour les domaines listés. Voir [Configuration → E-mail](configuration#email).
 
-Vous pouvez ajouter vos propres endpoints à côté de ceux d'Authagonal :
+### Ajouter des endpoints personnalisés {#add-custom-endpoints}
+
+Vous pouvez ajouter vos propres endpoints à côté de ceux d'Authagonal :
 
 ```csharp
 app.MapGet("/custom/health", () => Results.Ok(new { status = "healthy" }));
 ```
 
-### Désactiver l'API d'administration
+### Désactiver l'API d'administration {#disable-admin-api}
 
-Pour les déploiements publics, désactivez les endpoints d'administration :
+Pour les déploiements exposés au public, désactivez les endpoints d'administration :
 
 ```json
 {
@@ -201,21 +203,21 @@ Pour les déploiements publics, désactivez les endpoints d'administration :
 }
 ```
 
-### Exécuter
+### L'exécuter {#run-it}
 
 ```bash
 dotnet run
 ```
 
-Le serveur démarre sur l'URL configurée, en servant le document de découverte OIDC à `/.well-known/openid-configuration`, l'interface de connexion à `/login`, et toutes les APIs d'authentification et d'administration.
+Le serveur démarre sur l'URL configurée et sert le document de découverte OIDC sur `/.well-known/openid-configuration`, l'interface de connexion sur `/login`, ainsi que toutes les API d'authentification et d'administration.
 
 ---
 
-## Partie 2 : Interface de connexion personnalisée
+## Partie 2 : interface de connexion personnalisée {#part-2-custom-login-ui}
 
-La SPA de connexion par défaut fonctionne directement, mais vous pouvez la remplacer par votre propre application React qui importe des composants et des clients API depuis le package npm `@authagonal/login`.
+La SPA de connexion par défaut fonctionne telle quelle, mais vous pouvez la remplacer par votre propre application React, qui importe des composants et des clients d'API depuis le paquet npm `@authagonal/login`.
 
-### Mettre en place le frontend
+### Créer la structure du frontend {#scaffold-the-frontend}
 
 ```bash
 mkdir login-app && cd login-app
@@ -224,10 +226,10 @@ npm install react react-dom react-router @authagonal/login
 npm install -D vite @vitejs/plugin-react typescript @types/react @types/react-dom
 ```
 
-### Ce que le package npm exporte
+### Ce qu'exporte le paquet npm {#what-the-npm-package-exports}
 
 ```typescript
-// Components — use as-is or as reference
+// Components: use as-is or as reference
 import {
   AuthLayout,
   LoginPage,
@@ -237,17 +239,19 @@ import {
   MfaSetupPage,
   RegisterPage,
   ConsentPage,
+  AgentConsentPage,
   GrantsPage,
   DevicePage,
-  App,              // Standalone SPA with full routing
+  App,              // Standalone SPA with full routing (accepts an extraRoutes prop)
 } from '@authagonal/login';
 
 // UI primitives
 import {
-  Button, Input, Label, Card, Alert, Separator, cn,
+  Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
+  Alert, Separator, Turnstile, cn,
 } from '@authagonal/login';
 
-// API clients — call from your custom pages
+// API clients: call from your custom pages
 import {
   login, register, logout, ssoCheck, forgotPassword, resetPassword,
   getSession, getProviders, getPasswordPolicy,
@@ -259,10 +263,14 @@ import {
 
 // Branding
 import {
-  loadBranding, useBranding, BrandingContext, resolveLocalized,
+  loadBranding, useBranding, BrandingContext, brandingDefaults, resolveLocalized,
+  getBoot, getOrganization,
 } from '@authagonal/login';
 
-// i18n — always import from this package, not react-i18next directly
+// Redirect helpers for the post-login hop
+import { resolveRedirect, isSameOriginPath } from '@authagonal/login';
+
+// i18n: always import from this package, not react-i18next directly
 import { useTranslation, i18n } from '@authagonal/login';
 
 // Styles
@@ -276,9 +284,9 @@ import type {
 } from '@authagonal/login';
 ```
 
-### Point d'entrée (main.tsx)
+### Point d'entrée (main.tsx) {#entry-point-maintsx}
 
-Chargez la configuration de marque depuis le serveur et enveloppez votre application dans le contexte de marque :
+Chargez la personnalisation depuis le serveur et enveloppez votre application dans le contexte de personnalisation :
 
 ```tsx
 import { createRoot } from 'react-dom/client';
@@ -287,7 +295,7 @@ import '@authagonal/login/styles.css';
 import App from './App';
 
 loadBranding().then((config) => {
-  document.title = `Sign In — ${config.appName}`;
+  document.title = `Sign In | ${config.appName}`;
   createRoot(document.getElementById('root')!).render(
     <BrandingContext.Provider value={config}>
       <App />
@@ -296,30 +304,35 @@ loadBranding().then((config) => {
 });
 ```
 
-### Routage (App.tsx)
+### Routage (App.tsx) {#routing-apptsx}
 
-Combinez des pages personnalisées avec les pages du package de base :
+Combinez des pages personnalisées avec les pages de base du paquet. Le serveur envoie les utilisateurs vers des chemins sous `/login` (l'endpoint d'autorisation redirige vers `/login?returnUrl=...`, et les e-mails pointent vers `/login/reset-password`, `/login/consent`, `/login/device`) ; le routeur doit donc utiliser `basename="/login"`, et les routes ci-dessous sont relatives à ce chemin :
 
 ```tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import {
-  ForgotPasswordPage, ResetPasswordPage, ConsentPage, DevicePage, GrantsPage,
+  RegisterPage, ForgotPasswordPage, ResetPasswordPage, MfaChallengePage, MfaSetupPage,
+  ConsentPage, AgentConsentPage, DevicePage, GrantsPage,
 } from '@authagonal/login';
 import MyLoginPage from './MyLoginPage';
 import MyLayout from './MyLayout';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/login">
       <MyLayout>
         <Routes>
-          <Route path="/login" element={<MyLoginPage />} />
+          <Route path="/" element={<MyLoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/mfa-challenge" element={<MfaChallengePage />} />
+          <Route path="/mfa-setup" element={<MfaSetupPage />} />
           <Route path="/consent" element={<ConsentPage />} />
+          <Route path="/consent/agents/:clientId" element={<AgentConsentPage />} />
           <Route path="/device" element={<DevicePage />} />
           <Route path="/grants" element={<GrantsPage />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </MyLayout>
     </BrowserRouter>
@@ -327,16 +340,22 @@ export default function App() {
 }
 ```
 
-### Page de connexion personnalisée
+Si vous voulez seulement ajouter des pages à l'application standard, rendez plutôt `<App extraRoutes={...} />` depuis le paquet. Elle fournit déjà toutes les routes ci-dessus (plus `/account`).
 
-Construisez votre propre formulaire de connexion en utilisant les clients API du package npm :
+### Page de connexion personnalisée {#custom-login-page}
+
+Construisez votre propre formulaire de connexion avec les clients d'API du paquet npm :
 
 ```tsx
 import { useState } from 'react';
-import { login, ssoCheck, ApiRequestError, useBranding } from '@authagonal/login';
+import { useNavigate, useSearchParams } from 'react-router';
+import { login, resolveRedirect, ApiRequestError, useBranding } from '@authagonal/login';
 
 export default function MyLoginPage() {
   const branding = useBranding();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnUrl = searchParams.get('returnUrl') || '';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -344,10 +363,29 @@ export default function MyLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login(email, password);
-      // Login sets a cookie — redirect to the return URL
-      const params = new URLSearchParams(window.location.search);
-      window.location.href = params.get('returnUrl') || '/';
+      const result = await login(email, password, returnUrl || undefined);
+
+      // A second factor is still owed: hand over to the package's MFA pages.
+      if (result.mfaRequired && result.challengeId) {
+        const params = new URLSearchParams({
+          challengeId: result.challengeId,
+          ...(returnUrl ? { returnUrl } : {}),
+          ...(result.methods ? { methods: result.methods.join(',') } : {}),
+          ...(result.webAuthn ? { webAuthn: JSON.stringify(result.webAuthn) } : {}),
+        });
+        navigate(`/mfa-challenge?${params.toString()}`);
+        return;
+      }
+      if (result.mfaSetupRequired) {
+        navigate(`/mfa-setup${returnUrl ? `?returnUrl=${encodeURIComponent(returnUrl)}` : ''}`, {
+          state: { setupToken: result.setupToken },
+        });
+        return;
+      }
+
+      // Login sets a cookie. resolveRedirect only returns a same-origin path or the origin of a
+      // registered client's home URI; anything else falls back to the default.
+      window.location.href = await resolveRedirect(returnUrl, () => '/login/account');
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message || 'Login failed');
@@ -379,9 +417,9 @@ export default function MyLoginPage() {
 }
 ```
 
-### Layout personnalisé
+### Mise en page personnalisée {#custom-layout}
 
-Enveloppez le `AuthLayout` de base pour ajouter votre propre marque :
+Enveloppez le `AuthLayout` de base pour ajouter votre propre identité visuelle :
 
 ```tsx
 import { AuthLayout } from '@authagonal/login';
@@ -391,7 +429,7 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
     <>
       <AuthLayout>{children}</AuthLayout>
       <footer>
-        &copy; {new Date().getFullYear()} My Company —
+        &copy; {new Date().getFullYear()} My Company |
         <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a>
       </footer>
     </>
@@ -399,9 +437,9 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
 }
 ```
 
-### Marque (wwwroot/branding.json)
+### Personnalisation (wwwroot/branding.json) {#branding-wwwrootbrandingjson}
 
-Configurez l'apparence de l'interface de connexion sans reconstruire :
+Configurez l'apparence de l'interface de connexion sans recompiler :
 
 ```json
 {
@@ -416,11 +454,11 @@ Configurez l'apparence de l'interface de connexion sans reconstruire :
 }
 ```
 
-Le schéma complet, incluant le texte de bienvenue localisé, la liste du sélecteur de langue et les surcharges de couleur clair/sombre et d'arrière-plan de logo par mode, se trouve sur la page [Marque](branding).
+Le schéma complet, y compris le texte d'accueil traduit, la liste du sélecteur de langue et les surcharges de couleurs et de fond de logo propres aux modes sombre et clair, est décrit sur la page [Personnalisation de l'interface](branding).
 
-### Configuration Vite
+### Configuration de Vite {#vite-config}
 
-Redirigez les appels API vers le backend pendant le développement :
+Redirigez les appels d'API vers le backend pendant le développement :
 
 ```typescript
 import { defineConfig } from 'vite';
@@ -442,9 +480,9 @@ export default defineConfig({
 });
 ```
 
-### Construire et servir
+### Compiler et servir {#build-and-serve}
 
-Ajoutez une cible de build à votre `.csproj` pour construire automatiquement la SPA et la copier dans `wwwroot` :
+Ajoutez une cible de build à votre `.csproj` pour compiler automatiquement la SPA et la copier dans `wwwroot` :
 
 ```xml
 <Target Name="BuildLoginApp" BeforeTargets="Build" Condition="!Exists('wwwroot/index.html')">
@@ -457,4 +495,4 @@ Ajoutez une cible de build à votre `.csproj` pour construire automatiquement la
 </Target>
 ```
 
-Maintenant `dotnet build` construit à la fois le serveur .NET et la SPA React, et `dotnet run` sert le tout depuis un seul processus.
+Désormais, `dotnet build` compile à la fois le serveur .NET et la SPA React, et `dotnet run` sert l'ensemble depuis un seul processus.

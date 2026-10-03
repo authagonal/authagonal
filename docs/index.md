@@ -26,19 +26,21 @@ A single, self-contained deployment. The server and login UI ship as one Docker 
 - **Device Authorization Grant**: RFC 8628 flow for input-constrained devices (smart TVs, CLIs, IoT)
 - **Token Introspection**: RFC 7662 for resource servers to verify token validity
 - **Token signing**: ES256 only. Access tokens carry the RFC 9068 `typ: at+jwt` so a resource server
-  can tell them from id_tokens and logout tokens, but **RFC 9068 conformance is not claimed** — §2.1
+  can tell them from id_tokens and logout tokens, but **RFC 9068 conformance is not claimed**: §2.1
   requires RS256 among the supported algorithms, and this server neither issues nor accepts it. A
   single algorithm is a deliberate posture: every additional accepted algorithm is another way for a
   verifier to be talked into the wrong one.
 - **Back-Channel Logout**: OIDC Back-Channel Logout 1.0 notifications to relying parties
+- **Server-side sessions** *(opt-in)*: `AddAuthagonalServerSideSessions` keeps the SSO ticket in storage so the auth cookie carries only an opaque id, and lights up self-service `GET /api/auth/sessions` listing and per-device revocation ([Auth API](auth-api#sessions-self-service))
+- **Backend-for-Frontend**: `Authagonal.Bff` (.NET) and `@authagonal/bff` (Node), a confidential-client BFF so a SPA never holds a token ([BFF](bff))
 - **GDPR Self-Service** *(Authagonal Cloud)*: data export and scheduled account deletion from the hosted
-  account page. The login app ships the UI for it, but the endpoints it calls —
-  `GET /api/v1/account/export`, `POST /api/v1/account/erasure` — are served by the Cloud auth host and are
+  account page. The login app ships the UI for it, but the endpoints it calls
+  (`GET /api/v1/account/export`, `POST /api/v1/account/erasure`) are served by the Cloud auth host and are
   **not** part of this library's surface. A self-hosted deployment must implement them, or leave the two
   buttons out of its account page: `MapFallbackToFile` answers an unimplemented route with 200 and the SPA's
   own HTML, so an export that is not implemented has to be recognised rather than downloaded.
 - **TCC Provisioning**: Try-Confirm-Cancel provisioning into downstream apps at authorize time
-- **Brandable Login UI**: runtime-configurable via a JSON file, logo, colors, CSS custom properties, no rebuild needed; localized into 10 languages
+- **Brandable Login UI**: runtime-configurable via a JSON file, logo, colors, CSS custom properties, no rebuild needed; localized into 11 languages
 - **Auth Hooks**: `IAuthHook` extensibility for audit logging, custom validation, webhooks
 - **PII Encryption Seams**: `IFieldCipher` / `IIndexTokenizer` extension points for field-level encryption at rest with keyed blind-index (HMAC) search; recovery codes encrypted via `ISecretProvider`
 - **HashiCorp Vault Transit client**: sign/verify, encrypt/decrypt and keyed HMAC against Vault's Transit engine, for building an `IFieldCipher` or `IIndexTokenizer`. Remote JWT signing is not wired: the token-signing key is always the one in `ISigningKeyStore`.
@@ -52,12 +54,13 @@ A single, self-contained deployment. The server and login UI ship as one Docker 
 
 Task-oriented guides for the flows teams build most often:
 
-- **[Upgrading a User](user-upgrade)** — turn a guest / SSO / invite account into a credentialed one via the passwordless account claim, and run your guest → standard-member promotion on confirm.
-- **[Self-Service SSO](self-service-sso)** — JIT provisioning for enterprise connections: invite-only vs. self-service onboarding, keeping external IdPs from becoming foot-guns, and pre-federation interstitials.
-- **[Federated Sessions](federated-sessions)** — revoke the local session when the upstream IdP does (`RevalidateOnRefresh`).
-- **[WebSocket Auth](websocket-auth)** — authenticate browser WebSockets through the BFF without exposing a token.
-- **[Agentic Auth](agentic-auth)** — delegate a user's authority to AI agents: registered agents, fine-grained RFC 9396 authority, composite delegation tokens (RFC 8693 `act`), standing consent, just-in-time approvals, capability tickets.
-- **[Organizations](organizations)** — serve many customers from one tenant: `Organization` and membership records, the `organization` authorize parameter, `org_id` / `org_slug` / `org_name` on the tokens, organization-scoped roles, and refusal of non-members.
+- **[Upgrading a User](user-upgrade)**: turn a guest / SSO / invite account into a credentialed one via the passwordless account claim, and run your guest → standard-member promotion on confirm.
+- **[Self-Service SSO](self-service-sso)**: JIT provisioning for enterprise connections: invite-only vs. self-service onboarding, keeping external IdPs from becoming foot-guns, and pre-federation interstitials.
+- **[Federated Sessions](federated-sessions)**: revoke the local session when the upstream IdP does (`RevalidateOnRefresh`).
+- **[Backend-for-Frontend (BFF)](bff)**: keep tokens out of the browser: a confidential OIDC client on your backend with an httpOnly session cookie and a token-injecting API proxy, in .NET or Node.
+- **[WebSocket Auth](websocket-auth)**: authenticate browser WebSockets through the BFF without exposing a token.
+- **[Agentic Auth](agentic-auth)**: delegate a user's authority to AI agents: registered agents, fine-grained RFC 9396 authority, composite delegation tokens (RFC 8693 `act`), standing consent, just-in-time approvals, capability tickets.
+- **[Organizations](organizations)**: serve many customers from one tenant: `Organization` and membership records, the `organization` authorize parameter, `org_id` / `org_slug` / `org_name` on the tokens, organization-scoped roles, and refusal of non-members.
 
 ## Architecture
 

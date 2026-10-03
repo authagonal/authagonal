@@ -5,57 +5,65 @@ locale: vi
 ---
 
 <p align="center">
-  <img src="{{ 'assets/logo.svg' | relative_url }}" width="120" alt="Authagonal logo">
+  <img src="{{ 'assets/logo.svg' | relative_url }}" width="120" alt="Logo Authagonal">
 </p>
 
 # Authagonal
 
-Máy chủ xác thực OAuth 2.0 / OpenID Connect / SAML 2.0 cho .NET, được hỗ trợ bởi lưu trữ có thể thay thế: PostgreSQL hoặc SQLite của chính bạn, Azure Table Storage, hoặc AWS (DynamoDB / S3 / Secrets Manager).
+Máy chủ xác thực OAuth 2.0 / OpenID Connect / SAML 2.0 dành cho .NET, chạy trên lớp lưu trữ có thể thay thế: PostgreSQL hoặc SQLite của riêng bạn, Azure Table Storage, hoặc AWS (DynamoDB / S3 / Secrets Manager).
 
-Một triển khai duy nhất, khép kín. Máy chủ và giao diện đăng nhập được đóng gói thành một Docker image duy nhất: SPA được phục vụ từ cùng origin với API, nên xác thực cookie, chuyển hướng và CSP đều hoạt động mà không cần xử lý phức tạp cross-origin.
+Một bản triển khai duy nhất, khép kín. Máy chủ và giao diện đăng nhập được đóng gói chung trong một Docker image, SPA được phục vụ từ cùng origin với API, nên xác thực bằng cookie, chuyển hướng và CSP đều hoạt động mà không phải vướng vào sự phức tạp của cross-origin.
 
-> **Thích dịch vụ được quản lý hơn?** [Authagonal Cloud](https://authagonal.io) vận hành tất cả những điều này cho bạn: đa người thuê (multi-tenant), mọi tính năng trên mọi gói, không tính phí SSO theo từng kết nối. → [authagonal.io](https://authagonal.io)
+> **Muốn dùng dịch vụ được quản lý?** [Authagonal Cloud](https://authagonal.io) vận hành toàn bộ những thứ này cho bạn, đa tenant, mọi tính năng có trong mọi gói, không tính phí SSO theo từng kết nối. → [authagonal.io](https://authagonal.io)
 
-## Tính năng chính
+## Tính năng chính {#key-features}
 
-- **Nhà cung cấp OIDC**: các loại cấp quyền authorization_code + PKCE, client_credentials, refresh_token, device_code với xoay vòng sử dụng một lần
-- **SAML 2.0 SP**: triển khai tự phát triển với hỗ trợ đầy đủ Azure AD (phản hồi có chữ ký, assertion, hoặc cả hai), một cặp khóa SP theo từng kết nối cho các AuthnRequest có chữ ký cùng khả năng giải mã `EncryptedAssertion`, và Single Logout (khởi tạo từ SP và từ IdP)
-- **Liên kết OIDC động**: kết nối với Google, Apple, Azure AD, hoặc bất kỳ IdP tương thích OIDC nào
-- **Xác thực đa yếu tố**: TOTP, WebAuthn/passkey, mã khôi phục; chính sách theo từng client (`Disabled` / `Enabled` / `Required`) với tùy chỉnh ghi đè theo từng người dùng qua `IAuthHook`, được áp dụng cả cho các lần đăng nhập liên kết
-- **Cấp phát SCIM 2.0**: cấp phát người dùng/nhóm đầu vào từ Entra ID, Okta, OneLogin; liệt kê phân trang theo con trỏ và bộ lọc `eq` dựa trên chỉ mục mù
-- **Màn hình đồng ý OAuth**: đồng ý theo từng client với nhắc lại theo phạm vi và quản lý cấp quyền
-- **Cấp quyền ủy quyền thiết bị**: luồng RFC 8628 cho các thiết bị hạn chế đầu vào (smart TV, CLI, IoT)
-- **Xem xét token (Introspection)**: RFC 7662 để các máy chủ tài nguyên xác minh tính hợp lệ của token
-- **Ký token**: chỉ ES256. Access token mang `typ: at+jwt` theo RFC 9068 để máy chủ tài nguyên có thể
-  phân biệt chúng với id_token và logout token, nhưng **không tuyên bố tuân thủ RFC 9068**: §2.1 yêu
-  cầu có RS256 trong số các thuật toán được hỗ trợ, và máy chủ này không phát hành lẫn không chấp
-  nhận nó. Chỉ dùng một thuật toán là một lập trường có chủ đích: mỗi thuật toán được chấp nhận thêm
-  là thêm một cách để dụ một bên xác minh dùng nhầm thuật toán.
-- **Đăng xuất Back-Channel**: thông báo OIDC Back-Channel Logout 1.0 đến các relying party
-- **Tự phục vụ GDPR**: xuất dữ liệu và lên lịch xóa tài khoản từ trang tài khoản được lưu trữ
-- **Cấp phát TCC**: cấp phát người dùng theo mô hình Try-Confirm-Cancel vào các ứng dụng phía sau tại thời điểm ủy quyền
-- **Giao diện đăng nhập tùy chỉnh**: cấu hình tại thời điểm chạy qua tệp JSON (logo, màu sắc, thuộc tính CSS tùy chỉnh), không cần build lại; được bản địa hóa sang 10 ngôn ngữ
-- **Auth Hooks**: khả năng mở rộng `IAuthHook` cho ghi nhật ký kiểm tra, xác thực tùy chỉnh, webhooks
-- **Seam mã hóa PII**: các điểm mở rộng `IFieldCipher` / `IIndexTokenizer` cho mã hóa cấp trường khi lưu trữ với tìm kiếm bằng chỉ mục mù có khóa (HMAC); mã khôi phục được mã hóa qua `ISecretProvider`
-- **HashiCorp Vault Transit**: ký JWT từ xa mà không cần truy cập khóa riêng cục bộ
-- **Thư viện có thể kết hợp**: `AddAuthagonal()` / `UseAuthagonal()` để tích hợp vào dự án của bạn với các tùy chỉnh dịch vụ
-- **Sẵn sàng Native AOT**: cắt tỉa IL và tuần tự hóa JSON được sinh từ nguồn để khởi động nhanh
-- **Lưu trữ có thể thay thế**: PostgreSQL hoặc SQLite tự vận hành (không cần tài khoản đám mây), hoặc Azure Table Storage / AWS (DynamoDB / S3 / Secrets Manager) làm các backend chi phí thấp, thân thiện với serverless
-- **Sao lưu & Khôi phục**: sao lưu tăng dần (dựa trên nhật ký thay đổi với dự phòng quét toàn bộ), xác minh tính toàn vẹn, theo dõi xóa dựa trên tombstone
-- **API Quản trị**: CRUD người dùng, quản lý nhà cung cấp SAML/OIDC, định tuyến tên miền SSO, giả mạo token
+- **OIDC Provider**: các grant authorization_code + PKCE, client_credentials, refresh_token, device_code với cơ chế xoay vòng dùng một lần
+- **SAML 2.0 SP**: bản triển khai tự xây dựng, hỗ trợ đầy đủ Azure AD (ký response, ký assertion, hoặc cả hai), một cặp khóa SP riêng cho từng kết nối để ký AuthnRequest + giải mã `EncryptedAssertion`, và Single Logout (khởi tạo từ SP lẫn từ IdP)
+- **Liên kết OIDC động**: kết nối tới Google, Apple, Azure AD, hoặc bất kỳ IdP nào tuân thủ OIDC
+- **Xác thực đa yếu tố**: TOTP, WebAuthn/passkey, mã khôi phục; chính sách theo từng client (`Disabled` / `Enabled` / `Required`) có thể ghi đè theo từng người dùng qua `IAuthHook`, được áp dụng cả cho đăng nhập liên kết
+- **Cấp phát SCIM 2.0**: nhận cấp phát người dùng/nhóm từ Entra ID, Okta, OneLogin; liệt kê phân trang bằng con trỏ và bộ lọc `eq` dựa trên blind index
+- **Màn hình chấp thuận OAuth**: chấp thuận theo từng client, hỏi lại khi scope thay đổi, và quản lý grant
+- **Device Authorization Grant**: luồng RFC 8628 cho các thiết bị hạn chế nhập liệu (smart TV, CLI, IoT)
+- **Token Introspection**: RFC 7662 để resource server kiểm tra tính hợp lệ của token
+- **Ký token**: chỉ ES256. Access token mang `typ: at+jwt` theo RFC 9068 để resource server
+  phân biệt được chúng với id_token và logout token, nhưng **không tuyên bố tuân thủ RFC 9068**: §2.1
+  yêu cầu RS256 nằm trong số các thuật toán được hỗ trợ, còn máy chủ này không phát hành cũng không chấp nhận nó. Chỉ dùng
+  một thuật toán là lập trường có chủ đích: mỗi thuật toán được chấp nhận thêm là thêm một cách để
+  bên kiểm tra token bị dụ dùng nhầm thuật toán.
+- **Back-Channel Logout**: gửi thông báo OIDC Back-Channel Logout 1.0 tới các relying party
+- **Phiên phía máy chủ** *(tùy chọn bật)*: `AddAuthagonalServerSideSessions` lưu ticket SSO trong kho lưu trữ để cookie xác thực chỉ mang một id không trong suốt, đồng thời bật chức năng tự phục vụ `GET /api/auth/sessions` để liệt kê phiên và thu hồi theo từng thiết bị ([Auth API](auth-api#sessions-self-service))
+- **Backend-for-Frontend**: `Authagonal.Bff` (.NET) và `@authagonal/bff` (Node), một BFF dạng confidential client để SPA không bao giờ nắm giữ token ([BFF](bff))
+- **GDPR tự phục vụ** *(Authagonal Cloud)*: xuất dữ liệu và lên lịch xóa tài khoản từ trang tài khoản
+  do Cloud lưu trữ. Ứng dụng đăng nhập có sẵn giao diện cho chức năng này, nhưng các endpoint mà nó gọi
+  (`GET /api/v1/account/export`, `POST /api/v1/account/erasure`) do auth host của Cloud phục vụ và
+  **không** thuộc bề mặt của thư viện này. Bản tự triển khai phải tự hiện thực chúng, hoặc bỏ hai
+  nút đó khỏi trang tài khoản của mình: `MapFallbackToFile` trả lời một route chưa được hiện thực bằng 200 kèm HTML
+  của chính SPA, nên một chức năng xuất chưa được hiện thực phải được nhận diện ra thay vì bị tải xuống như một tệp.
+- **Cấp phát TCC**: cấp phát theo mô hình Try-Confirm-Cancel vào các ứng dụng downstream ngay tại thời điểm authorize
+- **Giao diện đăng nhập tùy biến thương hiệu**: cấu hình lúc chạy qua một tệp JSON, logo, màu sắc, CSS custom property, không cần build lại; đã bản địa hóa sang 11 ngôn ngữ
+- **Auth Hook**: khả năng mở rộng qua `IAuthHook` cho ghi nhật ký kiểm toán, kiểm tra hợp lệ tùy chỉnh, webhook
+- **Điểm mở rộng mã hóa PII**: các điểm mở rộng `IFieldCipher` / `IIndexTokenizer` để mã hóa dữ liệu lưu trữ ở cấp trường, kèm tìm kiếm bằng blind index có khóa (HMAC); mã khôi phục được mã hóa qua `ISecretProvider`
+- **Client HashiCorp Vault Transit**: ký/xác minh chữ ký, mã hóa/giải mã và HMAC có khóa trên engine Transit của Vault, dùng để xây dựng một `IFieldCipher` hoặc `IIndexTokenizer`. Ký JWT từ xa chưa được kết nối: khóa ký token luôn là khóa nằm trong `ISigningKeyStore`.
+- **Thư viện có thể kết hợp**: `AddAuthagonal()` / `UseAuthagonal()` để chạy trong dự án của riêng bạn với các dịch vụ ghi đè tùy chỉnh
+- **Sẵn sàng cho Native AOT**: IL trimming và tuần tự hóa JSON sinh bằng source generator để khởi động nhanh
+- **Lưu trữ có thể thay thế**: PostgreSQL hoặc SQLite tự vận hành (không cần tài khoản cloud), hoặc Azure Table Storage / AWS (DynamoDB / S3 / Secrets Manager) cho backend chi phí thấp, thân thiện với serverless
+- **Sao lưu & khôi phục**: sao lưu tăng dần (dựa trên change-log, có lượt quét toàn bộ làm lưới an toàn), kiểm tra tính toàn vẹn, theo dõi thao tác xóa bằng tombstone
+- **Admin API**: CRUD người dùng, quản lý provider SAML/OIDC, định tuyến SSO theo tên miền, mạo danh bằng token
 
-## Các tích hợp thường gặp
+## Các tích hợp phổ biến {#common-integrations}
 
-Các hướng dẫn theo tác vụ cho những luồng mà các đội thường xây dựng nhất. Hiện các trang này mới chỉ
-có bản tiếng Anh:
+Hướng dẫn theo tác vụ cho những luồng mà các nhóm hay xây dựng nhất:
 
-- **[Nâng cấp một người dùng](../user-upgrade)**: biến một tài khoản khách / SSO / theo lời mời thành tài khoản có thông tin đăng nhập thông qua cơ chế nhận tài khoản không mật khẩu, và chạy phần nâng hạng từ khách lên thành viên tiêu chuẩn khi xác nhận.
-- **[SSO tự phục vụ](../self-service-sso)**: cấp phát JIT cho các kết nối doanh nghiệp: onboarding chỉ theo lời mời so với tự phục vụ, cách không để các IdP bên ngoài trở thành cạm bẫy, và các trang trung gian trước khi liên kết.
-- **[Phiên liên kết](../federated-sessions)**: thu hồi phiên cục bộ khi IdP thượng nguồn thu hồi (`RevalidateOnRefresh`).
-- **[Xác thực WebSocket](../websocket-auth)**: xác thực WebSocket của trình duyệt qua BFF mà không để lộ token.
-- **[Xác thực cho tác nhân](../agentic-auth)**: ủy quyền thẩm quyền của người dùng cho các tác nhân AI: tác nhân đã đăng ký, thẩm quyền chi tiết theo RFC 9396, token ủy quyền ghép (`act` của RFC 8693), đồng ý thường trực, phê duyệt tức thời, capability ticket.
+- **[Nâng cấp người dùng](user-upgrade)**: biến một tài khoản khách / SSO / được mời thành tài khoản có thông tin đăng nhập thông qua cơ chế nhận lại tài khoản không mật khẩu, và chạy bước nâng khách → thành viên chuẩn của bạn khi xác nhận.
+- **[SSO tự phục vụ](self-service-sso)**: cấp phát JIT cho các kết nối doanh nghiệp: onboarding chỉ qua lời mời so với tự phục vụ, ngăn IdP bên ngoài trở thành cái bẫy tự gây hại, và các trang trung gian trước khi chuyển sang IdP liên kết.
+- **[Phiên liên kết](federated-sessions)**: thu hồi phiên cục bộ khi IdP upstream thu hồi (`RevalidateOnRefresh`).
+- **[Backend-for-Frontend (BFF)](bff)**: giữ token bên ngoài trình duyệt: một OIDC confidential client trên backend của bạn với cookie phiên httpOnly và một proxy API tự chèn token, bằng .NET hoặc Node.
+- **[Xác thực WebSocket](websocket-auth)**: xác thực WebSocket của trình duyệt thông qua BFF mà không để lộ token.
+- **[Xác thực cho agent](agentic-auth)**: ủy quyền thẩm quyền của người dùng cho AI agent: agent đã đăng ký, thẩm quyền chi tiết theo RFC 9396, token ủy quyền tổng hợp (RFC 8693 `act`), chấp thuận thường trực, phê duyệt đúng lúc, capability ticket.
+- **[Tổ chức](organizations)**: phục vụ nhiều khách hàng từ một tenant: bản ghi `Organization` và bản ghi thành viên, tham số authorize `organization`, `org_id` / `org_slug` / `org_name` trên token, vai trò theo phạm vi tổ chức, và từ chối người không phải thành viên.
 
-## Kiến trúc
+## Kiến trúc {#architecture}
 
 ```
 Client App                    Authagonal                         IdP (Azure AD, etc.)
@@ -76,4 +84,4 @@ Client App                    Authagonal                         IdP (Azure AD, 
     │ ◄─ { access_token, ... } ──┤                                    │
 ```
 
-Bắt đầu với hướng dẫn [Cài đặt](installation) hoặc chuyển thẳng đến [Bắt đầu nhanh](quickstart). Để tích hợp Authagonal vào dự án của bạn, xem [Khả năng mở rộng](extensibility).
+Hãy bắt đầu với hướng dẫn [Cài đặt](installation) hoặc chuyển thẳng tới [Bắt đầu nhanh](quickstart). Để chạy Authagonal bên trong dự án của riêng bạn, xem [Khả năng mở rộng](extensibility). Về quản lý dữ liệu, xem [Sao lưu & khôi phục](backup-restore). Để xem toàn bộ lịch sử thay đổi, xem [Changelog](https://github.com/authagonal/authagonal/blob/master/CHANGELOG.md).

@@ -9,7 +9,7 @@ Authagonal is designed to scale both vertically and horizontally with no special
 
 ## Stateless by design
 
-All persistent state is stored in the backing store — Azure Table Storage, DynamoDB on the AWS backend, or PostgreSQL on the self-hosted SQL backend. There is no in-process state that requires sticky sessions or coordination between instances:
+All persistent state is stored in the backing store (Azure Table Storage, DynamoDB on the AWS backend, or PostgreSQL on the self-hosted SQL backend). There is no in-process state that requires sticky sessions or coordination between instances:
 
 - **Signing keys**: loaded from Table Storage, refreshed hourly
 - **Authorization codes and refresh tokens**: stored in Table Storage with single-use enforcement
@@ -19,11 +19,13 @@ All persistent state is stored in the backing store — Azure Table Storage, Dyn
 
 ## Cookie encryption (data protection)
 
-ASP.NET Core's Data Protection keys are automatically persisted to Azure Blob Storage when using a real Azure Storage connection string. This means cookies signed by one instance can be decrypted by any other instance, no sticky sessions required.
+ASP.NET Core's Data Protection key ring protects the auth cookie, so every instance must share one. It is persisted automatically, in this order:
 
-For local development with Azurite, data protection keys fall back to the default file-based store.
+1. `DataProtection:BlobUri`, if set (an explicit blob, authenticated with `DefaultAzureCredential`).
+2. A `dataprotection` container in the account named by `Storage:ConnectionString`, unless that is Azurite.
+3. On the managed-identity path (`Storage:TableServiceUri`), the sibling blob endpoint of the same account, `https://{account}.blob.…/dataprotection/keys.xml`. The identity needs Storage Blob Data Contributor on the account.
 
-You can also point to an explicit blob URI via configuration (the managed-identity path, preferred in production):
+Only an unrecognised table endpoint (Azurite, path-style emulators) falls back to the per-machine file store, which is ephemeral and per-pod: restarts sign everyone out and replicas cannot read each other's cookies. The startup check logs `Critical` when that happens.
 
 ```json
 {
@@ -33,7 +35,9 @@ You can also point to an explicit blob URI via configuration (the managed-identi
 }
 ```
 
-On the AWS backend, pass an S3 client + bucket to `AddAuthagonalAwsStorage` to persist the key ring to S3, without it the key ring is in-memory and cookies break on restart and across nodes. See [Installation → AWS backend](installation#aws-backend).
+On the AWS backend, pass an S3 client + bucket to `AddAuthagonalAwsStorage` to persist the key ring to S3, without it the key ring is in-memory and cookies break on restart and across nodes. See [Installation → AWS backend](installation#aws-backend). On the SQL backend the ring is persisted by `AddAuthagonalPostgres` / `AddAuthagonalSqlite`.
+
+Persisting is not encrypting: the ring is plaintext XML unless `DataProtection:KeyVaultKeyId` or `DataProtection:CertificateThumbprint` is set. At startup a ring with no encryption and no keys yet is refused, and one that already has keys starts with a `Critical` log (`DataProtection:AllowUnencryptedKeyRing=true` accepts it deliberately). See [Configuration](configuration) for the full `DataProtection:*` table.
 
 ## Per-instance caches
 
@@ -53,15 +57,15 @@ Abuse-prone endpoints (registration per IP, password reset per target email, SCI
 
 By default, limits are enforced **in-process per node** behind the `IRateLimiter` seam, so with N instances the effective ceiling is N× the configured value. That's deliberate: the limiter is a backstop against runaway abuse of a single node, and the authoritative global limit belongs at the edge (WAF / ingress / CDN), which sees all traffic before it's load-balanced.
 
-That trade-off is right for the volume limits and wrong for one case: a budget guarding a **guessable secret**. The device flow's `user_code` is a short string from a small alphabet, and the attempt limit is the only thing standing between an attacker and a code that grants a live session — a ceiling that multiplies by replica count is the wrong shape there, and it makes the real bound a property of your ingress configuration rather than of the server.
+That trade-off is right for the volume limits and wrong for one case: a budget guarding a **guessable secret**. The device flow's `user_code` is a short string from a small alphabet, and the attempt limit is the only thing standing between an attacker and a code that grants a live session. A ceiling that multiplies by replica count is the wrong shape there, and it makes the real bound a property of your ingress configuration rather than of the server.
 
-Set **`Auth:DurableRateLimiting=true`** to move the counters into the store you already run, so every replica shares one budget. It costs a store round trip per rate-limit check, uses fixed windows (a budget of N allows up to 2N across a window boundary), and fails open if the store is unreachable — so it layers on the edge rule rather than replacing it. Counter rows are collected automatically on all three backends. See [Configuration → Cluster-wide limits](configuration#cluster-wide-limits-authdurableratelimiting).
+Set **`Auth:DurableRateLimiting=true`** to move the counters into the store you already run, so every replica shares one budget. It costs a store round trip per rate-limit check, uses fixed windows (a budget of N allows up to 2N across a window boundary), and fails open if the store is unreachable, so it layers on the edge rule rather than replacing it. Counter rows are collected automatically on all three backends. See [Configuration → Cluster-wide limits](configuration#cluster-wide-limits-authdurableratelimiting).
 
 ## Clustering
 
 Multiple instances coordinate through a **leader election** and a **cross-node event bus**, both behind pluggable backends:
 
-- **Leader election**: a lease-based election (`Cluster:LeaseTtlSeconds`, default 30s, renewed at roughly half that interval). Exactly one node holds the lease; leadership transfers automatically when the leader dies. Leader-gated work — currently signing-key *deactivation* at expiry, when `Auth:KeyRotationEnabled` is on — runs only on the leader.
+- **Leader election**: a lease-based election (`Cluster:LeaseTtlSeconds`, default 30s, renewed at roughly half that interval). Exactly one node holds the lease; leadership transfers automatically when the leader dies. Leader-gated work runs only on the leader: signing-key *deactivation* at expiry (when `Auth:KeyRotationEnabled` is on), the grant reconciliation sweep (Azure backend only), the at-rest backfill (when `Auth:AtRestBackfillEnabled` is on; a non-leader waits briefly for leadership, then skips), and the rate-limit counter sweep (Azure backend with `Auth:DurableRateLimiting`). With `Cluster:Enabled=false` the single node is a permanent leader, so a standalone deployment still runs all of them.
 - **Event bus**: cross-node notifications (e.g. cache invalidation in multi-tenant hosts), polled every `Cluster:PollIntervalSeconds` (default 3s).
 
 Each instance generates a random 12-hex-char node ID at startup to identify itself; it is not persisted.
@@ -89,13 +93,13 @@ builder.Services.AddAuthagonal(builder.Configuration,
 
 > **Note:** with the in-process default on multiple nodes, *every* node believes it is the leader. That's harmless for most workloads, but enable a real lease backend before turning on `Auth:KeyRotationEnabled` across multiple instances.
 
-Signing-key **generation** is separate from that leader-gated deactivation, and is not driven by it: every node calls `EnsureActiveKeyAsync` at startup and on each `Auth:SigningKeyCacheRefreshMinutes` refresh, so with `KeyRotationEnabled` off — the default — rollover at the 90-day expiry is driven entirely by that path. Generation takes its own short cluster lease, so it is single-writer wherever a real lease backend is configured. With the in-process default on multiple nodes there is no such coordination and two nodes that reach an expired key at the same moment can each generate one; both end up in the JWKS and tokens signed by either verify, but which key is reported active can flap. This is another reason to configure a real lease backend for multi-node deployments.
+Signing-key **generation** is separate from that leader-gated deactivation, and is not driven by it: every node calls `EnsureActiveKeyAsync` at startup and on each `Auth:SigningKeyCacheRefreshMinutes` refresh, so with `KeyRotationEnabled` off, the default, rollover at the 90-day expiry is driven entirely by that path. Generation takes its own short cluster lease, so it is single-writer wherever a real lease backend is configured. With the in-process default on multiple nodes there is no such coordination and two nodes that reach an expired key at the same moment can each generate one; both end up in the JWKS and tokens signed by either verify, but which key is reported active can flap. This is another reason to configure a real lease backend for multi-node deployments.
 
 See the [Configuration](configuration#cluster) page for all cluster settings.
 
 ### Multi-tenant deployments
 
-In multi-tenant mode (`AddAuthagonalCore()`), no background services are registered, `TokenCleanupService`, `GrantReconciliationService`, `SigningKeyRotationService`, and the config seed services are all part of the single-tenant `AddAuthagonal()` composition. The host manages these per-tenant.
+In multi-tenant mode (`AddAuthagonalCore()`), `TokenCleanupService`, `GrantReconciliationService`, `SigningKeyRotationService`, and the config seed services (clients, providers, scopes, roles) are not registered: they are part of the single-tenant `AddAuthagonal()` composition, and the host manages that work per tenant.
 
 ## Name-index hot partition
 
@@ -106,7 +110,7 @@ Admin name-prefix search is backed by the `UserFirstNames` / `UserLastNames` ind
 When running multiple instances behind a load balancer:
 
 - **Forwarded headers**: rate limiting and lockout key on the client IP, resolved from `X-Forwarded-For`. Set `ForwardedHeaders:KnownNetworks` to your ingress / pod CIDR so the client IP can't be spoofed across instances. `ForwardedHeaders:ForwardLimit` defaults to `1`. See [Configuration](configuration#forwarded-headers-trusted-proxy).
-- **Internal endpoints**: `/_internal/backchannel-logout` requires `Cluster:Secret` in the `X-Cluster-Secret` header (compared in constant time). Without it the endpoint authorizes nobody and answers 404 — source IP is not treated as a credential, because loopback is what a same-host reverse proxy presents for every forwarded request and a private range is every neighbouring workload in a shared cluster network. `Cluster:AllowLoopbackWithoutSecret` is a development-only opt-in that re-admits a loopback pre-forwarding peer. The shipped product never calls this route (session fan-out is in-process via `SessionTermination`), so it matters only for a fan-out you build yourself.
+- **Internal endpoints**: `/_internal/backchannel-logout` requires `Cluster:Secret` in the `X-Cluster-Secret` header (compared in constant time). Without it the endpoint authorizes nobody and answers 404; source IP is not treated as a credential, because loopback is what a same-host reverse proxy presents for every forwarded request and a private range is every neighbouring workload in a shared cluster network. `Cluster:AllowLoopbackWithoutSecret` is a development-only opt-in that re-admits a loopback pre-forwarding peer. The shipped product never calls this route (session fan-out is in-process via `SessionTermination`), so it matters only for a fan-out you build yourself.
 
 ## Scaling recommendations
 

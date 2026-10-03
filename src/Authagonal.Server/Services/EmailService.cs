@@ -1,11 +1,33 @@
+using System.Globalization;
 using System.Net.Http.Json;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Unicode;
 using Authagonal.Core.Services;
+using Authagonal.Core.Stores;
+using Microsoft.Extensions.Localization;
 
 namespace Authagonal.Server.Services;
 
-public sealed class EmailService(IHttpClientFactory httpClientFactory, IConfiguration configuration, ILogger<EmailService> logger) : IEmailService
+/// <summary>
+/// The built-in Resend sender. Subject and body are localized: the recipient's stored
+/// <c>AuthUser.Locale</c> decides, then the request's UI culture, then English.
+/// </summary>
+/// <remarks>
+/// Registered as a singleton, so it must not hold a store: stores can be scoped (the Cloud registers them
+/// per tenant). The user store is resolved from a fresh scope for each lookup instead.
+/// </remarks>
+public sealed class EmailService(
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    ILogger<EmailService> logger,
+    IServiceScopeFactory scopeFactory,
+    IStringLocalizer<SharedMessages> localizer) : IEmailService
 {
+    // The default encoder escapes everything outside Basic Latin as numeric entities, which would turn a
+    // Japanese or Arabic body into a wall of &#x...; in the message source. Markup characters are still escaped.
+    private static readonly HtmlEncoder TextEncoder = HtmlEncoder.Create(UnicodeRanges.All);
+
     private const string ConfigSection = "Email";
     private const string ResendApiUrl = "https://api.resend.com/emails";
 
@@ -17,16 +39,8 @@ public sealed class EmailService(IHttpClientFactory httpClientFactory, IConfigur
             return;
         }
 
-        var subject = "Verify your email address";
-        var html = $"""
-            <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-                <h2>Verify your email</h2>
-                <p>Click the link below to verify your email address:</p>
-                <p><a href="{callbackUrl}" style="display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">Verify Email</a></p>
-                <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">If you didn't create an account, you can safely ignore this email.</p>
-            </div>
-            """;
-
+        var culture = await ResolveCultureAsync(email, ct);
+        var (subject, html) = Render(culture, "Email_Verify", callbackUrl);
         await SendAsync(email, subject, html, ct);
     }
 
@@ -38,16 +52,8 @@ public sealed class EmailService(IHttpClientFactory httpClientFactory, IConfigur
             return;
         }
 
-        var subject = "Reset your password";
-        var html = $"""
-            <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-                <h2>Reset your password</h2>
-                <p>Click the link below to set a new password:</p>
-                <p><a href="{callbackUrl}" style="display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">Reset Password</a></p>
-                <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">This link expires in 1 hour. If you didn't request a password reset, you can safely ignore this email.</p>
-            </div>
-            """;
-
+        var culture = await ResolveCultureAsync(email, ct);
+        var (subject, html) = Render(culture, "Email_Reset", callbackUrl);
         await SendAsync(email, subject, html, ct);
     }
 
@@ -59,17 +65,62 @@ public sealed class EmailService(IHttpClientFactory httpClientFactory, IConfigur
             return;
         }
 
-        var subject = "You already have an account";
-        var html = $"""
-            <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-                <h2>You already have an account</h2>
-                <p>Someone tried to sign up with this email, but an account already exists. Sign in instead — or reset your password if you've forgotten it.</p>
-                <p><a href="{signInUrl}" style="display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">Sign in</a></p>
-                <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">If this wasn't you, you can safely ignore this email.</p>
-            </div>
-            """;
-
+        // The recipient is the existing account owner, so their stored locale, not the re-registrant's.
+        var culture = await ResolveCultureAsync(email, ct);
+        var (subject, html) = Render(culture, "Email_Exists", signInUrl);
         await SendAsync(email, subject, html, ct);
+    }
+
+    /// <summary>
+    /// The language to write to <paramref name="email"/> in: the stored locale of the account at that
+    /// address, else the request's UI culture, else English. A lookup failure never blocks the email.
+    /// </summary>
+    private async Task<CultureInfo> ResolveCultureAsync(string email, CancellationToken ct)
+    {
+        string? stored = null;
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var users = scope.ServiceProvider.GetService<IUserStore>();
+            if (users is not null)
+                stored = (await users.FindByEmailAsync(email, ct))?.Locale;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Could not resolve locale for {Email}; using the request culture", email);
+        }
+
+        return SupportedLocales.Resolve(stored)
+            ?? SupportedLocales.Resolve(CultureInfo.CurrentUICulture.Name)
+            ?? CultureInfo.GetCultureInfo("en");
+    }
+
+    /// <summary>
+    /// Renders one email in an explicit culture. Synchronous on purpose: it swaps the thread's UI culture
+    /// for the duration of the lookups and restores it before returning, so it cannot leak across an await.
+    /// </summary>
+    private (string Subject, string Html) Render(CultureInfo culture, string prefix, string url)
+    {
+        var previous = CultureInfo.CurrentUICulture;
+        CultureInfo.CurrentUICulture = culture;
+        try
+        {
+            static string Enc(string v) => TextEncoder.Encode(v);
+            var subject = localizer[$"{prefix}_Subject"].Value;
+            var html = $"""
+                <div {HtmlDocumentLocale.HtmlAttributes(culture)} style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+                    <h2>{Enc(localizer[$"{prefix}_Heading"].Value)}</h2>
+                    <p>{Enc(localizer[$"{prefix}_Body"].Value)}</p>
+                    <p><a href="{url}" style="display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">{Enc(localizer[$"{prefix}_Button"].Value)}</a></p>
+                    <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">{Enc(localizer[$"{prefix}_Footer"].Value)}</p>
+                </div>
+                """;
+            return (subject, html);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = previous;
+        }
     }
 
     private async Task SendAsync(string toEmail, string subject, string html, CancellationToken ct)

@@ -1,14 +1,14 @@
 ---
 layout: default
-title: Ban dia hoa
+title: Bản địa hóa
 locale: vi
 ---
 
-# Ban dia hoa
+# Bản địa hóa
 
-Giao diện đăng nhập cung cấp sẵn mười locale: tiếng Anh, tiếng Trung giản thể (`zh-Hans`), tiếng Đức (`de`), tiếng Pháp (`fr`), tiếng Tây Ban Nha (`es`), tiếng Việt (`vi`), tiếng Bồ Đào Nha (`pt`), tiếng Ả Rập (`ar`), tiếng Afrikaans (`af`) và tiếng Hindi (`hi`). Các phản hồi API của máy chủ được bản địa hóa trong bảy ngôn ngữ đầu tiên. Bản địa hóa bao gồm các phản hồi API của máy chủ, giao diện đăng nhập và trang tài liệu này.
+Giao diện đăng nhập có sẵn mười một locale: tiếng Anh, tiếng Trung giản thể (`zh-Hans`), tiếng Đức (`de`), tiếng Pháp (`fr`), tiếng Tây Ban Nha (`es`), tiếng Việt (`vi`), tiếng Bồ Đào Nha (`pt`), tiếng Ả Rập (`ar`), tiếng Afrikaans (`af`), tiếng Hindi (`hi`) và tiếng Nhật (`ja`). Phản hồi API của máy chủ và các trang do máy chủ render cũng được bản địa hóa đủ cả mười một ngôn ngữ. Bản địa hóa bao gồm phản hồi API của máy chủ, giao diện đăng nhập, và trang tài liệu này.
 
-## Cac ngon ngu duoc ho tro
+## Ngôn ngữ được hỗ trợ {#supported-languages}
 
 | Mã | Ngôn ngữ | Giao diện đăng nhập | API máy chủ |
 |---|---|---|---|
@@ -19,32 +19,35 @@ Giao diện đăng nhập cung cấp sẵn mười locale: tiếng Anh, tiếng 
 | `es` | Tiếng Tây Ban Nha | ✓ | ✓ |
 | `vi` | Tiếng Việt | ✓ | ✓ |
 | `pt` | Tiếng Bồ Đào Nha | ✓ | ✓ |
-| `ar` | Tiếng Ả Rập (phải sang trái) | ✓ | — |
-| `af` | Tiếng Afrikaans | ✓ | — |
-| `hi` | Tiếng Hindi | ✓ | — |
+| `ar` | Tiếng Ả Rập (viết từ phải sang trái) | ✓ | ✓ |
+| `af` | Tiếng Afrikaans | ✓ | ✓ |
+| `hi` | Tiếng Hindi | ✓ | ✓ |
+| `ja` | Tiếng Nhật | ✓ | ✓ |
 
-## May chu (phan hoi API)
+## Máy chủ (phản hồi API) {#server-api-responses}
 
-May chu su dung tinh nang ban dia hoa tich hop cua ASP.NET Core voi `IStringLocalizer<T>` va cac tep tai nguyen `.resx`. Ngon ngu duoc chon tu tieu de HTTP `Accept-Language`.
+Máy chủ dùng cơ chế bản địa hóa dựng sẵn của ASP.NET Core với `IStringLocalizer<T>` và các tệp tài nguyên `.resx`. Ngôn ngữ được chọn từ HTTP header `Accept-Language`.
 
-### Nhung gi duoc ban dia hoa
+### Những gì được bản địa hóa {#what-is-localized}
 
-- Thong bao loi xac thuc mat khau
-- Nhan chinh sach mat khau (`GET /api/auth/password-policy`)
-- Thong bao quy trinh dat lai mat khau (loi token, het han, thanh cong)
-- Mo ta loi chung tu middleware xu ly ngoai le
-- Thong bao quan ly nguoi dung quan tri (xac nhan email, xac minh, v.v.)
-- Thong bao xac nhan ket thuc phien
+- Thông báo lỗi kiểm tra mật khẩu
+- Nhãn chính sách mật khẩu (`GET /api/auth/password-policy`)
+- Thông báo trong luồng đặt lại mật khẩu (lỗi token, hết hạn, thành công)
+- Mô tả lỗi chung từ middleware xử lý ngoại lệ
+- Thông báo quản lý người dùng của admin (xác nhận email, xác minh, v.v.)
+- Thông báo xác nhận kết thúc phiên
+- Các trang do máy chủ render (kết quả xác nhận email, trang xác nhận kết thúc phiên và trang đã đăng xuất), bao gồm `<html lang>` và `dir="rtl"` cho tiếng Ả Rập
+- Email do thư viện gửi (`EmailService`: xác minh, đặt lại mật khẩu, và thông báo "tài khoản đã tồn tại"), theo locale đã lưu của người nhận (`AuthUser.Locale`), nếu không có thì theo culture của request, nếu không nữa thì tiếng Anh
 
-### Nhung gi KHONG duoc ban dia hoa
+### Những gì KHÔNG được bản địa hóa {#what-is-not-localized}
 
-- Ma `error` co the doc bang may (`"email_required"`, `"invalid_credentials"`, v.v.): day la cac hop dong API va khong thay doi
-- Ma loi OAuth/OIDC va mo ta loi danh cho nha phat trien tren cac diem cuoi token, uy quyen va thu hoi
-- Thong bao nhat ky noi bo va thong bao ngoai le
+- Mã `error` dành cho máy đọc (`"email_required"`, `"invalid_credentials"`, v.v.), đây là hợp đồng API và giữ nguyên
+- Mã lỗi OAuth/OIDC và mô tả lỗi dành cho lập trình viên trên các endpoint token, authorize và revocation
+- Thông điệp log nội bộ và thông điệp ngoại lệ
 
-### Kiem tra ban dia hoa may chu
+### Kiểm thử bản địa hóa phía máy chủ {#testing-server-localization}
 
-Gui tieu de `Accept-Language` den bat ky diem cuoi nao da duoc ban dia hoa:
+Gửi header `Accept-Language` tới bất kỳ endpoint nào đã được bản địa hóa:
 
 ```bash
 # English (default)
@@ -57,9 +60,9 @@ curl -H "Accept-Language: zh-Hans" https://auth.example.com/api/auth/password-po
 curl -H "Accept-Language: de" https://auth.example.com/api/auth/password-policy
 ```
 
-### Tep tai nguyen
+### Tệp tài nguyên {#resource-files}
 
-Tat ca cac chuoi dich cua may chu nam trong cac tep `.resx` tai `src/Authagonal.Server/Resources/`:
+Mọi chuỗi dịch của máy chủ nằm trong các tệp `.resx` dưới `src/Authagonal.Server/Resources/`:
 
 ```
 Resources/
@@ -71,28 +74,32 @@ Resources/
   SharedMessages.es.resx
   SharedMessages.vi.resx
   SharedMessages.pt.resx
+  SharedMessages.ja.resx
+  SharedMessages.ar.resx
+  SharedMessages.af.resx
+  SharedMessages.hi.resx
 ```
 
-## Giao dien dang nhap
+## Giao diện đăng nhập {#login-ui}
 
-Ung dung SPA dang nhap su dung [react-i18next](https://react.i18next.com/) de ban dia hoa phia may khach. Ngon ngu duoc tu dong phat hien tu cai dat `navigator.language` cua trinh duyet.
+SPA đăng nhập dùng [react-i18next](https://react.i18next.com/) để bản địa hóa phía client. Ngôn ngữ được tự động phát hiện từ thiết lập `navigator.language` của trình duyệt.
 
-Các locale đã đăng ký nằm trong một registry `LANGUAGES` duy nhất tại `login-app/src/i18n/index.ts`, nơi điều khiển cả việc đăng ký tài nguyên i18next lẫn mọi bộ chọn ngôn ngữ, nên hai bên không thể lệch nhau. Hiện tại mọi locale đã đăng ký đều xuất hiện trong bộ chọn mặc định. `DEFAULT_LANGUAGES` được xuất riêng khỏi `LANGUAGES` để một locale bị giới hạn trong tương lai có thể được loại khỏi các bộ chọn mà không phải sửa nơi gọi, nhưng hiện không có locale nào bị loại. Tenant cũng có thể thu hẹp bộ chọn theo cùng cách: một mảng `languages` trong `branding.json` thay thế hoàn toàn danh sách mặc định (xem [Tùy chỉnh giao diện](branding)).
+Các locale đã đăng ký nằm trong một registry `LANGUAGES` duy nhất ở `login-app/src/i18n/index.ts`, registry này điều khiển cả việc đăng ký resource của i18next lẫn mọi bộ chọn ngôn ngữ, nên hai thứ không thể lệch nhau. Hiện mọi locale đã đăng ký đều xuất hiện trong bộ chọn mặc định. `DEFAULT_LANGUAGES` được export tách riêng khỏi `LANGUAGES` để sau này một locale bị hạn chế có thể bị loại khỏi bộ chọn mà không phải sửa các nơi gọi, nhưng hiện chưa có locale nào bị loại. Tenant cũng có thể thu hẹp bộ chọn theo cùng cách: một mảng `languages` trong `branding.json` thay thế hoàn toàn danh sách mặc định (xem [Thương hiệu](branding)).
 
-Ngôn ngữ đang hoạt động được phản chiếu lên `<html lang>` và `<html dir>`, nên các ngôn ngữ viết phải sang trái (`ar`) tự động lật thẻ xác thực, kể cả khi ngôn ngữ được chuyển tại chỗ qua bộ chọn.
+Ngôn ngữ đang dùng được phản chiếu lên `<html lang>` và `<html dir>`, nên các ngôn ngữ viết từ phải sang trái (`ar`) tự động lật thẻ xác thực, kể cả khi ngôn ngữ được chuyển ngay tại chỗ qua bộ chọn.
 
-### Phat hien ngon ngu
+### Phát hiện ngôn ngữ {#language-detection}
 
-Thu tu phat hien la:
+Thứ tự phát hiện là:
 
-1. **localStorage**: tuy chon da luu tu lan truy cap truoc
-2. **Tham so truy van**: `?lng=de` ghi de phat hien trinh duyet
-3. **Ngon ngu trinh duyet**: `navigator.language` (tu dong)
-4. **Du phong**: Tieng Anh (`en`)
+1. **localStorage**: lựa chọn đã lưu từ lần truy cập trước
+2. **Tham số truy vấn**: `?lng=de` ghi đè việc phát hiện theo trình duyệt
+3. **Ngôn ngữ trình duyệt**: `navigator.language` (tự động)
+4. **Mặc định dự phòng**: tiếng Anh (`en`)
 
-### Tep dich
+### Tệp bản dịch {#translation-files}
 
-Cac tep JSON dich duoc dong goi cung ung dung tai `login-app/src/i18n/`:
+Các tệp JSON bản dịch được đóng gói cùng ứng dụng tại `login-app/src/i18n/`:
 
 ```
 i18n/
@@ -107,15 +114,16 @@ i18n/
   ar.json         # Arabic
   af.json         # Afrikaans
   hi.json         # Hindi
+  ja.json         # Japanese
 ```
 
-### Nhan chinh sach mat khau
+### Nhãn chính sách mật khẩu {#password-policy-labels}
 
-Trang đặt lại mật khẩu dịch danh sách kiểm tra yêu cầu mật khẩu của nó phía máy khách dựa trên khóa `rule` được trả về bởi `GET /api/auth/password-policy` (rơi về `label` do máy chủ cung cấp với các rule không nhận diện được). Điều này đảm bảo các yêu cầu đi theo ngôn ngữ được chọn trong giao diện, ngay cả khi tiêu đề `Accept-Language` của trình duyệt khác đi. Trang đăng ký hiển thị các giá trị `label` do máy chủ cung cấp, vốn được bản địa hóa từ `Accept-Language`.
+Trang đặt lại mật khẩu dịch danh sách yêu cầu mật khẩu ngay phía client dựa trên khóa `rule` do `GET /api/auth/password-policy` trả về (dùng `label` do máy chủ cung cấp cho các rule không nhận ra). Nhờ đó các yêu cầu luôn theo ngôn ngữ được chọn trong giao diện, kể cả khi header `Accept-Language` của trình duyệt khác. Trang đăng ký hiển thị các giá trị `label` do máy chủ cung cấp, vốn được bản địa hóa theo `Accept-Language`.
 
-### Nguoi dung goi npm
+### Dùng qua gói npm {#npm-package-consumers}
 
-Neu ban su dung ung dung dang nhap thong qua `@authagonal/login`, phien ban i18n duoc xuat:
+Nếu bạn dùng ứng dụng đăng nhập qua `@authagonal/login`, instance i18n được export:
 
 ```typescript
 import { i18n } from '@authagonal/login';
@@ -124,76 +132,76 @@ import { i18n } from '@authagonal/login';
 i18n.changeLanguage('de');
 ```
 
-## Tai lieu
+## Tài liệu {#documentation}
 
-Trang tai lieu su dung cach tiep can dua tren thu muc. Cac trang tieng Anh nam o thu muc goc va cac ban dich nam trong cac thu muc con theo ngon ngu (`/zh-Hans/`, `/de/`, `/fr/`, `/es/`, `/vi/`, `/pt/`). Mot menu tha xuong chuyen doi ngon ngu trong thanh ben cho phep chuyen doi giua cac ngon ngu.
+Trang tài liệu dùng cách tổ chức theo thư mục. Các trang tiếng Anh nằm ở thư mục gốc, còn bản dịch nằm trong các thư mục con theo locale (`/zh-Hans/`, `/de/`, `/fr/`, `/es/`, `/vi/`, `/pt/`, `/ja/`). Một danh sách thả xuống chuyển ngôn ngữ trong thanh bên cho phép chuyển giữa các ngôn ngữ.
 
-## Them ngon ngu moi
+## Thêm một ngôn ngữ mới {#adding-a-new-language}
 
-De them ho tro cho ngon ngu moi (vi du: tieng Nhat `ja`):
+Để hỗ trợ một ngôn ngữ mới (ví dụ tiếng Ý `it`):
 
-### 1. May chu
+### 1. Máy chủ {#1-server}
 
-Tao tep `.resx` moi bang cach sao chep tep tieng Anh va dich cac gia tri:
+Tạo một tệp `.resx` mới bằng cách sao chép tệp tiếng Anh và dịch các giá trị:
 
 ```
-src/Authagonal.Server/Resources/SharedMessages.ja.resx
+src/Authagonal.Server/Resources/SharedMessages.it.resx
 ```
 
-Them `"ja"` vao mang cac culture duoc ho tro trong `AuthagonalExtensions.cs`:
+Thêm `"it"` vào `SupportedLocales.All` trong `src/Authagonal.Server/Services/SupportedLocales.cs`, danh sách duy nhất mà cả middleware bản địa hóa request lẫn các trang do máy chủ render cùng đọc:
 
 ```csharp
-var supportedCultures = new[] { "en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja" };
+public static readonly string[] All = ["en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja", "ar", "af", "hi", "it"];
 ```
 
-### 2. Giao dien dang nhap
+### 2. Giao diện đăng nhập {#2-login-ui}
 
-Tao tep JSON dich moi bang cach sao chep `en.json` va dich cac gia tri:
+Tạo một tệp JSON bản dịch mới bằng cách sao chép `en.json` và dịch các giá trị:
 
 ```
-login-app/src/i18n/ja.json
+login-app/src/i18n/it.json
 ```
 
-Đăng ký nó trong mảng `LANGUAGES` tại `login-app/src/i18n/index.ts`. Một mục duy nhất đó vừa đăng ký tài nguyên i18next vừa thêm ngôn ngữ vào mọi bộ chọn:
+Đăng ký nó trong mảng `LANGUAGES` ở `login-app/src/i18n/index.ts`. Chỉ một mục đó vừa đăng ký resource của i18next vừa thêm ngôn ngữ vào mọi bộ chọn:
 
 ```typescript
-import ja from './ja.json';
+import it from './it.json';
 
 // In the LANGUAGES array:
-{ code: 'ja', label: '日本語', resource: ja },
+{ code: 'it', label: 'Italiano', resource: it },
 ```
 
-### 3. Tai lieu
+### 3. Tài liệu {#3-documentation}
 
-Tao thu muc moi voi cac tep markdown da dich:
+Tạo một thư mục mới chứa các tệp markdown đã dịch:
 
 ```
-docs/ja/
+docs/it/
   index.md
   installation.md
   quickstart.md
   ...
 ```
 
-Them gia tri mac dinh ngon ngu trong `docs/_config.yml`:
+Thêm một giá trị locale mặc định trong `docs/_config.yml`:
 
 ```yaml
 defaults:
   - scope:
-      path: "ja"
+      path: "it"
     values:
-      locale: "ja"
+      locale: "it"
 ```
 
-Them tuy chon ngon ngu vao bo chuyen doi trong `docs/_layouts/default.html`.
+Thêm tùy chọn ngôn ngữ vào bộ chuyển ngôn ngữ trong `docs/_layouts/default.html`.
 
-## Them chuoi moi
+## Thêm chuỗi mới {#adding-new-strings}
 
-### May chu
+### Máy chủ {#server}
 
-1. Them khoa va gia tri tieng Anh vao `SharedMessages.resx`
-2. Them cac gia tri da dich vao tep `.resx` cua tung ngon ngu
-3. Su dung `IStringLocalizer<SharedMessages>` de truy cap chuoi:
+1. Thêm khóa và giá trị tiếng Anh vào `SharedMessages.resx`
+2. Thêm giá trị đã dịch vào tệp `.resx` của từng locale
+3. Dùng `IStringLocalizer<SharedMessages>` để truy cập chuỗi:
 
 ```csharp
 // Inject via parameter
@@ -206,11 +214,11 @@ localizer["MyNewKey"].Value
 string.Format(localizer["MyNewKey"].Value, param1)
 ```
 
-### Giao dien dang nhap
+### Giao diện đăng nhập {#login-ui-1}
 
-1. Them khoa va gia tri tieng Anh vao `en.json`
-2. Them cac gia tri da dich vao tep JSON cua tung ngon ngu
-3. Su dung ham `t()` trong cac component:
+1. Thêm khóa và giá trị tiếng Anh vào `en.json`
+2. Thêm giá trị đã dịch vào tệp JSON của từng locale
+3. Dùng hàm `t()` trong các component:
 
 ```tsx
 const { t } = useTranslation();

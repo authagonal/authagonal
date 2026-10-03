@@ -125,7 +125,16 @@ Connections with `AllowedDomains` configured are **excluded**: those are reached
 POST /api/auth/logout
 ```
 
-Clears the auth cookie. Returns `200 { success: true }`.
+Ends the caller's session the same way `/connect/endsession` does: back-channel logout tokens are sent to the relying parties that have a registered URI, the grants minted for that session are revoked, and the auth cookie is cleared. Requires cookie auth and a same-origin request. Returns `200`:
+
+```json
+{
+  "success": true,
+  "frontchannel_logout_uris": ["https://myapp.example.com/oidc/frontchannel"]
+}
+```
+
+`frontchannel_logout_uris` lists the front-channel logout URLs the caller should load (hidden iframes) to finish sign-out in the browser; it is empty when no client registered one. See [Front-Channel Logout](front-channel-logout).
 
 ### Forgot Password
 
@@ -193,6 +202,36 @@ PATCH /api/auth/profile
 ```
 
 The authenticated user reads/updates their own non-sensitive profile fields: `firstName`, `lastName`, `companyName`, `phone`, `locale`. Null fields are unchanged; email, password, roles, active state and organization are **not** editable here. Both return the profile `{ email, emailConfirmed, firstName, lastName, companyName, phone, locale }`.
+
+### Sessions (self-service)
+
+```
+GET    /api/auth/sessions
+DELETE /api/auth/sessions/{sessionId}
+POST   /api/auth/sessions/revoke-others
+```
+
+List and end the authenticated user's own SSO sessions. These need server-side sessions, which are opt-in: call `AddAuthagonalServerSideSessions(configuration)` after `AddAuthagonal` (Azure Table Storage, reading `Storage:ConnectionString` or `Storage:TableServiceUri`), or register your own `ITicketStore` and `IUserSessionRegistry`. Without a registry `GET` returns an empty list, `revoke-others` returns `{ "revoked": 0 }` and `DELETE` returns `404 not_supported`. The `DELETE` and `POST` routes require a same-origin request.
+
+`GET` returns the sessions, newest activity first:
+
+```json
+{
+  "sessions": [
+    {
+      "sessionId": "...",
+      "current": true,
+      "createdAt": "2026-10-01T02:11:40+00:00",
+      "lastSeenAt": "2026-10-04T05:30:12+00:00",
+      "expiresAt": "2026-10-08T02:11:40+00:00",
+      "ip": "203.0.113.7",
+      "userAgent": "Mozilla/5.0 ..."
+    }
+  ]
+}
+```
+
+`DELETE` ends one session and returns `{ "revoked": 1 }`, or `404 session_not_found`. `POST /revoke-others` ends every session except the caller's and returns `{ "revoked": <count> }`. Both also notify the relying parties of each ended session (back-channel and front-channel logout) and revoke the grants bound to it, so refresh tokens held on that device stop working. The account page in the login UI shows this list when a registry is registered.
 
 ### SSO Check
 
@@ -323,7 +362,7 @@ POST /api/auth/mfa/webauthn/confirm
 → { "success": true, "credentialId": "..." }
 ```
 
-Passkey enrolment requires a **confirmed TOTP credential first** (`400 totp_required_first`), passkeys are a per-device convenience layered on a portable base factor, so an account can never end up passkey-only and locked to a device. Users whose email domain is SSO-routed cannot enrol a local passkey (`400 sso_managed`), it would bypass the tenant's IdP. A credential ID already registered to **any** account, including the enrolling user's own, is rejected with `409 credential_already_registered` — a duplicate would restart that credential's signature counter and share one lookup entry between two rows.
+Passkey enrolment requires a **confirmed TOTP credential first** (`400 totp_required_first`), passkeys are a per-device convenience layered on a portable base factor, so an account can never end up passkey-only and locked to a device. Users whose email domain is SSO-routed cannot enrol a local passkey (`400 sso_managed`), it would bypass the tenant's IdP. A credential ID already registered to **any** account, including the enrolling user's own, is rejected with `409 credential_already_registered`, because a duplicate would restart that credential's signature counter and share one lookup entry between two rows.
 
 ### Recovery Codes
 
@@ -382,20 +421,58 @@ Returns a device code, user code, and verification URI:
 
 `expires_in` comes from the client's `DeviceCodeLifetimeSeconds` (default 300). The device displays the `verification_uri` and `user_code` to the user, then polls the token endpoint with the `device_code`, no faster than `interval` seconds apart, or the token endpoint answers `slow_down` (RFC 8628 §3.5). While the user hasn't approved yet the token endpoint returns `authorization_pending`. The user visits the verification URI, logs in, and enters the user code to approve.
 
+### Show the Request Before Approving
+
+```
+GET /api/auth/device/info?user_code=ABCD-EFGH
+```
+
+Requires cookie authentication. Describes what the code would grant, so the approval screen can show the user which application is asking before they approve (a device flow started by an attacker and approved on an opaque prompt is the illicit-consent pattern RFC 8628 §5.4 warns about):
+
+```json
+{
+  "clientId": "my-cli",
+  "clientName": "My CLI",
+  "clientUri": "https://example.com",
+  "logoUri": null,
+  "scopes": ["openid", "profile"]
+}
+```
+
+`scopes` is what would actually be granted, after the per-user role gate on role-restricted scopes, not the raw request. Errors: `401 not_authenticated`, `400 user_code_required`, `400 invalid_user_code` (unknown, consumed or expired), `400 expired`. It shares the approval's rate-limit bucket (below).
+
 ### Approve Device
 
 ```
 POST /api/auth/device/approve
-Content-Type: application/json
+Content-Type: application/x-www-form-urlencoded
 
-{
-  "userCode": "ABCD-EFGH"
-}
+user_code=ABCD-EFGH&scopes=openid+profile
 ```
 
-Requires cookie authentication. Approves the device code for the current user. The device can then exchange the device code for tokens via the token endpoint using grant type `urn:ietf:params:oauth:grant-type:device_code`.
+Requires cookie authentication and a same-origin request. `scopes` is optional (space-separated): it can only narrow what the user is entitled to, never widen it, and omitting it grants everything entitled. Approves the device code for the current user and returns `200 { "approved": true }`. The device can then exchange the device code for tokens via the token endpoint using grant type `urn:ietf:params:oauth:grant-type:device_code`.
 
-The submitted code is normalised per RFC 8628 §6.1 before lookup: it is uppercased and every character outside the 31-character code alphabet is dropped. `ABCD-EFGH`, `abcd-efgh`, `ABCDEFGH`, `ABCD EFGH` and a copy-paste that turned the dash into an em dash are all the same code. The dash exists only so the code is easier to read aloud. Entry is rate limited to ten attempts per minute per subject (RFC 8628 §5.1); the eleventh returns `429`. That counter is per node under the default in-process rate limiter, so a multi-replica deployment should also enforce the limit at the edge.
+The submitted code is normalised per RFC 8628 §6.1 before lookup: it is uppercased and every character outside the 31-character code alphabet is dropped. `ABCD-EFGH`, `abcd-efgh`, `ABCDEFGH`, `ABCD EFGH` and a copy-paste that turned the dash into an em dash are all the same code. The dash exists only so the code is easier to read aloud.
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 400 | `user_code_required`, `invalid_user_code`, `expired` | As for `info` |
+| 400 | `invalid_scope` | `scopes` was given but none of it is a scope the user is entitled to |
+| 403 | `access_denied` | The user is entitled to none of the requested scopes (`Scope.AllowedRoles`) |
+| 403 | `mfa_enrolment_required` | The client's effective MFA policy is `Required` and the user has no second factor; enrol, then approve again |
+
+Entry is rate limited to ten attempts per minute per subject (RFC 8628 §5.1), shared across `info`, `approve` and `deny`; the eleventh returns `429`. That counter is per node under the default in-process rate limiter, so a multi-replica deployment should also enforce the limit at the edge.
+
+### Deny Device
+
+```
+POST /api/auth/device/deny
+Content-Type: application/x-www-form-urlencoded
+
+user_code=ABCD-EFGH
+```
+
+Requires cookie authentication and a same-origin request. Records the user's refusal and returns `200 { "success": true }`. The device's next poll of the token endpoint gets `access_denied` (RFC 8628 §3.5) instead of `authorization_pending` until the code expires. Same errors and rate-limit bucket as `info`.
 
 ## Token Introspection (RFC 7662)
 
@@ -438,10 +515,10 @@ Inactive or invalid tokens return `{ "active": false }`. Supports both JWT acces
 ### Consent Info
 
 ```
-GET /consent/info?client_id=my-app&scope=openid%20profile%20email
+GET /consent/info?client_id=my-app
 ```
 
-Returns client details and the requested scopes for the consent page (`scope` defaults to `openid` when omitted):
+Requires cookie authentication. Returns client details and the requested scopes for the consent page. The scopes are not taken from the query string: they are the offer the authorize endpoint recorded for this user and client (after role entitlement filtering), so a crafted link cannot put a trusted client's name above a permission list of the caller's choosing.
 
 ```json
 {
@@ -450,11 +527,35 @@ Returns client details and the requested scopes for the consent page (`scope` de
   "description": null,
   "clientUri": null,
   "logoUri": null,
-  "scopes": ["openid", "profile", "email"]
+  "scopes": ["openid", "profile", "email"],
+  "scopeDetails": [
+    { "name": "openid", "displayName": null, "description": null, "emphasize": false, "required": false, "group": null },
+    { "name": "profile", "displayName": null, "description": null, "emphasize": false, "required": false, "group": null },
+    { "name": "email", "displayName": null, "description": null, "emphasize": false, "required": false, "group": null }
+  ]
 }
 ```
 
-Returns `404 client_not_found` for an unknown client.
+`scopeDetails` runs parallel to `scopes` (same order, one entry per scope), so a login app that only reads `scopes` keeps working. Each entry carries the presentation registered for that scope:
+
+| Field | Meaning |
+|---|---|
+| `name` | The scope name, as in `scopes`. |
+| `displayName` | The registered display name, or `null` when the scope is not registered. |
+| `description` | The registered description, or `null`. |
+| `emphasize` | `true` when the scope is registered as consequential, so the screen may draw attention to it. Defaults to `false`. |
+| `required` | `true` when the scope is registered as not declinable: the screen shows it ticked and locked. Defaults to `false`. |
+| `group` | The heading to file the scope under, or `null` to show it on its own. |
+
+A scope that is not registered yields `null` for `displayName`, `description` and `group` and `false` for the two flags, and the login app falls back to its own wording. See [Scopes](scopes) for registering the wording.
+
+Errors:
+
+| Status | Body | When |
+|---|---|---|
+| `401` | none | No signed-in user. |
+| `404` | `{ "error": "client_not_found" }` | Unknown `client_id`. |
+| `400` | `{ "error": "no_pending_consent_request" }` | There is no live consent offer for this user and client (none was recorded, or it expired). |
 
 ### Submit Consent
 
@@ -498,6 +599,43 @@ DELETE /consent/grants/{clientId}
 ```
 
 Revokes consent for a specific application. The user will be prompted to re-consent on their next login.
+
+## Discovery and Signing Keys (JWKS)
+
+Both are public and anonymous. They are what a resource server uses to validate the tokens this server issues.
+
+```
+GET /.well-known/openid-configuration
+GET /.well-known/oauth-authorization-server
+GET /.well-known/openid-configuration/jwks
+```
+
+- The two metadata paths return the same discovery document; its `jwks_uri` is `{issuer}/.well-known/openid-configuration/jwks`.
+- The JWKS lists every non-expired signing key (`kty`, `use`, `kid`, `alg`, and `crv`/`x`/`y` for the EC keys). Rotation publishes the next key days ahead, so a cached copy never lacks the key a token was signed with.
+- Responses carry `Cache-Control: public, max-age=3600`.
+- Signing is ES256 only; discovery advertises `id_token_signing_alg_values_supported: ["ES256"]`.
+- The issuer comes from `ITenantContext`, and the keys from `IKeyManager`, so a multi-tenant host with a per-tenant key manager serves per-tenant keys.
+
+## Authorization Endpoint Behaviour
+
+`GET /connect/authorize` is the entry point for the authorization code flow. Two behaviours matter to anyone building a client or a login UI against it.
+
+### Issuer in the response (RFC 9207)
+
+Every redirect back to the client's `redirect_uri` carries an `iss` query parameter holding the issuer, on success (alongside `code` and `state`) and on error (alongside `error`, `error_description` and `state`). The same applies to the error redirect when a user denies consent at `/consent`. The discovery document advertises this with `authorization_response_iss_parameter_supported: true`. A client that talks to several authorization servers should compare `iss` with the issuer it started the flow against, which is what defeats the mix-up attack; clients that ignore the parameter are unaffected. Errors raised before a trusted `redirect_uri` is known (unknown `client_id`, an unregistered redirect URI) are returned as a JSON error body, not a redirect, so there is no `iss` on those.
+
+### `prompt` and `max_age`
+
+| Request | Behaviour |
+|---|---|
+| `prompt=login` | An existing session is signed out and the user is sent to `/login` to authenticate again. The `prompt` is stripped from the `returnUrl` so the fresh sign-in is not forced to re-authenticate in a loop. For a [pushed request](par) the prompt rides the stored payload, and the loop is broken by requiring the session's `auth_time` to be at or after the moment the request was pushed |
+| `prompt=select_account` | Treated as `prompt=login`: the server holds one session per browser, so account choice is the login screen |
+| `prompt=create` | An unauthenticated user is sent to `/login/register` instead of the sign-in form. An existing session just proceeds |
+| `prompt=consent` | The consent screen is shown even if a stored grant would satisfy the request, once per request (the satisfied marker is single-use) |
+| `prompt=none` | No UI is ever shown. The server answers with a redirect carrying `login_required` (no session), `interaction_required` (MFA step-up or enrolment needed) or `consent_required` (consent needed) |
+| `max_age=N` | If the session's `auth_time` is older than `N` seconds, or absent, the user is re-authenticated exactly as for `prompt=login`. `max_age=0` always re-authenticates |
+
+`prompt=none` combined with any other value is rejected with `invalid_request`, as is any value outside `none`, `login`, `consent`, `select_account` and `create`. The embeddable `Authagonal.Protocol` host honours `prompt=login`, `select_account`, `none` and `max_age` the same way, but has no consent interface, so it answers `prompt=consent` with `consent_required`.
 
 ## Building a Custom Login UI
 

@@ -36,11 +36,11 @@ builder.Services.AddAuthagonalCore(builder.Configuration);
 
 ### Embedding `Authagonal.Protocol` alone
 
-A host that wants only the OIDC protocol surface — its own authentication, its own pipeline, drop-in `/connect/*` endpoints — calls `AddAuthagonalProtocol()` + `MapAuthagonalProtocolEndpoints()` without any of `Authagonal.Server`.
+A host that wants only the OIDC protocol surface (its own authentication, its own pipeline, drop-in `/connect/*` endpoints) calls `AddAuthagonalProtocol()` + `MapAuthagonalProtocolEndpoints()` without any of `Authagonal.Server`.
 
 `/connect/authorize`, `/connect/token`, `/connect/userinfo` and `/connect/par` refuse plaintext http in that shape too, per RFC 6749 §3.1/§3.2. Because the package is mapped into a pipeline it does not own, the requirement rides on the endpoints as a filter rather than as middleware, so it holds however you compose your pipeline and whether you map the whole surface or one endpoint at a time. Two consequences worth knowing before you upgrade:
 
-- **Behind a TLS-terminating proxy, call `UseForwardedHeaders` with the proxy declared.** The filter reads the scheme after routing, so a forwarded `X-Forwarded-Proto: https` satisfies it. Without that middleware your host sees plaintext — which also means your cookies are not being marked `Secure` and your generated absolute URLs are wrong, so this is worth fixing rather than working around. Populate `KnownProxies` / `KnownNetworks` when you register it: ASP.NET Core reads an empty trust set as "every caller is a trusted proxy", which hands the scheme to anyone who can reach your host. If the refusal body mentions an unapplied `X-Forwarded-Proto`, this is the middleware it is asking for.
+- **Behind a TLS-terminating proxy, call `UseForwardedHeaders` with the proxy declared.** The filter reads the scheme after routing, so a forwarded `X-Forwarded-Proto: https` satisfies it. Without that middleware your host sees plaintext, which also means your cookies are not being marked `Secure` and your generated absolute URLs are wrong, so this is worth fixing rather than working around. Populate `KnownProxies` / `KnownNetworks` when you register it: ASP.NET Core reads an empty trust set as "every caller is a trusted proxy", which hands the scheme to anyone who can reach your host. If the refusal body mentions an unapplied `X-Forwarded-Proto`, this is the middleware it is asking for.
 - **A host that genuinely serves the protocol surface over http sets the opt-in**, the same way the server does:
 
 ```csharp
@@ -53,7 +53,7 @@ builder.Services.AddAuthagonalProtocol(o =>
 
 Discovery and JWKS are deliberately not gated: they are public metadata, and a client that cannot read them cannot learn it needs https in the first place.
 
-When you use `AddAuthagonal()` (the full server) you do not set this separately — `Auth:AllowInsecureHttp` is propagated into the protocol options for you, so one switch governs the whole surface.
+When you use `AddAuthagonal()` (the full server) you do not set this separately: `Auth:AllowInsecureHttp` is propagated into the protocol options for you, so one switch governs the whole surface.
 
 ## Overriding Services
 
@@ -83,6 +83,10 @@ builder.Services.AddAuthagonal(builder.Configuration);
 | `IKeyManager` | `ProtocolKeyManager` (singleton, from `Authagonal.Protocol`) | Signing key management; override for per-tenant key isolation |
 | `IProvisioningAppProvider` | `ConfigProvisioningAppProvider` (scoped) | Resolves available provisioning apps; override for dynamic or per-tenant app resolution |
 | `IAuditLogger` | `NullAuditLogger` (no-op) | Audit trail for configuration changes and security-relevant events |
+| `IClientCredentialsClaimsTransformer` | `NullClientCredentialsClaimsTransformer` (singleton, from `Authagonal.Protocol`) | Validate caller-supplied context on a `client_credentials` mint and force claims onto the token, or refuse it |
+| `ITokenExchangeSubjectTransformer` | `NullTokenExchangeSubjectTransformer` (singleton, from `Authagonal.Protocol`) | Subject mapping for RFC 8693 token exchange; see [Agentic Auth](agentic-auth) |
+| `ITurnstileKeyProvider` | `OptionsTurnstileKeyProvider` (scoped, reads `TurnstileOptions`) | Which Turnstile sitekey and secret apply to this request |
+| `IInteractiveCorsOriginPolicy` | `DenyInteractiveCorsOriginPolicy` (singleton, denies every origin) | Origins allowed to make credentialed cross-origin calls to `/api/auth/*` |
 
 Three further seams live at the **store level** rather than in DI: `IFieldCipher`, `IIndexTokenizer`, and `IChangeWriter` (all in `Authagonal.Core.Services`). The storage providers accept them as optional constructor parameters; see their sections below.
 
@@ -125,6 +129,22 @@ public interface IAuthHook
         CancellationToken ct = default) => Task.CompletedTask;
     Task OnPasswordChangedAsync(string userId, string email, string changedVia,
         CancellationToken ct = default) => Task.CompletedTask;
+
+    // Token gate and agentic / consent notifications (also default no-ops)
+    Task OnTokenIssuingAsync(TokenIssuanceContext context,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnDelegationMintedAsync(DelegationAudit audit,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnApprovalRequestedAsync(ApprovalAudit audit,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnApprovalResolvedAsync(ApprovalAudit audit,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnAgentConsentChangedAsync(string subjectId, string clientId, string change,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnConsentRevokedAsync(string subjectId, string clientId, int grantsRemoved,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnCapabilityTicketRedeemedAsync(string ticketId, string? subjectId, string clientId,
+        CancellationToken ct = default) => Task.CompletedTask;
 }
 ```
 
@@ -146,6 +166,13 @@ public interface IAuthHook
 | `OnMfaCredentialRemovedAsync` | `"totp"`, `"webauthn"`, `"recoverycode"`; `mfaDisabled` is true when the removal left no primary factor |
 | `OnRecoveryCodesRegeneratedAsync` | The previous recovery-code set is invalidated |
 | `OnPasswordChangedAsync` | e.g. `"reset"`; the change is persisted and existing sessions invalidated |
+| `OnTokenIssuingAsync` | Pre-mint gate, unlike `OnTokenIssuedAsync`. Fires on `authorization_code`, `refresh_token` and `device_code`, and on the two agentic mints (delegated token exchange, and `client_credentials` for a client with an agent profile). Throw to refuse: a plain exception becomes `access_denied` carrying its message; throw `ProtocolTokenException` to name your own OAuth error. On refresh it runs before rotation, so a refusal leaves the presented refresh token usable. The context carries `ClientId`, `SubjectId`, `GrantType`, `Scopes`, `RequestedAuthorityJson`, and `OrganizationId` / `OrganizationSlug` when the request selected an organisation |
+| `OnDelegationMintedAsync` | A delegated (composite-identity) token was minted via token exchange; notification only |
+| `OnApprovalRequestedAsync` | A delegated exchange parked on an ask-policy action and a pending approval was created |
+| `OnApprovalResolvedAsync` | A pending approval was approved or denied by the user |
+| `OnAgentConsentChangedAsync` | `change` is `"granted"` or `"revoked"` (standing agent consent) |
+| `OnConsentRevokedAsync` | A user revoked an authorized app; the consent and the client's session-bound grants are already gone. `grantsRemoved` is how many were removed (0 means none) |
+| `OnCapabilityTicketRedeemedAsync` | A capability ticket was redeemed for its bound token |
 
 ### Example: Audit Logger
 
@@ -205,6 +232,56 @@ public sealed class DomainRestrictionHook : IAuthHook
 }
 ```
 
+## IClientCredentialsClaimsTransformer
+
+A `client_credentials` token has no subject, so the token-exchange seam cannot reach it. This seam is for a first-party service caller whose token must name the context it acts in (an organisation, a tenant) without a user. It runs after the client, its scopes and any RFC 8707 resources are validated, and before the token is minted.
+
+```csharp
+public interface IClientCredentialsClaimsTransformer
+{
+    Task<ClientCredentialsClaimsResult> TransformAsync(
+        OAuthClient client,
+        IReadOnlyList<string> grantedScopes,
+        IReadOnlyDictionary<string, string> extraParameters,
+        CancellationToken ct = default);
+}
+```
+
+- `extraParameters` holds the non-protocol form parameters of the token request (single-valued, first wins), for example an `organization_id` the caller sent.
+- Return `ClientCredentialsClaimsResult.Allow(claims)` to force `claims` onto the token (null or empty leaves it unchanged), or `ClientCredentialsClaimsResult.Reject(error, description)` to refuse the issuance with that OAuth error.
+- Reserved protocol claim names are still blocked at mint.
+- Validate the caller-supplied binding against your own authority; do not copy it onto the token unchecked.
+- The default `NullClientCredentialsClaimsTransformer` is registered with `TryAddSingleton`, so register yours first to replace it.
+
+## ITurnstileKeyProvider
+
+Both Turnstile keys come from one object so the widget the browser renders and the secret the server verifies against can never disagree. The default `OptionsTurnstileKeyProvider` reads `SiteKey` and `SecretKey` from `TurnstileOptions`, which suits a host serving one domain. A host serving customer-supplied domains, where Cloudflare caps a widget's hostnames, registers its own scoped implementation that returns the key pair of the widget allocated to the requesting host.
+
+```csharp
+public interface ITurnstileKeyProvider
+{
+    string? SiteKey { get; }     // null when disabled
+    string? SecretKey { get; }   // null or empty disables enforcement
+}
+```
+
+Registered with `TryAddScoped`, so a registration made before `AddAuthagonal` wins.
+
+## IInteractiveCorsOriginPolicy
+
+The interactive auth API (`/api/auth/*`) refuses credentialed cross-origin calls by default, because it is driven by the login app served from the same origin. A host that lets a tenant build its own login screen on another origin implements this to vouch for specific origins.
+
+```csharp
+public interface IInteractiveCorsOriginPolicy
+{
+    ValueTask<bool> IsAllowedAsync(HttpContext context, string origin, string path);
+}
+```
+
+- Consulted per request and per origin; tenant resolution has already run when it is called.
+- Returning true lets that origin read authenticated responses from the account, session, profile and MFA-setup endpoints for whoever is signed in. Answer only for origins the host controls or has verified, never for one taken from the request.
+- The default (`DenyInteractiveCorsOriginPolicy`, `TryAddSingleton`) returns false for every origin.
+
 ## ISecretProvider
 
 `ISecretProvider` (in `Authagonal.Core.Services`) is the reversible-encryption seam for stored secrets such as SSO client secrets, SMTP passwords, and TOTP seeds. `ProtectAsync` turns a plaintext into a reference the store persists; `ResolveAsync` turns the reference back into the plaintext. The default `PlaintextSecretProvider` stores values as-is (the reference IS the value).
@@ -255,13 +332,13 @@ Two contract points matter. `ProtectAsync` must return a self-describing ciphert
 >   buckets your population by employer, which often identifies people without recovering an address.
 > - **Chosen plaintext.** An attacker who can both read the store *and* cause values to be indexed
 >   (register an account, be provisioned over SCIM) can submit a candidate and look for its token.
->   That recovers any guessable value — common domains, common first names — no matter where the key
+>   That recovers any guessable value (common domains, common first names) no matter where the key
 >   lives, because the oracle is the write path rather than the cipher.
 >
 > Tokenization defends against the case it was built for: someone holding a dump and nothing else,
 > trying to read addresses. The two residues that remain are exactly what a registration oracle gives
-> away anyway. If they are unacceptable, leave the prefix and domain index tables unconfigured —
-> exact-match lookup carries neither — rather than assuming the HMAC covers them.
+> away anyway. If they are unacceptable, leave the prefix and domain index tables unconfigured
+> (exact-match lookup carries neither) rather than assuming the HMAC covers them.
 
 ```csharp
 public interface IIndexTokenizer
@@ -319,7 +396,7 @@ app.MapFallbackToFile("index.html");
 > `ProtocolKeyManager` calls `ProtocolSigningKeyOps.BuildSigningCredentials`, which builds an
 > `ECDsaSecurityKey` from the material in `ISigningKeyStore`, and nothing substitutes a
 > `VaultTransitSecurityKey` for it. A host that followed the old snippet saw ES256 tokens verify against JWKS
-> and reasonably concluded Vault was signing them — while the private key was generated locally on first boot
+> and reasonably concluded Vault was signing them, while the private key was generated locally on first boot
 > and persisted to the primary data store, in plaintext unless an `IFieldCipher` happened to be registered.
 > Read access to that store is complete impersonation of the issuer. If you have a compliance requirement that
 > signing keys never leave an HSM, this does not satisfy it.
@@ -334,7 +411,7 @@ app.MapFallbackToFile("index.html");
 > generating locally. `VaultTransitClient`, `VaultTransitSecurityKey`, `VaultTransitSignatureProvider` and
 > `VaultTransitCryptoProvider` are kept because they are the pieces that work; the wiring is what is absent.
 
-What `VaultTransitClient` **is** good for today is the encryption and HMAC seams — a Vault-backed
+What `VaultTransitClient` **is** good for today is the encryption and HMAC seams: a Vault-backed
 `IFieldCipher` for PII at rest, or an `IIndexTokenizer` for keyed blind indexes:
 
 ```csharp
@@ -348,7 +425,7 @@ builder.Services.AddHttpClient("Vault", client =>
 
 builder.Services.AddSingleton<VaultTransitClient>();
 
-// Your own adapters over the client — these are the seams Authagonal actually consumes.
+// Your own adapters over the client. These are the seams Authagonal actually consumes.
 builder.Services.AddSingleton<IFieldCipher, MyVaultFieldCipher>();
 builder.Services.AddSingleton<IIndexTokenizer, MyVaultIndexTokenizer>();
 
@@ -356,7 +433,7 @@ builder.Services.AddAuthagonal(builder.Configuration);
 ```
 
 Registering an `IFieldCipher` is also what silences `PlaintextSigningKeyWarning`, because the signing key
-stores route their key material through that same seam — which is the closest thing to the original claim
+stores route their key material through that same seam, which is the closest thing to the original claim
 that is available today: the private key still exists locally, but not in the clear.
 
 The `VaultTransitClient` provides these operations:

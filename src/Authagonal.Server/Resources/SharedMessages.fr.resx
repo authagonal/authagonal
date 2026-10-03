@@ -86,4 +86,37 @@
   <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>Le jeton est invalide ou a expiré</value></data>
   <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>L'adresse e-mail est déjà confirmée</value></data>
   <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>Le fournisseur et la clé du fournisseur sont requis</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>Il manque quelque chose</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>Ce lien de confirmation est incomplet. Ouvrez l'e-mail de vérification le plus récent et utilisez le lien qui s'y trouve.</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>Ce lien ne semble pas correct</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>Ouvrez l'e-mail de vérification le plus récent et utilisez le lien qui s'y trouve.</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>Ce lien a expiré</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>Connectez-vous pour recevoir un nouvel e-mail de vérification.</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>Votre adresse e-mail est déjà confirmée</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>Vous pouvez vous connecter maintenant.</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>Confirmez votre adresse e-mail</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>Confirmez que cette adresse vous appartient.</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>Confirmer mon adresse e-mail</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>Aller à la connexion</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>Vérifiez votre adresse e-mail</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>Vérifiez votre adresse e-mail</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>Cliquez sur le lien ci-dessous pour vérifier votre adresse e-mail :</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>Vérifier l'e-mail</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>Si vous n'avez pas créé de compte, vous pouvez ignorer cet e-mail.</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>Réinitialisez votre mot de passe</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>Réinitialisez votre mot de passe</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>Cliquez sur le lien ci-dessous pour définir un nouveau mot de passe :</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>Réinitialiser le mot de passe</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>Ce lien expire dans 1 heure. Si vous n'avez pas demandé la réinitialisation de votre mot de passe, vous pouvez ignorer cet e-mail.</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>Vous avez déjà un compte</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>Vous avez déjà un compte</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>Quelqu'un a essayé de s'inscrire avec cette adresse e-mail, mais un compte existe déjà. Connectez-vous, ou réinitialisez votre mot de passe si vous l'avez oublié.</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>Se connecter</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>Si ce n'était pas vous, vous pouvez ignorer cet e-mail.</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Déconnecté</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Déconnexion</value></data>
 </root>

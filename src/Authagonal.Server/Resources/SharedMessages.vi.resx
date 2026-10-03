@@ -86,4 +86,37 @@
   <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>Mã xác thực không hợp lệ hoặc đã hết hạn</value></data>
   <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>Email đã được xác nhận</value></data>
   <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>Provider và ProviderKey là bắt buộc</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>Thiếu thông tin</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>Liên kết xác nhận này không đầy đủ. Hãy mở email xác minh mới nhất và dùng liên kết trong đó.</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>Liên kết này có vẻ không đúng</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>Hãy mở email xác minh mới nhất và dùng liên kết trong đó.</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>Liên kết này đã hết hạn</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>Hãy đăng nhập để nhận email xác minh mới.</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>Email của bạn đã được xác nhận</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>Bạn có thể đăng nhập ngay bây giờ.</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>Xác nhận email của bạn</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>Hãy xác nhận rằng địa chỉ này thuộc về bạn.</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>Xác nhận email của tôi</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>Đến trang đăng nhập</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>Xác minh địa chỉ email của bạn</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>Xác minh email của bạn</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>Nhấp vào liên kết bên dưới để xác minh địa chỉ email của bạn:</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>Xác minh email</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>Nếu bạn không tạo tài khoản, bạn có thể bỏ qua email này.</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>Đặt lại mật khẩu của bạn</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>Đặt lại mật khẩu của bạn</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>Nhấp vào liên kết bên dưới để đặt mật khẩu mới:</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>Đặt lại mật khẩu</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>Liên kết này hết hạn sau 1 giờ. Nếu bạn không yêu cầu đặt lại mật khẩu, bạn có thể bỏ qua email này.</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>Bạn đã có tài khoản</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>Bạn đã có tài khoản</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>Có người đã cố đăng ký bằng email này, nhưng tài khoản đã tồn tại. Hãy đăng nhập, hoặc đặt lại mật khẩu nếu bạn đã quên.</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>Đăng nhập</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>Nếu đó không phải là bạn, bạn có thể bỏ qua email này.</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Đã đăng xuất</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Đăng xuất</value></data>
 </root>

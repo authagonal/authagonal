@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" msdata:Ordinal="0" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>1.3</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <!-- Authentication messages -->
+  <data name="Auth_ResetTokenRequired" xml:space="preserve"><value>रीसेट टोकन आवश्यक है।</value></data>
+  <data name="Auth_PasswordRequired" xml:space="preserve"><value>पासवर्ड आवश्यक है।</value></data>
+  <data name="Auth_WeakPassword" xml:space="preserve"><value>पासवर्ड मज़बूती की आवश्यकताओं को पूरा नहीं करता।</value></data>
+  <data name="Auth_InvalidTokenFormat" xml:space="preserve"><value>रीसेट टोकन का प्रारूप अमान्य है।</value></data>
+  <data name="Auth_TokenExpired" xml:space="preserve"><value>यह रीसेट लिंक समाप्त हो चुका है।</value></data>
+  <data name="Auth_TokenUsedOrExpired" xml:space="preserve"><value>यह रीसेट लिंक पहले ही उपयोग किया जा चुका है या समाप्त हो चुका है।</value></data>
+  <data name="Auth_InvalidToken" xml:space="preserve"><value>रीसेट टोकन अमान्य है।</value></data>
+  <data name="Auth_EmailConfirmed" xml:space="preserve"><value>ईमेल की पुष्टि सफलतापूर्वक हो गई</value></data>
+  <data name="Auth_VerificationSent" xml:space="preserve"><value>सत्यापन ईमेल भेज दिया गया</value></data>
+
+  <!-- Password validation -->
+  <data name="Password_Required" xml:space="preserve"><value>पासवर्ड आवश्यक है।</value></data>
+  <data name="Password_MinLength" xml:space="preserve"><value>पासवर्ड कम से कम {0} अक्षरों का होना चाहिए।</value></data>
+  <data name="Password_RequireUppercase" xml:space="preserve"><value>पासवर्ड में कम से कम एक बड़ा अक्षर होना चाहिए।</value></data>
+  <data name="Password_RequireLowercase" xml:space="preserve"><value>पासवर्ड में कम से कम एक छोटा अक्षर होना चाहिए।</value></data>
+  <data name="Password_RequireDigit" xml:space="preserve"><value>पासवर्ड में कम से कम एक अंक होना चाहिए।</value></data>
+  <data name="Password_RequireSpecialChar" xml:space="preserve"><value>पासवर्ड में कम से कम एक अक्षरांकीय के अलावा अन्य वर्ण होना चाहिए।</value></data>
+  <data name="Password_MinUniqueChars" xml:space="preserve"><value>पासवर्ड में कम से कम {0} अलग-अलग वर्ण होने चाहिए।</value></data>
+
+  <!-- Password policy labels -->
+  <data name="PasswordPolicy_MinLength" xml:space="preserve"><value>कम से कम {0} वर्ण</value></data>
+  <data name="PasswordPolicy_Uppercase" xml:space="preserve"><value>बड़ा अक्षर</value></data>
+  <data name="PasswordPolicy_Lowercase" xml:space="preserve"><value>छोटा अक्षर</value></data>
+  <data name="PasswordPolicy_Digit" xml:space="preserve"><value>अंक</value></data>
+  <data name="PasswordPolicy_SpecialChar" xml:space="preserve"><value>विशेष वर्ण</value></data>
+
+  <!-- Error messages -->
+  <data name="Error_BadRequest" xml:space="preserve"><value>अनुरोध अमान्य था।</value></data>
+  <data name="Error_Unauthorized" xml:space="preserve"><value>प्रमाणीकरण आवश्यक है।</value></data>
+  <data name="Error_NotFound" xml:space="preserve"><value>अनुरोधित संसाधन नहीं मिला।</value></data>
+  <data name="Error_ServerError" xml:space="preserve"><value>एक अनपेक्षित त्रुटि हुई।</value></data>
+
+  <!-- End session -->
+  <data name="EndSession_SignedOut" xml:space="preserve"><value>आपको साइन आउट कर दिया गया है।</value></data>
+  <data name="EndSession_ConfirmPrompt" xml:space="preserve"><value>{0} से साइन आउट करें?</value></data>
+  <data name="EndSession_ConfirmButton" xml:space="preserve"><value>साइन आउट करें</value></data>
+  <data name="EndSession_CancelButton" xml:space="preserve"><value>रद्द करें</value></data>
+
+  <!-- Admin user endpoint messages -->
+  <data name="Admin_UserNotFound" xml:space="preserve"><value>उपयोगकर्ता “{0}” नहीं मिला</value></data>
+  <data name="Admin_EmailRequired" xml:space="preserve"><value>ईमेल आवश्यक है</value></data>
+  <data name="Admin_PasswordRequired" xml:space="preserve"><value>पासवर्ड आवश्यक है</value></data>
+  <data name="Admin_UserExists" xml:space="preserve"><value>इस ईमेल वाला उपयोगकर्ता पहले से मौजूद है</value></data>
+  <data name="Admin_UserIdInUse" xml:space="preserve"><value>इस आईडी वाला उपयोगकर्ता पहले से मौजूद है</value></data>
+  <data name="Admin_UserIdRequired" xml:space="preserve"><value>उपयोगकर्ता आईडी आवश्यक है</value></data>
+  <data name="Admin_TokenRequired" xml:space="preserve"><value>टोकन आवश्यक है</value></data>
+  <data name="Admin_InvalidTokenFormat" xml:space="preserve"><value>टोकन का प्रारूप अमान्य है</value></data>
+  <data name="Admin_VerificationExpired" xml:space="preserve"><value>यह सत्यापन लिंक समाप्त हो चुका है</value></data>
+  <data name="Admin_UserNotFoundSimple" xml:space="preserve"><value>उपयोगकर्ता नहीं मिला</value></data>
+  <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>टोकन अमान्य है या समाप्त हो चुका है</value></data>
+  <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>ईमेल की पुष्टि पहले ही हो चुकी है</value></data>
+  <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>प्रदाता और प्रदाता कुंजी आवश्यक हैं</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>कुछ जानकारी अधूरी है</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>यह पुष्टि लिंक अधूरा है। सबसे हाल का सत्यापन ईमेल खोलें और उसमें दिया गया लिंक उपयोग करें।</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>यह लिंक सही नहीं लगता</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>सबसे हाल का सत्यापन ईमेल खोलें और उसमें दिया गया लिंक उपयोग करें।</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>यह लिंक समाप्त हो चुका है</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>नया सत्यापन ईमेल पाने के लिए साइन इन करें।</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>आपके ईमेल की पुष्टि पहले ही हो चुकी है</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>अब आप साइन इन कर सकते हैं।</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>अपने ईमेल की पुष्टि करें</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>पुष्टि करें कि यह पता आपका है।</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>मेरे ईमेल की पुष्टि करें</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>साइन इन पर जाएँ</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>अपना ईमेल पता सत्यापित करें</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>अपना ईमेल सत्यापित करें</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>अपना ईमेल पता सत्यापित करने के लिए नीचे दिए गए लिंक पर क्लिक करें:</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>ईमेल सत्यापित करें</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>यदि आपने खाता नहीं बनाया है, तो आप इस ईमेल को अनदेखा कर सकते हैं।</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>अपना पासवर्ड रीसेट करें</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>अपना पासवर्ड रीसेट करें</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>नया पासवर्ड सेट करने के लिए नीचे दिए गए लिंक पर क्लिक करें:</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>पासवर्ड रीसेट करें</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>यह लिंक 1 घंटे में समाप्त हो जाएगा। यदि आपने पासवर्ड रीसेट का अनुरोध नहीं किया है, तो आप इस ईमेल को अनदेखा कर सकते हैं।</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>आपके पास पहले से एक खाता है</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>आपके पास पहले से एक खाता है</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>किसी ने इस ईमेल से साइन अप करने की कोशिश की, लेकिन खाता पहले से मौजूद है। इसके बजाय साइन इन करें, या पासवर्ड भूल गए हों तो उसे रीसेट करें।</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>साइन इन करें</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>यदि यह आप नहीं थे, तो आप इस ईमेल को अनदेखा कर सकते हैं।</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>साइन आउट हो गए</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>साइन आउट</value></data>
+</root>

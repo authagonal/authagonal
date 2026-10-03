@@ -1,14 +1,14 @@
 ---
 layout: default
-title: Backup & Restore
+title: Cópia de segurança e restauro
 locale: pt
 ---
 
-# Backup e restauração
+# Cópia de segurança e restauro
 
-O Authagonal fornece duas ferramentas CLI para fazer backup e restaurar dados do Azure Table Storage. Ambas são aplicações de console .NET no diretório `tools/`, e ambas são invólucros finos sobre o pacote NuGet `Authagonal.Backup`. Hosts que precisam de backups agendados, multi-tenant ou fora do sistema de arquivos podem usar a biblioteca diretamente (consulte [Usando a biblioteca](#usando-a-biblioteca)).
+A Authagonal disponibiliza duas ferramentas CLI para fazer cópias de segurança e restaurar dados do Azure Table Storage. Ambas são aplicações de consola .NET no diretório `tools/`, e ambas são invólucros finos sobre o pacote NuGet `Authagonal.Backup`. Os anfitriões que precisem de cópias de segurança agendadas, multi-inquilino ou fora do sistema de ficheiros podem utilizar a biblioteca diretamente (consulte [Utilizar a biblioteca](#using-the-library)).
 
-## Backup
+## Cópia de segurança {#backup}
 
 ```bash
 dotnet run --project tools/Authagonal.Backup -- \
@@ -16,21 +16,23 @@ dotnet run --project tools/Authagonal.Backup -- \
   --output ./backups
 ```
 
-### Opções
+### Opções {#options}
 
-| Option | Descrição |
+| Opção | Descrição |
 |---|---|
-| `--connection-string <conn>` | String de conexão do Azure Table Storage (ou definir a variável de ambiente `STORAGE_CONNECTION_STRING`) |
-| `--output <dir>` | Diretório de saída (padrão: `./backups`) |
-| `--incremental` | Fazer backup apenas das entidades alteradas desde o último backup |
-| `--tables <t1,t2,...>` | Lista de tabelas separadas por vírgulas (padrão: todas as tabelas do Authagonal) |
-| `--prefix <prefix>` | Prefixo de nome de tabela (para armazenamento multi-tenant) |
-| `--gzip` | Compactar arquivos de backup com gzip (`.jsonl.gz`) |
-| `--dry-run` | Mostrar o que seria feito backup sem gravar |
+| `--connection-string <conn>` | Cadeia de ligação do Azure Table Storage (ou defina a variável de ambiente `STORAGE_CONNECTION_STRING`) |
+| `--output <dir>` | Diretório de saída (predefinição: `./backups`) |
+| `--incremental` | Copiar apenas as entidades alteradas desde a última cópia de segurança |
+| `--tables <t1,t2,...>` | Lista de tabelas separadas por vírgulas (predefinição: todas as tabelas da Authagonal) |
+| `--prefix <prefix>` | Prefixo dos nomes das tabelas (para armazenamento multi-inquilino) |
+| `--gzip` | Comprimir os ficheiros da cópia de segurança com gzip (`.jsonl.gz`) |
+| `--encryption-key <base64>` | Chave de encriptação de chaves AES-256 de 32 bytes. Encripta todos os ficheiros de dados. Mantenha-a **fora** do destino da cópia de segurança. Também lê `BACKUP_ENCRYPTION_KEY` (prefira esta opção; ver abaixo). |
+| `--manifest-key <base64>` | Chave HMAC de ≥32 bytes. Assina o manifesto para que o restauro possa provar que os hashes registados não foram reescritos juntamente com os ficheiros. Mantenha-a **fora** do destino da cópia de segurança. Também lê `BACKUP_MANIFEST_KEY` (prefira esta opção; ver abaixo). |
+| `--dry-run` | Mostrar o que seria copiado sem escrever nada |
 
-### Formato de saída
+### Formato de saída {#output-format}
 
-Cada backup cria um diretório com carimbo de data/hora:
+Cada cópia de segurança cria um diretório com carimbo temporal:
 
 ```
 backups/
@@ -46,39 +48,81 @@ backups/
     _manifest.json
 ```
 
-Cada arquivo `.jsonl` contém um objeto JSON por linha (um por entidade de tabela). Com `--gzip`, os arquivos são compactados como `.jsonl.gz`. O arquivo `_manifest.json` registra o id do backup, o carimbo de data/hora, o modo (`full` ou `incremental`), a compressão, a marca d'água incremental, a contagem de entidades por tabela, a contagem de tombstones, quais tabelas (se houver) foram lidas via change-log (`ChangeLogTables`, null significa cobertura de varredura completa) e os hashes SHA-256 dos arquivos para verificação de integridade.
+Com `--prefix`, as cópias de segurança ficam aninhadas um nível mais abaixo, sob o prefixo: `backups/acmecorp/20260329-120000/`.
+É isto que impede que as cópias de segurança completas de dois inquilinos que caiam no mesmo diretório `--output` no mesmo
+segundo colidam. O id da cópia de segurança continua a ser apenas um carimbo temporal `yyyyMMdd-HHmmss[-incr]` com
+resolução de um segundo e sem prefixo, pelo que, sem o aninhamento, dois prefixos copiados no mesmo
+segundo receberiam o mesmo id e, portanto, o mesmo diretório. Aponte `--input` para o
+diretório aninhado para restaurar a partir dele (`--input backups/acmecorp/20260329-120000`); as execuções sem prefixo
+não são afetadas e mantêm a estrutura plana mostrada acima.
 
-Backups incrementais também gravam um arquivo `_tombstones.jsonl(.gz)` que registra as exclusões desde a marca d'água: uma linha por linha excluída com `Table`, `PartitionKey`, `RowKey` e `DeletedAt`. A restauração reaplica essas exclusões para que linhas excluídas não sejam ressuscitadas (consulte [Reaplicação de tombstones](#reaplicação-de-tombstones)).
+Cada ficheiro `.jsonl` contém um objeto JSON por linha (um por entidade da tabela). Com `--gzip`, os ficheiros são comprimidos como `.jsonl.gz`. O `_manifest.json` regista o id da cópia de segurança, o carimbo temporal, o modo (`full` ou `incremental`), a compressão, a marca de água incremental, as contagens de entidades por tabela, a contagem de tombstones, quais as tabelas (se as houver) lidas através do registo de alterações (`ChangeLogTables`; null significa cobertura por varredura completa) e os hashes SHA-256 dos ficheiros para verificação de integridade.
 
-As entidades fazem round-trip de valores exatamente: cada linha do backup carrega um marcador de formato `"@v"` e uma anotação `"{column}@odata.type"` explícita (`Edm.Guid`, `Edm.DateTime`, `Edm.Binary`, `Edm.Int64`, `Edm.Double`) para cada coluna que o JSON não consegue representar sem ambiguidade, portanto a restauração grava de volta os tipos originais em vez de valores convertidos em string ou reinferidos.
+As cópias de segurança incrementais também escrevem um ficheiro `_tombstones.jsonl(.gz)` que regista as eliminações desde a marca de água: uma linha por linha eliminada, com `Table`, `PartitionKey`, `RowKey` e `DeletedAt`. O restauro reproduz-nas para que as linhas eliminadas não ressuscitem (consulte [Reprodução de tombstones](#tombstone-replay)).
 
-### Verificação de integridade
+Os valores das entidades fazem o percurso de ida e volta com exatidão: cada linha copiada transporta um marcador de formato `"@v"` e uma anotação explícita `"{column}@odata.type"` (`Edm.Guid`, `Edm.DateTime`, `Edm.Binary`, `Edm.Int64`, `Edm.Double`) para cada coluna que o JSON não consiga representar sem ambiguidade, pelo que o restauro grava os tipos originais em vez de valores convertidos em cadeia ou novamente inferidos.
 
-Cada manifesto de backup inclui um dicionário `FileHashes` que mapeia nomes de arquivos para os seus hashes SHA-256. Durante a restauração, a integridade de cada arquivo é verificada contra esses hashes antes de qualquer um dos seus dados ser gravado; um arquivo que falha na verificação, ou um arquivo de dados ausente do manifesto, aborta a restauração com um erro. Backups gravados antes de o hashing de integridade existir (sem `FileHashes` no manifesto) não podem ser verificados e são restaurados com um aviso ruidoso em vez disso. A verificação pode ser desativada programaticamente via `RestoreOptions.VerifyIntegrity` (padrão `true`).
+### Verificação de integridade {#integrity-verification}
 
-### Backups incrementais
+Cada manifesto de cópia de segurança inclui um dicionário `FileHashes` que associa os nomes dos ficheiros aos respetivos hashes SHA-256. Durante o restauro, cada ficheiro é verificado contra o hash registado (a partir da mesma leitura de onde as entidades são aplicadas, pelo que os bytes verificados são os bytes que são gravados) antes de qualquer dos seus dados chegar a uma tabela. Um ficheiro que falhe a verificação, um ficheiro de dados ausente do manifesto ou um ficheiro listado no manifesto que falte no armazenamento interrompem, qualquer um deles, o restauro. As cópias de segurança escritas antes de existir o hashing de integridade (sem `FileHashes`) não podem ser verificadas e são recusadas, a menos que se utilize `--allow-unverified`. A verificação pode ser desativada programaticamente através de `RestoreOptions.VerifyIntegrity` (predefinição `true`).
 
-Passe `--incremental` para fazer backup apenas das entidades modificadas desde o último backup bem-sucedido. A ferramenta utiliza a propriedade integrada `Timestamp` do Azure Table Storage para filtragem e rastreia a marca d'água alta em um arquivo `.lastbackup` no diretório de saída.
+### Passe as chaves por variável de ambiente, não na linha de comandos {#pass-the-keys-by-environment-variable-not-on-the-command-line}
 
-Se nenhum arquivo `.lastbackup` existir, a primeira execução incremental realiza um backup completo.
+Ambas as ferramentas leem `BACKUP_ENCRYPTION_KEY` e `BACKUP_MANIFEST_KEY`, e uma cópia de segurança agendada deve utilizá-las.
 
-Cada filtro de `Timestamp` incremental subtrai uma pequena margem de segurança (`BackupDefaults.WatermarkSkewMargin`, 5 minutos) antes de filtrar. A marca d'água vem do relógio do chamador, enquanto os carimbos de data/hora das linhas são aplicados pelo serviço de armazenamento, portanto uma mutação que confirma dentro do desvio de relógio seria de outra forma perdida por esta execução e por todas as posteriores. Reler a margem custa algumas linhas duplicadas por execução, que a semântica de upsert da restauração remove.
+Uma flag passa a fazer parte da linha de comandos do processo. No Kubernetes, isso significa que a especificação do CronJob contém literalmente a
+KEK em base64 e a chave HMAC, pelo que qualquer pessoa com `get`/`list` sobre cronjobs ou pods nesse namespace consegue ler ambas
+com `kubectl get cronjob -o yaml`, um conjunto de principais muito mais amplo do que os detentores do Secret, e um conjunto
+habitualmente concedido a dashboards só de leitura e a contas de serviço de CI. Os mesmos valores são visíveis em
+`/proc/<pid>/cmdline` para qualquer processo no nó, e em qualquer histórico de shell ou registo de CI que tenha montado o
+comando. `--connection-string` tem um caminho por variável de ambiente exatamente por esta razão; as duas chaves que protegem
+o arquivo não tinham.
 
-### Tabelas padrão
+```yaml
+env:
+  - name: BACKUP_ENCRYPTION_KEY
+    valueFrom: { secretKeyRef: { name: authagonal-backup, key: encryption-key } }
+  - name: BACKUP_MANIFEST_KEY
+    valueFrom: { secretKeyRef: { name: authagonal-backup, key: manifest-key } }
+```
 
-A ferramenta de backup inclui todas as tabelas do Authagonal por padrão (`BackupDefaults.Tables`):
+Uma flag continua a prevalecer se ambas estiverem definidas, pelo que um restauro interativo pontual não precisa de nenhuma alteração.
 
-`Users`, `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `Clients`, `Grants`, `GrantsBySubject`, `GrantsByExpiry`, `SigningKeys`, `SsoDomains`, `SamlProviders`, `OidcProviders`, `UserProvisions`, `MfaCredentials`, `MfaChallenges`, `MfaWebAuthnIndex`, `ScimTokens`, `ScimGroups`, `ScimGroupExternalIds`, `ScimGroupRoleMappings`, `Roles`, `Scopes`, `ProvisioningApps`
+Os hashes estabelecem que o arquivo corresponde ao manifesto, não que algum dos dois seja autêntico: o manifesto está no mesmo destino que os dados, pelo que quem conseguir reescrever `Clients.jsonl.gz` consegue reescrever a linha que regista o seu hash. `--manifest-key` resolve isso: a cópia de segurança calcula o HMAC do manifesto, o restauro verifica-o, e a chave reside num local a que quem escreve a cópia de segurança não consegue chegar. **O restauro falha de forma fechada**: sem `--manifest-key`, recusa em vez de emitir um aviso, e `--allow-unauthenticated-manifest` é a exclusão explícita para arquivos escritos antes da assinatura de manifestos.
 
-Tabelas transitórias (`SamlReplayCache`, `OidcStateStore`, `RevokedTokens`) são excluídas por padrão, pois as suas entradas são limitadas pelo tempo de vida dos tokens; inclua-as explicitamente com `--tables` se necessário. A tabela de change-log `Tombstones` é tratada separadamente pelo mecanismo de backup e não deve ser listada.
+### Cópias de segurança incrementais {#incremental-backups}
 
-### As chaves de assinatura são excluídas por padrão
+Passe `--incremental` para copiar apenas as entidades modificadas desde a última cópia de segurança bem-sucedida. A ferramenta utiliza a propriedade `Timestamp` integrada do Azure Table Storage para filtrar e acompanha a marca de água máxima num ficheiro `.lastbackup` no diretório de saída.
 
-A tabela `SigningKeys` está na lista de tabelas padrão mas é **filtrada dos backups por padrão** (`BackupOptions.IncludeSigningKeys`, padrão `false`; a CLI nunca a habilita). Para hosts que usam a fonte de chaves local (armazenada em tabela), esta tabela contém a **chave privada** de assinatura JWT, e gravá-la num arquivo de backup em texto simples permitiria que qualquer pessoa que leia o backup forjasse tokens. (Hosts que assinam via HashiCorp Vault Transit não mantêm nenhuma chave privada na tabela, portanto esta preocupação não se aplica a eles.)
+Se não existir nenhum ficheiro `.lastbackup`, a primeira execução incremental faz uma cópia de segurança completa.
 
-> ⚠️ Só opte por incluir via `BackupOptions.IncludeSigningKeys` quando o alvo do backup estiver ele próprio criptografado em repouso e com acesso controlado. O mesmo se aplica ao resto do backup: com o provedor de segredos de **texto simples** padrão, os backups também contêm os segredos de clientes OIDC upstream e as sementes TOTP / MFA em texto claro. Consulte [Configuração → Provedor de Segredos](configuration#secret-provider).
+Cada filtro incremental por `Timestamp` subtrai uma pequena margem de segurança (`BackupDefaults.WatermarkSkewMargin`, 5 minutos) antes de filtrar. A marca de água vem do relógio de quem chama, enquanto os carimbos temporais das linhas são atribuídos pelo serviço de armazenamento, pelo que uma mutação confirmada dentro do desvio de relógio seria, de outro modo, perdida por esta execução e por todas as seguintes. Reler a margem custa algumas linhas duplicadas por execução, que a semântica de upsert do restauro elimina.
 
-## Restauração
+### Tabelas predefinidas {#default-tables}
+
+A ferramenta de cópia de segurança inclui por predefinição todas as tabelas da Authagonal (`BackupDefaults.Tables`):
+
+`Users`, `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `UserOrganizations`, `Clients`, `Grants`, `GrantsBySubject`, `GrantsByExpiry`, `SigningKeys`, `SsoDomains`, `SamlProviders`, `OidcProviders`, `UpstreamRefreshTokens`, `UserProvisions`, `MfaCredentials`, `MfaChallenges`, `MfaWebAuthnIndex`, `ScimTokens`, `ScimGroups`, `ScimGroupExternalIds`, `ScimGroupRoleMappings`, `Roles`, `UserRoles`, `Scopes`, `AgentProfiles`, `ProvisioningApps`, `Organizations`, `OrganizationSlugs`, `OrganizationMembers`, `UserMemberships`
+
+`AgentProfiles`, `UserRoles` e `UpstreamRefreshTokens` estão no conjunto deliberadamente: sem elas, uma implementação restaurada fica, sem que se note, mais fraca do que a que foi copiada (os clientes de agente perdem o seu limite máximo e as verificações de consentimento, as funções estão definidas mas ninguém as detém, os tokens de atualização a montante desaparecem).
+
+As tabelas transitórias (`SamlReplayCache`, `OidcStateStore`, `RevokedTokens`) são excluídas por predefinição, uma vez que as suas entradas estão limitadas pelos tempos de vida dos tokens; inclua-as explicitamente com `--tables`, se necessário. A tabela de registo de alterações `Tombstones` é tratada separadamente pelo motor de cópia de segurança e não deve ser listada.
+
+### As chaves de assinatura são excluídas por predefinição {#signing-keys-are-excluded-by-default}
+
+A tabela `SigningKeys` está na lista de tabelas predefinida, mas é **filtrada das cópias de segurança por predefinição** (`BackupOptions.IncludeSigningKeys`, predefinição `false`; a CLI nunca a ativa). Nos anfitriões que utilizam a origem de chaves local (guardada em tabela), esta tabela contém a **chave privada** de assinatura de JWT, e gravá-la num ficheiro de cópia de segurança em texto simples permitiria a qualquer pessoa que leia a cópia de segurança forjar tokens. Isto aplica-se a **todos** os anfitriões: a assinatura de JWT não é delegada no Vault Transit, pelo que não existe nenhuma configuração em que a tabela `SigningKeys` não contenha uma chave privada.
+
+> ⚠️ Só opte pela inclusão através de `BackupOptions.IncludeSigningKeys` quando o próprio destino da cópia de segurança estiver encriptado em repouso e com acesso controlado. O mesmo se aplica ao resto da cópia de segurança: com o fornecedor de segredos predefinido de **texto simples**, as cópias de segurança também contêm em claro os segredos de cliente OIDC a montante e as sementes TOTP / MFA. Consulte [Configuração → Fornecedor de segredos](configuration#secret-provider).
+
+### `--tables` indica tabelas do conjunto de cópia de segurança {#--tables-names-tables-from-the-backup-set}
+
+Só podem ser indicadas tabelas do conjunto de tabelas declarado (`BackupDefaults.Tables`, ou `KnownTables` abaixo). Uma tabela fora dele é recusada logo à partida, em vez de
+produzir um arquivo que o restauro rejeitaria. A lista de permissões do restauro é esse mesmo conjunto, pelo que um arquivo que indicasse
+qualquer outra tabela poderia ser escrito, ter o hash calculado e ser assinado, e depois nunca ser restaurado. As tabelas transitórias (entradas
+de tokens revogados, contadores de limitação de taxa) são excluídas deliberadamente: expiram por si mesmas, e restaurar linhas desatualizadas
+não serve para nada.
+
+## Restauro {#restore}
 
 ```bash
 dotnet run --project tools/Authagonal.Restore -- \
@@ -86,56 +130,70 @@ dotnet run --project tools/Authagonal.Restore -- \
   --input ./backups/20260329-120000
 ```
 
-### Opções
+### Opções {#options-1}
 
-| Option | Descrição |
+| Opção | Descrição |
 |---|---|
-| `--connection-string <conn>` | String de conexão do Azure Table Storage (ou definir a variável de ambiente `STORAGE_CONNECTION_STRING`) |
-| `--input <dir>` | Diretório de backup a partir do qual restaurar |
-| `--mode <mode>` | Modo de restauração: `upsert` (padrão), `merge` ou `clean` |
-| `--tables <t1,t2,...>` | Lista de tabelas a restaurar separadas por vírgulas (padrão: todos os arquivos `.jsonl`/`.jsonl.gz` no backup) |
-| `--prefix <prefix>` | Prefixo de nome de tabela (para armazenamento multi-tenant) |
-| `--dry-run` | Mostrar o que seria restaurado sem gravar |
+| `--connection-string <conn>` | Cadeia de ligação do Azure Table Storage (ou defina a variável de ambiente `STORAGE_CONNECTION_STRING`) |
+| `--input <dir>` | Diretório da cópia de segurança a partir do qual restaurar |
+| `--mode <mode>` | Modo de restauro: `upsert` (predefinição), `merge` ou `clean` |
+| `--tables <t1,t2,...>` | Lista de tabelas a restaurar, separadas por vírgulas (predefinição: todos os ficheiros `.jsonl`/`.jsonl.gz` da cópia de segurança) |
+| `--prefix <prefix>` | Prefixo dos nomes das tabelas (para armazenamento multi-inquilino) |
+| `--clean-env <env>` | Com `--mode clean`, apagar apenas as linhas deste ambiente (prefixo de PartitionKey `<env>|`) |
+| `--allow-clean-from-incremental` | Permitir `--mode clean` a partir de uma cópia de segurança incremental |
+| `--allow-clean-all-envs` | Permitir `--mode clean` sem `--clean-env`, esvaziando a tabela inteira |
+| `--encryption-key <base64>` | A chave de encriptação de chaves de 32 bytes com que a cópia de segurança foi escrita. Obrigatória para um arquivo encriptado. Também lê `BACKUP_ENCRYPTION_KEY`. |
+| `--manifest-key <base64>` | A chave HMAC com que a cópia de segurança foi assinada. **Obrigatória**, a menos que se utilize `--allow-unauthenticated-manifest`. Também lê `BACKUP_MANIFEST_KEY`. |
+| `--allow-unauthenticated-manifest` | Restaurar sem `--manifest-key`, aceitando hashes que detetam corrupção mas não adulteração |
+| `--allow-unverified` | Restaurar uma cópia de segurança cujo manifesto não contenha nenhum hash de ficheiro |
+| `--dry-run` | Mostrar o que seria restaurado sem escrever nada |
 
-### Modos de restauração
+### Modos de restauro {#restore-modes}
 
 | Modo | Comportamento |
 |---|---|
-| `upsert` | Inserir ou substituir cada entidade. Os dados existentes são sobrescritos. |
-| `merge` | Inserir ou mesclar. Propriedades existentes que não estão no backup são preservadas. |
-| `clean` | Excluir todos os dados existentes em cada tabela antes de restaurar. |
+| `upsert` | Inserir ou substituir cada entidade. Os dados existentes são substituídos. |
+| `merge` | Inserir ou fundir. As propriedades existentes que não estejam na cópia de segurança são preservadas. |
+| `clean` | Eliminar todos os dados existentes em cada tabela antes de restaurar. |
 
-Arquivos de backup compactados com gzip (`.jsonl.gz`) são detectados e descompactados automaticamente; nenhuma flag adicional é necessária.
+Os ficheiros de cópia de segurança comprimidos com gzip (`.jsonl.gz`) são detetados e descomprimidos automaticamente; não são necessárias flags adicionais.
 
-### Reaplicação de tombstones
+### Reprodução de tombstones {#tombstone-replay}
 
-Após os arquivos de dados, a restauração aplica o arquivo `_tombstones` do backup: cada chave registrada é excluída das tabelas restauradas (`RestoreOptions.ApplyTombstones`, padrão `true`). As exclusões de um incremental fazem parte do seu estado tanto quanto os seus upserts; ignorá-las ressuscitaria linhas excluídas, incluindo as apagadas por GDPR, ao restaurar uma sequência de completo mais incrementais. Backups completos não carregam arquivo de tombstones. Ao restaurar um backup completo seguido de incrementais, aplique-os do mais antigo para o mais recente, para que uma recriação posterior fique após uma exclusão anterior. O hash do arquivo de tombstones é verificado contra o manifesto como os arquivos de dados.
+Depois dos ficheiros de dados, o restauro aplica o ficheiro `_tombstones` da cópia de segurança: cada chave registada é eliminada das tabelas restauradas (`RestoreOptions.ApplyTombstones`, predefinição `true`). As eliminações de uma incremental fazem tanto parte do seu estado como os seus upserts; ignorá-las ressuscitaria linhas eliminadas, incluindo as apagadas ao abrigo do RGPD, ao restaurar uma sequência de completa mais incrementais. As cópias de segurança completas não têm ficheiro de tombstones. Ao restaurar uma cópia de segurança completa seguida de incrementais, aplique-as da mais antiga para a mais recente, para que uma recriação posterior fique depois de uma eliminação anterior. O hash do ficheiro de tombstones é verificado contra o manifesto, tal como os ficheiros de dados.
 
-### Round-trip exato de tipos
+### Ida e volta exata dos tipos {#exact-type-round-trip}
 
-Linhas gravadas com o marcador de formato `"@v"` carregam anotações de tipo EDM explícitas, portanto a restauração reconstrói os tipos de coluna originais exatos (`Int64`, `Guid`, `Binary`, `DateTime`, `Double`); uma string sem anotação é restaurada como string. Arquivos de backup legados sem o marcador recorrem a inferência baseada em formato, mantida apenas para que backups antigos permaneçam restauráveis (a inferência pode atribuir tipo errado a colunas de string com formato de GUID ou de data).
+As linhas escritas com o marcador de formato `"@v"` transportam anotações de tipo EDM explícitas, pelo que o restauro reconstrói exatamente os tipos de coluna originais (`Int64`, `Guid`, `Binary`, `DateTime`, `Double`); uma cadeia sem anotação é restaurada como cadeia. Os ficheiros de cópia de segurança antigos sem o marcador recorrem à inferência baseada na forma, mantida apenas para que as cópias de segurança antigas continuem restauráveis (a inferência pode atribuir o tipo errado a colunas de cadeia com forma de GUID ou de data).
 
-### Códigos de saída
+### Códigos de saída {#exit-codes}
 
 | Código | Significado |
 |---|---|
 | `0` | Sucesso |
-| `1` | Erro (argumentos ausentes, entrada inválida) |
+| `1` | Erro (argumentos em falta, entrada inválida) |
 | `2` | Sucesso parcial (algumas entidades tiveram erros) |
 
-## Usando a biblioteca
+### Um anfitrião com as suas próprias tabelas: `KnownTables` {#a-host-with-its-own-tables-knowntables}
 
-O pacote NuGet `Authagonal.Backup` expõe as mesmas operações programaticamente, para serviços em segundo plano ou orquestração personalizada:
+`BackupOptions.KnownTables` e `RestoreOptions.KnownTables` (ambos `string[]?`; null significa `BackupDefaults.Tables`) declaram o conjunto de tabelas que um arquivo da sua implementação pode legitimamente indicar. Um anfitrião que guarde os seus próprios dados ao lado dos da Authagonal e copie os dois como um único arquivo define-o; caso contrário, todas as cópias de segurança que indiquem essas tabelas são recusadas logo à partida (`BackupService.cs:48`) e todos os restauros recusam o arquivo (`RestoreService.cs:17,167`).
 
-| Tipo | Propósito |
+- O anfitrião declara o conjunto antecipadamente. Nunca é derivado do arquivo, e é precisamente essa a questão: não é o arquivo que escolhe as tabelas em que um restauro escreve.
+- Passe o **mesmo** conjunto a ambas as opções. Uma cópia de segurança feita com um conjunto mais amplo só é restaurada por um restauro que declare esse mesmo conjunto.
+
+## Utilizar a biblioteca {#using-the-library}
+
+O pacote NuGet `Authagonal.Backup` expõe as mesmas operações de forma programática, para serviços em segundo plano ou orquestração personalizada:
+
+| Tipo | Finalidade |
 |---|---|
-| `BackupService` | Executa um backup completo ou incremental contra um `TableServiceClient`, gravando num `IBackupTarget` |
-| `RestoreService` | Verifica os hashes e grava um backup de volta no Table Storage |
-| `MergeService` | Transmite um backup completo mais incrementais (e os seus tombstones) para uma única visão do estado atual |
-| `RollupService` | Consolida incrementais num novo backup completo, opcionalmente excluindo as entradas |
+| `BackupService` | Executa uma cópia de segurança completa ou incremental sobre um `TableServiceClient`, escrevendo para um `IBackupTarget` |
+| `RestoreService` | Verifica os hashes e grava uma cópia de segurança de volta no Table Storage |
+| `MergeService` | Transmite uma cópia de segurança completa mais as incrementais (e os respetivos tombstones) para uma única vista do estado atual |
+| `RollupService` | Consolida as incrementais numa nova cópia de segurança completa, eliminando opcionalmente as cópias de origem |
 | `BackupOptions` / `RestoreOptions` | Configuração por execução |
-| `BackupDefaults` | Lista de tabelas padrão e presets de change-log |
-| `IBackupSource` / `IBackupTarget` | Abstrações de armazenamento; `FileSystemBackupSource` / `FileSystemBackupTarget` são as implementações integradas. Implemente `IBackupTarget` para gravar em blob storage ou noutro lugar. |
+| `BackupDefaults` | Lista de tabelas predefinida e predefinições do registo de alterações |
+| `IBackupSource` / `IBackupTarget` | Abstrações de armazenamento; `FileSystemBackupSource` / `FileSystemBackupTarget` são as implementações integradas. Implemente `IBackupTarget` para escrever para armazenamento de blobs ou outro destino. |
 
 ```csharp
 var serviceClient = new TableServiceClient(connectionString);
@@ -144,34 +202,34 @@ var options = new BackupOptions { Incremental = true, Gzip = true };
 var manifest = await new BackupService(serviceClient, target, options).RunAsync(ct);
 ```
 
-### Incrementais orientados por change-log
+### Incrementais orientadas pelo registo de alterações {#change-log-driven-incrementals}
 
-O Azure Table Storage indexa apenas `PartitionKey` e `RowKey`, portanto um backup incremental filtrado por `Timestamp` ainda é uma varredura completa de cada tabela. Para evitar isso, os stores do Authagonal registram cada mutação num change-log via o seam `IChangeWriter` (`Authagonal.Core`), implementado para o Azure por `TableChangeWriter` (`Authagonal.AzureProvider`). É uma única tabela física, ainda chamada `Tombstones`: PK = o nome lógico da tabela, RK = `"{pk}|{rk}"`, uma coluna `Op` de `"U"` (upsert) ou `"D"` (delete) e colunas `OrigPK`/`OrigRK` autoritativas (um `|` dentro do PartitionKey original torna ambígua a divisão do RowKey composto, portanto o leitor do backup confia nas colunas e só recorre à divisão para linhas legadas). Cada chave mantém uma linha (upsert-replace), portanto a última operação numa janela de backup vence.
+O Azure Table Storage só indexa `PartitionKey` e `RowKey`, pelo que uma cópia de segurança incremental filtrada por `Timestamp` continua a ser uma varredura completa de cada tabela. Para o evitar, os armazenamentos da Authagonal registam cada mutação num registo de alterações através do ponto de extensão `IChangeWriter` (`Authagonal.Core`), implementado para o Azure por `TableChangeWriter` (`Authagonal.AzureProvider`). É uma única tabela física, ainda com o nome `Tombstones`: PK = o nome lógico da tabela, RK = `"{pk}|{rk}"`, uma coluna `Op` com `"U"` (upsert) ou `"D"` (eliminação), e colunas `OrigPK`/`OrigRK` autoritativas (um `|` dentro da PartitionKey original torna ambígua a divisão da RowKey composta, pelo que o leitor da cópia de segurança confia nas colunas e só recorre à divisão para linhas antigas). Cada chave tem uma única linha (upsert com substituição), pelo que a última operação numa janela de cópia de segurança prevalece.
 
-Com o caminho de change-log habilitado, um backup incremental enumera as entradas de change-log `Op = "U"` de uma tabela desde a marca d'água e faz point-read de cada linha ativa em vez de varrer a tabela. O recurso é **opcional e desligado por padrão**: `BackupOptions.ChangeLoggedTables` null ou vazio significa que cada tabela permanece no caminho de varredura, portanto o mecanismo é entregue inerte até uma virada deliberada (um deploy não pode silenciosamente perder linhas alteradas por código anterior à captura). Dois presets:
+Com o caminho do registo de alterações ativado, uma cópia de segurança incremental enumera as entradas `Op = "U"` do registo de alterações de uma tabela desde a marca de água e faz uma leitura pontual de cada linha ativa, em vez de varrer a tabela. A funcionalidade é **opcional e está desativada por predefinição**: `BackupOptions.ChangeLoggedTables` nulo ou vazio significa que todas as tabelas permanecem no caminho de varredura, pelo que o mecanismo é distribuído inerte até uma ativação deliberada (uma implementação não pode perder, sem aviso, linhas alteradas por código anterior à captura). Duas predefinições:
 
-| Preset | Conteúdo |
+| Predefinição | Conteúdo |
 |---|---|
-| `BackupDefaults.ChangeLoggedTables` | As tabelas cujas gravações são totalmente capturadas por change-log |
-| `BackupDefaults.ChangeLoggedTablesWithUsers` | O mesmo conjunto mais `Users`. As gravações de estado de login de Users não são deliberadamente capturadas (caminho quente, baixo valor), portanto este preset **só é seguro quando você também executa o backstop de varredura completa abaixo** |
+| `BackupDefaults.ChangeLoggedTables` | As tabelas cujas escritas são totalmente capturadas pelo registo de alterações: `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `UserOrganizations`, `ScimGroupRoleMappings`, `ProvisioningApps`, `Organizations`, `OrganizationSlugs`, `OrganizationMembers`, `UserMemberships` |
+| `BackupDefaults.ChangeLoggedTablesWithUsers` | O mesmo conjunto mais `Users`. As escritas de estado de início de sessão de Users não são deliberadamente capturadas (caminho crítico, pouco valor), pelo que esta predefinição **só é segura quando também executa a varredura completa de salvaguarda descrita abaixo** |
 
-A propriedade `ChangeLogTables` do manifesto lista quais tabelas uma execução leu via change-log; null ou vazio significa que a execução teve cobertura de varredura completa (um backup completo, um incremental de varredura simples ou uma varredura de backstop).
+A propriedade `ChangeLogTables` do manifesto lista as tabelas que uma execução leu através do registo de alterações; nulo ou vazio significa que a execução teve cobertura por varredura completa (uma cópia de segurança completa, uma incremental simples por varredura ou uma varredura de salvaguarda).
 
-### Backstop de varredura completa
+### Varredura completa de salvaguarda {#full-scan-backstop}
 
-Como a captura de change-log pode perder gravações (campos de estado de login, gravadores fora do store, pods executando código anterior à captura durante um deploy), combine incrementais de change-log com uma re-varredura completa periódica. Defina `BackupOptions.WatermarkOverride` como o carimbo de data/hora da última varredura de cobertura completa e deixe `ChangeLoggedTables` sem definir para essa execução: o incremental então filtra por `Timestamp` em toda a janela desde essa varredura, capturando qualquer coisa que o change-log nunca capturou. Um backstop diário junto de incrementais de change-log a cada hora é uma cadência razoável. As exclusões são a única classe de mutação sem auto-recuperação (uma varredura de linhas ativas não consegue ver uma linha que já foi embora), motivo pelo qual os stores gravam o tombstone de exclusão **antes** de excluir a linha de dados.
+Como a captura do registo de alterações pode perder escritas (campos de estado de início de sessão, escritores fora dos armazenamentos, pods a executar código anterior à captura durante uma implementação), combine as incrementais orientadas pelo registo de alterações com uma nova varredura completa periódica. Defina `BackupOptions.WatermarkOverride` com o carimbo temporal da última varredura com cobertura completa e deixe `ChangeLoggedTables` por definir nessa execução: a incremental filtra então por `Timestamp` ao longo de toda a janela desde essa varredura, apanhando tudo o que o registo de alterações nunca capturou. Uma salvaguarda diária a par de incrementais horárias pelo registo de alterações é uma cadência razoável. As eliminações são a única classe de mutação sem autorreparação (uma varredura de linhas ativas não consegue ver uma linha que já não existe), e é por isso que os armazenamentos escrevem o tombstone da eliminação **antes** de eliminarem a linha de dados.
 
-Todos os filtros incrementais, incluindo o backstop, subtraem `BackupDefaults.WatermarkSkewMargin` (5 minutos) da marca d'água; chamadores que purgam o change-log após um backup devem limitar a purga pela mesma margem, ou excluirão linhas de que a próxima execução ainda precisa.
+Todos os filtros incrementais, incluindo a salvaguarda, subtraem `BackupDefaults.WatermarkSkewMargin` (5 minutos) à marca de água; quem chama e purga o registo de alterações após uma cópia de segurança tem de limitar a purga pela mesma margem, ou elimina linhas de que a execução seguinte ainda precisa.
 
-### Rollups
+### Consolidações (rollups) {#rollups}
 
-`RollupService.RollupAsync` mescla um backup completo e os seus incrementais num novo backup completo; `RollupAndCleanAsync` adicionalmente exclui as entradas depois. O parâmetro opcional `newBackupId` nomeia o resultado (null deriva um id com carimbo de data/hora); um snapshot especialmente retido (por exemplo, um rollup semanal) deve passar o seu id aqui, já que a retenção baseada em id lista ids físicos de backup, não manifestos.
+`RollupService.RollupAsync` funde uma cópia de segurança completa e as suas incrementais numa nova cópia de segurança completa; `RollupAndCleanAsync` elimina ainda as cópias de origem no final. O parâmetro opcional `newBackupId` dá nome ao resultado (null deriva um id a partir do carimbo temporal); um instantâneo retido de forma especial (por exemplo, uma consolidação semanal) tem de passar aqui o seu id, uma vez que a retenção baseada em ids lista ids físicos de cópias de segurança, e não manifestos.
 
-Durante uma mesclagem, os tombstones são aplicados com ordenação por carimbo de data/hora: uma exclusão remove uma linha capturada apenas quando o `Timestamp` da linha não é posterior ao `DeletedAt` do tombstone. Uma chave excluída no início da janela e recriada mais tarde tem tanto um tombstone quanto uma captura ativa, e a linha recriada sobrevive ao rollup. Tombstones legados sem `DeletedAt` removem incondicionalmente.
+Durante uma fusão, os tombstones aplicam-se por ordem temporal: uma eliminação só remove uma linha capturada quando o `Timestamp` da linha não for posterior ao `DeletedAt` do tombstone. Uma chave eliminada no início da janela e recriada mais tarde tem um tombstone e uma captura ativa, e a linha recriada sobrevive à consolidação. Os tombstones antigos sem `DeletedAt` removem incondicionalmente.
 
-## Docker
+## Docker {#docker}
 
-A ferramenta de backup fornece um Dockerfile (`tools/Authagonal.Backup/Dockerfile`) para execução em CI ou sem instalar o SDK .NET:
+A ferramenta de cópia de segurança inclui um Dockerfile (`tools/Authagonal.Backup/Dockerfile`) para ser executada em CI ou sem instalar o SDK do .NET:
 
 ```bash
 docker build -f tools/Authagonal.Backup/Dockerfile -t authagonal-backup .
@@ -181,11 +239,11 @@ docker run --rm -v $(pwd)/backups:/backups \
   authagonal-backup --output /backups
 ```
 
-A ferramenta de restauração não tem imagem; execute-a com o SDK .NET (`dotnet run --project tools/Authagonal.Restore`).
+A ferramenta de restauro não tem imagem; execute-a com o SDK do .NET (`dotnet run --project tools/Authagonal.Restore`).
 
-## Agendamento de backups
+## Agendar cópias de segurança {#scheduling-backups}
 
-Para uso em produção, execute a ferramenta de backup em um agendamento (por exemplo, backup completo diário + incremental a cada hora):
+Em produção, execute a ferramenta de cópia de segurança de forma agendada (por exemplo, completa diária + incremental horária):
 
 ```bash
 # Daily full backup (compressed)
@@ -195,4 +253,4 @@ Para uso em produção, execute a ferramenta de backup em um agendamento (por ex
 0 * * * * authagonal-backup --connection-string "$CONN" --output /backups --incremental --gzip
 ```
 
-Hosts que incorporam a biblioteca normalmente executam incrementais a cada hora com o caminho de change-log ligado, um backstop de varredura completa diário e rollups periódicos para limitar a cadeia incremental.
+Os anfitriões que incorporam a biblioteca executam normalmente incrementais horárias com o caminho do registo de alterações ativado, uma varredura completa de salvaguarda diária e consolidações periódicas para limitar a cadeia de incrementais.

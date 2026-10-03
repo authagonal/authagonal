@@ -1,37 +1,47 @@
 ---
 layout: default
-title: Provisionamento
+title: Aprovisionamento
 locale: pt
 ---
 
-# Provisionamento TCC
+# Aprovisionamento TCC
 
-O Authagonal provisiona utilizadores em aplicações downstream usando o padrão **Try-Confirm-Cancel (TCC)**. Isto garante que todas as aplicações concordem antes que um utilizador obtenha acesso, com rollback limpo se alguma aplicação rejeitar.
+O Authagonal aprovisiona utilizadores em aplicações a jusante através do padrão **Try-Confirm-Cancel (TCC)**. Isto garante que todas as aplicações concordam antes de um utilizador obter acesso, com uma reversão limpa se alguma aplicação o rejeitar.
 
-## Quando o Provisionamento é Executado
+## Quando é executado o aprovisionamento {#when-provisioning-runs}
 
-O provisionamento é executado automaticamente sempre que um utilizador é criado, independentemente do caminho de criação:
+O aprovisionamento é executado automaticamente sempre que um utilizador é criado, qualquer que seja a via de criação:
 
-| Endpoint | Gatilho |
+| Endpoint | Acionador |
 |---|---|
-| `POST /api/v1/profile/` | Criação de utilizador pelo administrador |
+| `POST /api/v1/profile/` | Criação de utilizador por um administrador |
 | `POST /api/auth/register` | Registo self-service |
-| SAML ACS (`POST /saml/{id}/acs`) | Primeiro login SSO (novo utilizador) |
-| OIDC callback (`GET /oidc/callback`) | Primeiro login SSO (novo utilizador) |
-| SCIM (`POST /scim/v2/Users`) | Provisionamento do fornecedor de identidade |
+| SAML ACS (`POST /saml/{id}/acs`) | Primeiro início de sessão SSO (novo utilizador) |
+| Callback OIDC (`GET /oidc/callback`) | Primeiro início de sessão SSO (novo utilizador) |
+| SCIM (`POST /scim/v2/Users`) | Aprovisionamento pelo fornecedor de identidade |
 | `GET /connect/authorize` | Primeira autorização através de um cliente com `ProvisioningApps` |
 
-Combinações aplicação/utilizador já provisionadas são ignoradas (rastreadas na tabela `UserProvisions`).
+As combinações aplicação/utilizador já aprovisionadas são ignoradas (o registo é feito na tabela `UserProvisions`).
 
-Os caminhos de criação de utilizadores provisionam em **todas as aplicações configuradas**. O endpoint de autorização provisiona apenas nas aplicações da lista `ProvisioningApps` do cliente.
+As vias de criação de utilizadores aprovisionam em **todas as aplicações configuradas**. O endpoint de autorização aprovisiona apenas nas aplicações da lista `ProvisioningApps` do cliente.
 
-**Em caso de rejeição:** Se alguma aplicação de provisionamento rejeitar o utilizador na fase Try, o utilizador recém-criado é eliminado. Isto previne utilizadores criados parcialmente. Os caminhos de criação via API (administrador, registo, SCIM) retornam `422 Unprocessable Entity` com o motivo da rejeição; os callbacks de SSO SAML/OIDC retornam `400 Bad Request`; o endpoint de autorização redireciona de volta para o cliente com `error=access_denied`.
+**Em caso de rejeição:** se alguma aplicação de aprovisionamento rejeitar o utilizador na fase Try (ou se um callback falhar), o utilizador acabado de criar é eliminado. Isto evita utilizadores criados pela metade. O que o chamador vê depende da via:
 
-## Configuração
+| Via | Resposta |
+|---|---|
+| Criação pelo administrador (`POST /api/v1/profile/`), registo self-service | `422 Unprocessable Entity` com o motivo da rejeição |
+| SAML ACS, callback OIDC | `400 Bad Request`, `{ "error": "provisioning_rejected", "message": "..." }` |
+| Criação por SCIM | SCIM `400`, `scimType: invalidValue`, com uma mensagem fixa (o texto da aplicação a jusante não é repetido para o fornecedor de identidade) |
+| Confirmação da reivindicação de uma conta sem palavra-passe | `400 provisioning_rejected` em JSON, ou um redirecionamento para `/login?error=provisioning_rejected&error_description=...` no caso de um clique no browser (consulte [Promover um utilizador](user-upgrade)) |
+| `GET /connect/authorize` | Redirecionamento de volta para o cliente com `error=access_denied` |
 
-### 1. Definir Aplicações de Provisionamento
+O pedido de criação pelo administrador aceita `skipProvisioning: true`, para um chamador próprio que é ele mesmo o destino do aprovisionamento e não quer que o seu próprio callback seja reinvocado enquanto ainda está a meio da configuração do utilizador. Nada é aprovisionado e nenhuma aplicação é chamada para esse utilizador.
 
-No `appsettings.json`:
+## Configuração {#configuration}
+
+### 1. Definir as aplicações de aprovisionamento {#1-define-provisioning-apps}
+
+Em `appsettings.json`:
 
 ```json
 {
@@ -45,28 +55,28 @@ No `appsettings.json`:
 }
 ```
 
-`TryTimeoutSeconds` é opcional (padrão 60). Aumente-o quando a aplicação downstream faz trabalho real durante o Try. Confirm e Cancel usam sempre um timeout fixo curto (10 segundos) e não são ajustáveis; devem ser sempre baratos.
+`TryTimeoutSeconds` é opcional (predefinição 60). Aumente-o quando a aplicação a jusante faz trabalho real durante o Try. Confirm, Cancel e Deprovision usam sempre um tempo limite curto e fixo (10 segundos) que não é ajustável; devem ser sempre operações leves.
 
-### 2. Atribuir Aplicações a Clientes
+A secção de configuração `ProvisioningApps` só é lida quando não está registado nenhum `IProvisioningAppStore`. Os fornecedores Azure Table, AWS e SQL registam cada um o seu, e a biblioteca passa então a resolver as aplicações a partir do armazenamento (consulte [Resolução personalizada de aplicações](#custom-app-resolution)). Com um fornecedor persistente, defina portanto as aplicações através da API de administração e não em `appsettings.json`.
 
-Cada cliente declara em quais aplicações os seus utilizadores devem ser provisionados, através do campo `provisioningApps` no registo do cliente. Defina-o através da API de administração de clientes (a configuração de seed `Clients` não transporta este campo):
+### 2. Atribuir aplicações aos clientes {#2-assign-apps-to-clients}
+
+Cada cliente declara em que aplicações os seus utilizadores têm de ser aprovisionados, através do campo `provisioningApps` do registo do cliente. Defina-o através da API de administração de clientes (a configuração de inicialização `Clients` não inclui este campo). A criação de um cliente associa o registo completo, e `PUT /api/v1/clients/{clientId}` funde os campos que enviar com o cliente guardado, pelo que um pedido que contenha apenas `provisioningApps` deixa o resto do cliente inalterado:
 
 ```
 PUT /api/v1/clients/web-app
 {
-  "clientId": "web-app",
-  "provisioningApps": ["my-backend"],
-  ...
+  "provisioningApps": ["my-backend"]
 }
 ```
 
-Quando um utilizador autoriza através de `web-app`, é provisionado no `my-backend` se ainda não tiver sido.
+Quando um utilizador autoriza através de `web-app`, é aprovisionado em `my-backend`, caso ainda não o tenha sido.
 
-## Protocolo TCC
+## Protocolo TCC {#tcc-protocol}
 
-O Authagonal faz três tipos de chamadas HTTP ao seu endpoint de provisionamento. Todas usam `POST` com corpos JSON e `Authorization: Bearer {ApiKey}`.
+O Authagonal faz três tipos de chamadas HTTP ao seu endpoint de aprovisionamento. Todas usam `POST` com corpos JSON e `Authorization: Bearer {ApiKey}`.
 
-### Fase 1: Try
+### Fase 1: Try {#phase-1-try}
 
 **Pedido:** `POST {CallbackUrl}/try`
 
@@ -82,23 +92,26 @@ O Authagonal faz três tipos de chamadas HTTP ao seu endpoint de provisionamento
 }
 ```
 
-Campos nulos (incluindo `customAttributes` quando o utilizador não tem nenhum) são omitidos do payload.
+Os campos nulos (incluindo `customAttributes` quando o utilizador não tem nenhum) são omitidos do conteúdo.
 
 **Respostas esperadas:**
 
 | Estado | Corpo | Significado |
 |---|---|---|
-| `200` | `{ "approved": true }` | O utilizador pode ser provisionado. A aplicação cria um registo **pendente**. |
-| `200` | `{ "approved": false, "reason": "..." }` | O utilizador é rejeitado. Nenhum registo criado. |
-| Não-2xx | Qualquer | Tratado como falha. |
+| `200` | `{ "approved": true }` | O utilizador pode ser aprovisionado. A aplicação cria um registo **pendente**. |
+| `200` | `{ "approved": false, "reason": "..." }` | O utilizador é rejeitado. Não é criado nenhum registo. |
+| `2xx` | Corpo vazio ou impossível de interpretar | Tratado como aprovado. |
+| Não 2xx | Qualquer | Tratado como falha. |
 
-O `transactionId` identifica esta tentativa de provisionamento. A sua aplicação deve armazená-lo junto com o registo pendente.
+Devolva um valor `approved` explícito. Uma resposta cujo corpo não possa ser lido como JSON é aprovada, pelo que um endpoint mal configurado que responda `200` com uma página HTML aprova todos os utilizadores.
 
-Uma resposta aprovada também pode devolver `organizationId` e/ou `customAttributes`. O Authagonal funde-os no utilizador: `organizationId` é aplicado apenas se o utilizador ainda não tiver um (as aplicações posteriores na mesma transação veem a atribuição anterior), e as entradas de `customAttributes` são fundidas chave a chave. Ambos fluem para os tokens (claim `org_id`; atributos personalizados via configuração `UserClaims` do scope).
+O `transactionId` identifica esta tentativa de aprovisionamento. A sua aplicação deve guardá-lo juntamente com o registo pendente.
 
-### Fase 2: Confirm
+Uma resposta de aprovação pode também devolver `organizationId`, `customAttributes` e `emailVerified`. O Authagonal funde-os no utilizador: `organizationId` só é aplicado se o utilizador ainda não tiver um (as aplicações seguintes na mesma transação veem a atribuição anterior), as entradas de `customAttributes` são fundidas chave a chave e `emailVerified: true` marca o email do utilizador como confirmado (use-o quando a aplicação a jusante já tiver verificado o endereço; o registo self-service dispensa então o email de verificação). Tanto `organizationId` como os atributos transitam para os tokens (claim `org_id`; atributos personalizados através da configuração `UserClaims` do âmbito). Os valores fundidos são guardados no utilizador depois de todas as aplicações terem confirmado.
 
-Chamado apenas se **todas** as aplicações retornaram `approved: true` na fase try.
+### Fase 2: Confirm {#phase-2-confirm}
+
+Chamada apenas se **todas** as aplicações tiverem devolvido `approved: true` na fase Try.
 
 **Pedido:** `POST {CallbackUrl}/confirm`
 
@@ -108,11 +121,11 @@ Chamado apenas se **todas** as aplicações retornaram `approved: true` na fase 
 }
 ```
 
-**Resposta esperada:** `200` (qualquer corpo). A sua aplicação promove o registo pendente para confirmado.
+**Resposta esperada:** `2xx` (qualquer corpo). A sua aplicação promove o registo pendente a confirmado. Uma resposta que não seja 2xx ou um tempo limite esgotado (10 segundos) conta como confirmação falhada.
 
-### Fase 3: Cancel
+### Fase 3: Cancel {#phase-3-cancel}
 
-Chamado se o try de **qualquer** aplicação foi rejeitado ou falhou, para limpar as aplicações que tiveram sucesso na fase try.
+Chamada se o Try de **alguma** aplicação tiver sido rejeitado ou tiver falhado, para limpar as aplicações cujo Try teve êxito.
 
 **Pedido:** `POST {CallbackUrl}/cancel`
 
@@ -124,9 +137,9 @@ Chamado se o try de **qualquer** aplicação foi rejeitado ou falhou, para limpa
 
 **Resposta esperada:** `200` (qualquer corpo). A sua aplicação elimina o registo pendente.
 
-O cancel é feito com melhor esforço: se falhar, o Authagonal regista o erro e continua. A sua aplicação deve **recolher registos não confirmados após um TTL** (ex.: 1 hora) como rede de segurança.
+O Cancel é feito na medida do possível: se falhar, o Authagonal regista o erro e prossegue. A sua aplicação deve **eliminar os registos não confirmados ao fim de um TTL** (por exemplo, 1 hora) como rede de segurança.
 
-## Diagrama de Fluxo
+## Diagrama de fluxo {#flow-diagram}
 
 ```
 Authorize Endpoint
@@ -147,7 +160,7 @@ Authorize Endpoint
     └─ Redirect to client
 ```
 
-### Em Caso de Falha
+### Em caso de falha {#on-failure}
 
 ```
     ├─ TRY A ──────────► App A: create pending record
@@ -161,30 +174,57 @@ Authorize Endpoint
     └─ Redirect with error=access_denied
 ```
 
-### Em Caso de Falha Parcial de Confirmação
+### Em caso de falha parcial da confirmação {#on-partial-confirm-failure}
 
-Se algumas confirmações tiverem sucesso mas uma falhar, as aplicações confirmadas com sucesso têm os seus registos de provisionamento armazenados (para que não sejam tentadas novamente), e quaisquer aplicações ainda a aguardar confirmação são canceladas. O utilizador vê um erro e pode tentar novamente; apenas as aplicações que não confirmaram serão tentadas da próxima vez.
+Se uma confirmação falhar, o Authagonal reverte toda a transação:
 
-## Resolução Personalizada de Aplicações
+1. As aplicações ainda não confirmadas recebem `POST {CallbackUrl}/cancel`.
+2. As aplicações que já confirmaram **nesta transação** são compensadas com `DELETE {CallbackUrl}/users/{userId}` (a mesma chamada do [desaprovisionamento](#deprovisioning)), e os respetivos registos de aprovisionamento são removidos. As aplicações em que o utilizador foi aprovisionado por uma transação anterior não são afetadas.
+3. É gerado um erro de aprovisionamento e a via chamadora elimina o utilizador acabado de criar (ou, no caso do endpoint de autorização, responde com um erro).
 
-Por padrão, as aplicações de provisionamento são lidas da secção de configuração `ProvisioningApps` via `ConfigProvisioningAppProvider`. Substitua `IProvisioningAppProvider` para resolver aplicações dinamicamente, por exemplo a partir de uma base de dados ou por tenant:
+Os registos de aprovisionamento só são guardados depois de todas as confirmações terem tido êxito, pelo que uma nova tentativa volta a tentar todas as aplicações. A compensação é feita na medida do possível: um `DELETE` falhado é registado e a conta na aplicação pode ter de ser removida manualmente.
+
+## Resolução personalizada de aplicações {#custom-app-resolution}
+
+A biblioteca escolhe por si a origem das aplicações:
+
+- Quando está registado um `IProvisioningAppStore`, o que acontece com todos os fornecedores Azure Table, AWS e SQL, as aplicações vêm do armazenamento (`StoreProvisioningAppProvider`) e são geridas através da API de administração abaixo.
+- Caso contrário, são lidas da secção de configuração `ProvisioningApps` (`ConfigProvisioningAppProvider`).
+
+Registe o seu próprio `IProvisioningAppProvider` antes de `AddAuthagonal` para resolver as aplicações de outra forma, por exemplo por inquilino; a predefinição da biblioteca só é adicionada se não estiver registado nenhum:
 
 ```csharp
 builder.Services.AddSingleton<IProvisioningAppProvider, MyAppProvider>();
 builder.Services.AddAuthagonal(builder.Configuration);
 ```
 
-O provedor retorna uma lista de aplicações e as suas URLs de callback. O `TccProvisioningOrchestrator` chama Try/Confirm/Cancel em cada uma.
+O fornecedor devolve uma lista de aplicações e os respetivos URLs de callback. O `TccProvisioningOrchestrator` chama Try/Confirm/Cancel em cada uma.
 
-Para CRUD em tempo de execução sem um provedor personalizado, a biblioteca inclui `StoreProvisioningAppProvider`, suportado por `IProvisioningAppStore`. Registe-o explicitamente (mesmo padrão que acima) e faça a gestão das aplicações através da API de administração em `/api/v1/provisioning/apps` (listar/criar/atualizar/eliminar, além de `POST /{appId}/test` para testar o endpoint Try de uma aplicação).
+> **Por predefinição, `CallbackUrl` tem de ser publicamente encaminhável.** O Authagonal valida-o quando é escrito e de novo em cada pedido que faz, recusando destinos de loopback, RFC1918, link-local e `.internal`/`.local` (um callback de aprovisionamento é um URL obtido pelo servidor). Uma aplicação de aprovisionamento que corra dentro da sua própria rede é uma implementação suportada: indique-a em [`Auth:AllowedInternalTargets`](configuration#outbound-fetches-ssrf-guard).
 
-## Desprovisionamento
+### API de administração {#admin-api}
 
-Quando um utilizador é eliminado via a API de administração (`DELETE /api/v1/profile/{userId}`) ou desprovisionado via SCIM (`DELETE /scim/v2/Users/{id}`, uma eliminação suave que desativa o utilizador), o Authagonal chama `DELETE {CallbackUrl}/users/{userId}` em cada aplicação na qual o utilizador foi provisionado. Isto é feito com melhor esforço: falhas são registadas mas não bloqueiam a eliminação.
+As aplicações guardadas no armazenamento são geridas em `/api/v1/provisioning/apps` (política `IdentityAdmin`; todas as alterações são auditadas):
 
-## Implementação dos Endpoints Upstream
+| Rota | Comportamento |
+|---|---|
+| `GET /` | `{ "apps": [{ "appId", "name", "callbackUrl", "hasApiKey", "tryTimeoutSeconds" }], "limit": n }`. A chave de API nunca é devolvida, apenas `hasApiKey`. `limit` é a quota de aplicações, nula quando não existe. |
+| `POST /` | Criar. `name` e `callbackUrl` são obrigatórios; `apiKey` e `tryTimeoutSeconds` são opcionais. É gerado um `appId` de 12 caracteres. Acima da quota, `400 provisioning_app_limit`. |
+| `PUT /{appId}` | Substitui `name`, `callbackUrl` e `tryTimeoutSeconds` (`name` e `callbackUrl` voltam a ser obrigatórios). `apiKey` omitido ou nulo deixa a chave inalterada; uma string vazia apaga-a. `404 app_not_found` para uma aplicação desconhecida. |
+| `DELETE /{appId}` | `{ "removed": true }`. |
+| `POST /{appId}/test` | Envia à aplicação um Try com um utilizador de teste fixo (`test-user`, `test@example.com`), com um tempo limite de 10 segundos. Devolve `{ "success", "statusCode", "body" }` (o corpo é truncado a 1000 caracteres). As falhas de ligação devolvem `success: false, statusCode: 0` em vez de um estado de erro. |
 
-### Exemplo Mínimo (Node.js/Express)
+`callbackUrl` tem de ser um URL `http` ou `https` absoluto num anfitrião externo, conforme descrito acima. `tryTimeoutSeconds` é limitado ao intervalo de 5 a 300 segundos. O `appId` é o que um cliente indica em `provisioningApps`.
+
+## Desaprovisionamento {#deprovisioning}
+
+Quando um utilizador é eliminado através da API de administração (`DELETE /api/v1/profile/{userId}`) ou desaprovisionado através de SCIM (`DELETE /scim/v2/Users/{id}`, uma eliminação lógica que desativa o utilizador), o Authagonal chama `DELETE {CallbackUrl}/users/{userId}` em cada aplicação em que o utilizador foi aprovisionado, com um tempo limite de 10 segundos, e remove o registo de aprovisionamento. Isto é feito na medida do possível: as falhas são registadas mas não bloqueiam a eliminação. Uma aplicação que já não esteja configurada é ignorada com um aviso.
+
+`ReprovisionAsync` em `IProvisioningOrchestrator` volta a executar Try e Confirm para todas as aplicações, mesmo quando o utilizador já está aprovisionado. A biblioteca usa-o quando uma conta sem palavra-passe é reivindicada (consulte [Promover um utilizador](user-upgrade)); um simples novo início de sessão nunca o faz.
+
+## Implementar os endpoints a montante {#implementing-the-upstream-endpoints}
+
+### Exemplo mínimo (Node.js/Express) {#minimal-example-nodejsexpress}
 
 ```javascript
 const pending = new Map(); // transactionId → user data

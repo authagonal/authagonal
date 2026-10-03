@@ -6,17 +6,19 @@ locale: fr
 
 # Démarrage rapide
 
-Lancez Authagonal localement en 5 minutes.
+Faites tourner Authagonal en local en 5 minutes.
 
-## 1. Démarrer le serveur
+## 1. Démarrer le serveur {#1-start-the-server}
 
 ```bash
 docker compose up
 ```
 
-Cela démarre Authagonal sur `http://localhost:8080` avec Azurite pour le stockage.
+Cette commande lance Authagonal sur `http://localhost:8080`, avec Azurite pour le stockage.
 
-## 2. Vérifier le fonctionnement
+> Le fichier compose définit `Auth__AllowInsecureHttp=true`, car les §3.1/§3.2 de la RFC 6749 exigent TLS sur les endpoints d'autorisation et de jeton, et Authagonal refuse sinon les requêtes en clair vers `/connect/*`. Ce réglage est réservé à un poste de développement. Tout ce qui est accessible à d'autres personnes doit se trouver derrière un proxy qui termine TLS et transmet `X-Forwarded-Proto: https`, sans ce réglage : voir [Installation](installation).
+
+## 2. Vérifier qu'il fonctionne {#2-verify-its-running}
 
 ```bash
 # Health check
@@ -29,9 +31,9 @@ curl http://localhost:8080/.well-known/openid-configuration
 curl http://localhost:8080/login
 ```
 
-## 3. Enregistrer un client
+## 3. Enregistrer un client {#3-register-a-client}
 
-Ajoutez un client dans votre `appsettings.json` (ou passez-le via des variables d'environnement) :
+Ajoutez un client à votre `appsettings.json` (ou passez-le par des variables d'environnement) :
 
 ```json
 {
@@ -51,11 +53,11 @@ Ajoutez un client dans votre `appsettings.json` (ou passez-le via des variables 
 }
 ```
 
-Les clients sont injectés au démarrage, sans risque à chaque déploiement.
+Les clients sont initialisés au démarrage, ce qui peut s'exécuter sans risque à chaque déploiement.
 
-## 4. Initier une connexion
+## 4. Lancer une connexion {#4-initiate-a-login}
 
-Redirigez vos utilisateurs vers :
+Redirigez vos utilisateurs vers :
 
 ```
 http://localhost:8080/connect/authorize
@@ -68,11 +70,11 @@ http://localhost:8080/connect/authorize
   &code_challenge_method=S256
 ```
 
-L'utilisateur voit la page de connexion, s'authentifie et est redirigé avec un code d'autorisation.
+L'utilisateur voit la page de connexion, s'authentifie, puis est redirigé vers votre application avec un code d'autorisation.
 
-> **Premier utilisateur :** enregistrez-en un sur `http://localhost:8080/login/register`, ou créez-en un via l'[API d'administration](admin-api). L'auto-enregistrement envoie un e-mail de vérification, et sans expéditeur d'e-mail configuré (le comportement local par défaut) ce message est ignoré. Pour les tests locaux, définissez donc `Auth__AutoConfirmEmailDomains__0=example.dev` (n'importe quel domaine avec lequel vous vous enregistrez) pour ignorer la vérification, ou configurez `Email:ResendApiKey` + `Email:SenderEmail`. Voir [Configuration → Email](configuration#email).
+> **Premier utilisateur :** inscrivez-en un sur `http://localhost:8080/login/register`, ou créez-le via l'[API d'administration](admin-api). L'inscription en libre-service envoie un e-mail de vérification ; sans expéditeur d'e-mail configuré (la valeur par défaut en local), ce message est ignoré. Pour vos tests en local, définissez donc `Auth__AutoConfirmEmailDomains__0=example.dev` (n'importe quel domaine avec lequel vous vous inscrivez) pour sauter la vérification, ou configurez `Email:ResendApiKey` + `Email:SenderEmail`. Voir [Configuration → E-mail](configuration#email).
 
-## 5. Échanger le code
+## 5. Échanger le code {#5-exchange-the-code}
 
 ```bash
 curl -X POST http://localhost:8080/connect/token \
@@ -83,25 +85,28 @@ curl -X POST http://localhost:8080/connect/token \
   -d code_verifier=THE_VERIFIER
 ```
 
-Réponse :
+Réponse :
 
 ```json
 {
   "access_token": "eyJ...",
   "id_token": "eyJ...",
   "token_type": "Bearer",
-  "expires_in": 1800
+  "expires_in": 1800,
+  "scope": "openid profile email"
 }
 ```
 
-## Démo fonctionnelle
+`expires_in` correspond au `AccessTokenLifetimeSeconds` du client (1800 pour un client initialisé par configuration, sauf si vous le définissez). Aucun `refresh_token` n'apparaît ici : un client n'en reçoit un que s'il active `AllowOfflineAccess` et que la requête demande le scope `offline_access`.
 
-Le répertoire `demos/sample-app/` contient une SPA React complète + API qui implémente le flux OIDC complet ci-dessus. Consultez le [README des démos](https://github.com/authagonal/authagonal/tree/master/demos) pour les instructions.
+## Démo fonctionnelle {#working-demo}
 
-## Prochaines étapes
+Le répertoire `demos/sample-app/` contient une SPA React complète avec son API, qui implémente l'intégralité du flux OIDC ci-dessus. Les instructions se trouvent dans le [README des démos](https://github.com/authagonal/authagonal/tree/master/demos).
 
-- [Configuration](configuration) : référence complète de tous les paramètres
-- [Extensibilité](extensibility) : héberger en tant que bibliothèque, ajouter des hooks personnalisés
-- [Personnalisation visuelle](branding) : personnaliser l'interface de connexion
-- [SAML](saml) : ajouter des fournisseurs SSO SAML
-- [Provisionnement](provisioning) : provisionner les utilisateurs dans les applications en aval
+## Étapes suivantes {#next-steps}
+
+- [Configuration](configuration) : référence complète de tous les paramètres
+- [Extensibilité](extensibility) : héberger Authagonal comme bibliothèque, ajouter des hooks personnalisés
+- [Personnalisation de l'interface](branding) : adapter l'interface de connexion
+- [SAML](saml) : ajouter des fournisseurs SSO SAML
+- [Provisionnement](provisioning) : provisionner les utilisateurs dans les applications en aval

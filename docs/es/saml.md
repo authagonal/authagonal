@@ -4,39 +4,39 @@ title: SAML
 locale: es
 ---
 
-# SAML 2.0 SP
+# SP de SAML 2.0
 
-Authagonal incluye una implementación propia de proveedor de servicios SAML 2.0. Sin biblioteca SAML de terceros: construido sobre `System.Security.Cryptography.Xml.SignedXml` (parte de .NET).
+Authagonal incluye una implementación propia de proveedor de servicios (SP) de SAML 2.0. No usa ninguna biblioteca SAML de terceros: está construida sobre `System.Security.Cryptography.Xml.SignedXml` (parte de .NET).
 
-## Alcance
+## Alcance {#scope}
 
-- **SSO iniciado por el SP** (el usuario comienza en Authagonal, se redirige al IdP)
-- **Binding HTTP-Redirect** para AuthnRequest (opcionalmente firmado, ver más abajo)
+- **SSO iniciado por el SP** (el usuario empieza en Authagonal y se le redirige al IdP)
+- **Binding HTTP-Redirect** para AuthnRequest (opcionalmente firmado; consulte más abajo)
 - **Binding HTTP-POST** para la respuesta (ACS)
-- **Aserciones cifradas** (`EncryptedAssertion`) descifradas con un par de claves de SP por conexión
-- **Cierre de sesión único (Single Logout)** (iniciado por el SP e iniciado por el IdP, bindings Redirect y POST)
-- Azure AD / Entra ID es el objetivo principal, pero cualquier IdP compatible funciona (se manejan los nombres de atributo de Okta, OneLogin, Ping, Google Workspace, ADFS y Shibboleth)
+- **Aserciones cifradas** (`EncryptedAssertion`), descifradas con un par de claves del SP propio de cada conexión
+- **Single Logout** (iniciado por el SP y por el IdP, bindings Redirect y POST)
+- Azure AD / Entra ID es el objetivo principal, pero funciona cualquier IdP conforme (se reconocen los nombres de atributo de Okta, OneLogin, Ping, Google Workspace, ADFS y Shibboleth)
 
-### No soportado
+### No admitido {#not-supported}
 
 - Binding Artifact
-- Cifrado de aserciones AES-GCM (limitación de `EncryptedXml` de .NET; configure AES-CBC en el IdP, ver más abajo)
+- Cifrado de aserciones con AES-GCM (limitación de `EncryptedXml` de .NET; configure AES-CBC en el IdP, consulte más abajo)
 
-**El inicio de sesión iniciado por el IdP funciona, y no hace falta reconfigurar el mosaico**, pero la aserción no solicitada no es lo que autentica al usuario. Una Response sin `InResponseTo` se descarta y el ACS redirige el navegador a `/saml/{connectionId}/login`, que emite un AuthnRequest nuevo vinculado a ese navegador. El usuario ya está autenticado en el IdP, así que este responde de inmediato y el rodeo resulta invisible; el `RelayState` del IdP viaja como URL de retorno, de modo que el usuario sigue llegando al enlace profundo para el que se configuró el mosaico.
+**El inicio de sesión iniciado por el IdP funciona y no hay que reconfigurar el mosaico**, pero no es la aserción no solicitada la que inicia la sesión del usuario. Una respuesta sin `InResponseTo` se descarta, y el ACS redirige el navegador a `/saml/{connectionId}/login`, que emite un AuthnRequest nuevo ligado a ese navegador. El usuario ya está autenticado en el IdP, así que este responde de inmediato y el recorrido es invisible; el `RelayState` del IdP se transmite como URL de retorno, de modo que el usuario sigue llegando al enlace profundo con el que se configuró el mosaico.
 
-La aserción debe descartarse porque aceptar una no solicitada permite que cualquiera con una cuenta en ese IdP inicie una sesión en cualquier user-agent: todas las reglas del §4.1.4.3 las cumple una aserción que el atacante obtuvo legítimamente para su PROPIA cuenta. Y porque exigir la cookie de solicitud en la ruta iniciada por el SP no vale nada mientras la misma aserción pueda reproducirse sin `InResponseTo`. Reiniciar el flujo mantiene el mosaico operativo sin aceptar nada de eso: quien acabe con la sesión iniciada es quien el IdP nombre en el NUEVO intercambio.
+La aserción tiene que descartarse porque aceptar una no solicitada permite que cualquiera con una cuenta en ese IdP introduzca una sesión firmada en cualquier agente de usuario (todas las reglas del §4.1.4.3 se cumplen con una aserción que el atacante obtuvo legítimamente para su propia cuenta), y porque exigir la cookie de la solicitud en la vía iniciada por el SP no sirve de nada mientras la misma aserción pueda reproducirse quitándole `InResponseTo`. Reiniciar el flujo mantiene el mosaico funcionando sin aceptar nada de eso: quien acaba con la sesión iniciada es quien el IdP nombra en el intercambio *nuevo*.
 
-El reinicio es de un solo uso por navegador. Un IdP que responda al AuthnRequest con otra Response no solicitada se rechaza con `error=saml_unsolicited` en lugar de redirigirse otra vez, de modo que un IdP mal configurado no puede producir un bucle de redirecciones.
+El reinicio ocurre una sola vez por navegador. Un IdP que responde al AuthnRequest con otra respuesta no solicitada se rechaza con `error=saml_unsolicited` en lugar de volver a redirigirse, de modo que un IdP mal configurado no puede provocar un bucle de redirecciones.
 
-Para aceptar en su lugar la aserción no solicitada tal cual, establezca `allowUnsolicitedResponses: true` en la conexión — **desactivado por defecto**. Cuando está activo, se omite la comprobación del ID de solicitud para las respuestas no solicitadas, pero el uso único del ID de aserción se sigue aplicando (ver Seguridad).
+Para aceptar la aserción no solicitada tal cual, establezca `allowUnsolicitedResponses: true` en la conexión (**desactivado por defecto**). Con esta opción activada, se omite la comprobación del ID de solicitud en las respuestas no solicitadas, pero se sigue exigiendo el uso único del ID de aserción (consulte Seguridad).
 
-## Configuración de Azure AD
+## Configuración inicial de Azure AD {#azure-ad-setup}
 
-### 1. Crear un proveedor SAML
+### 1. Crear un proveedor SAML {#1-create-a-saml-provider}
 
-**Opción A: Configuración (recomendado para configuraciones estáticas)**
+**Opción A: configuración (recomendada para configuraciones estáticas)**
 
-Agregue en `appsettings.json`:
+Añada a `appsettings.json`:
 
 ```json
 {
@@ -52,11 +52,15 @@ Agregue en `appsettings.json`:
 }
 ```
 
-Los proveedores se inyectan al inicio. Los mapeos de dominios SSO se registran automáticamente desde `AllowedDomains`. Los proveedores inyectados desde la configuración requieren una URL en `MetadataLocation` y no obtienen un par de claves de SP (por lo que no hay AuthnRequests firmados, aserciones cifradas ni mensajes de cierre de sesión firmados); use la API de administración para esas funciones.
+Los proveedores se cargan desde la configuración al arrancar. `ConnectionId`, `EntityId` y `MetadataLocation` son obligatorios para una conexión nueva (sin ellos el arranque falla). Las asignaciones de dominios SSO se registran automáticamente a partir de `AllowedDomains`, salvo en una conexión limitada a una organización, cuyos dominios solo se comparan dentro de su organización. Un proveedor recién cargado desde la configuración no recibe par de claves del SP (por tanto, no hay AuthnRequest firmados, aserciones cifradas ni mensajes de cierre de sesión firmados); para esas funciones, use la API de administración.
 
-`EntityId` es **su ID de entidad de SP** (el identificador que registra en el IdP), no el ID de entidad del IdP.
+La configuración también puede establecer `OrganizationId`, `JitProvisioningEnabled` (por defecto `false`), `ChallengeMfaAfterLogin` (por defecto `true`), `ProvisioningAttributeParams`, `AllowUninvitedJit` y `AllowUnsolicitedResponses`. La carga lee la conexión almacenada y fusiona, de modo que una conexión existente conserva su par de claves del SP, los metadatos pegados, el formato de NameID, `signAuthnRequests` y el icono, para los que la configuración no tiene campo. Los indicadores de comportamiento anteriores se escriben desde la configuración en cada arranque, así que un indicador que omita vuelve a su valor por defecto.
 
-**Opción B: API de administración (para gestión en tiempo de ejecución)**
+`EntityId` es **el entity ID de su SP** (el identificador que registra en el IdP), no el entity ID del IdP.
+
+> **Un IdP en su propia red privada.** `MetadataLocation` debe ser https y, por defecto, debe resolverse a una dirección enrutable públicamente: el documento de metadatos contiene los certificados con los que se valida cada aserción, y Authagonal rechaza los destinos internos en todas las URL que descarga. Para federar con un IdP local, indíquelo en [`Auth:AllowedInternalTargets`](configuration#outbound-fetches-ssrf-guard). Si el IdP no publica ningún endpoint de metadatos https, pegue el documento en `MetadataXml` mediante la API de administración.
+
+**Opción B: API de administración (para la gestión en tiempo de ejecución)**
 
 ```bash
 curl -X POST https://auth.example.com/api/v1/saml/connections \
@@ -70,93 +74,93 @@ curl -X POST https://auth.example.com/api/v1/saml/connections \
   }'
 ```
 
-La API genera el `connectionId` (un GUID) y lo devuelve en la cabecera `Location` y en el cuerpo de la respuesta. Campos opcionales adicionales: `metadataXml` (metadatos pegados, ver más abajo), `nameIdFormat` (ver más abajo), `signAuthnRequests` (forzar AuthnRequests firmados), `iconUrl` (icono del botón de inicio de sesión), `disableJitProvisioning` (rechazar usuarios desconocidos en lugar de crearlos automáticamente), `allowUnsolicitedResponses` (aceptar una aserción iniciada por el IdP tal cual, en lugar de reiniciar el flujo: desactivado por defecto, ver más arriba). Las conexiones creadas mediante la API también obtienen un par de claves de SP autogenerado (ver Par de claves de SP más abajo).
+La API genera el `connectionId` (un GUID) y lo devuelve en la cabecera `Location` y en el cuerpo de la respuesta. Campos opcionales adicionales: `metadataXml` (metadatos pegados, consulte más abajo), `nameIdFormat` (consulte más abajo), `signAuthnRequests` (fuerza AuthnRequest firmados), `iconUrl` (icono del botón de inicio de sesión), `jitProvisioningEnabled` (crea automáticamente los usuarios desconocidos en su primer inicio de sesión; **desactivado por defecto**, así que un usuario desconocido se rechaza hasta que lo establezca), `challengeMfaAfterLogin` (por defecto `true`; `false` confía en la MFA propia del IdP), `provisioningAttributeParams` y `allowUninvitedJit` (consulte [SSO de autoservicio](self-service-sso)), `organizationId` (limita la conexión a una organización; consulte [SSO de autoservicio](self-service-sso#organisation-scoped-connections)) y `allowUnsolicitedResponses` (acepta tal cual una aserción iniciada por el IdP en lugar de reiniciar el flujo; desactivado por defecto, consulte más arriba). Las conexiones creadas mediante la API también reciben un par de claves del SP generado automáticamente (consulte Par de claves del SP más abajo).
 
-Las conexiones se gestionan mediante `POST` / `GET` / `PUT` / `DELETE` en `/api/v1/saml/connections[/{connectionId}]`. `PUT` es una actualización parcial: solo se modifican los campos suministrados en la petición.
+Las conexiones se gestionan mediante `POST` / `GET` / `PUT` / `DELETE` sobre `/api/v1/saml/connections[/{connectionId}]`. `PUT` es una actualización parcial: solo se modifican los campos enviados.
 
-### 2. Configurar Azure AD
+### 2. Configurar Azure AD {#2-configure-azure-ad}
 
-1. En Azure AD, vaya a Aplicaciones empresariales, Nueva aplicación, Crear la suya propia
-2. Configure el inicio de sesión único, SAML
-3. **Identificador (Entity ID):** `https://auth.example.com/saml/acme-azure`
-4. **URL de respuesta (ACS):** `https://auth.example.com/saml/acme-azure/acs`
-5. **URL de inicio de sesión:** `https://auth.example.com/saml/acme-azure/login`
+1. En Azure AD → Enterprise Applications → New Application → Create your own
+2. Set up Single Sign-On → SAML
+3. **Identifier (Entity ID):** `https://auth.example.com/saml/acme-azure`
+4. **Reply URL (ACS):** `https://auth.example.com/saml/acme-azure/acs`
+5. **Sign on URL:** `https://auth.example.com/saml/acme-azure/login`
 
-### 3. Enrutamiento de dominio SSO
+### 3. Enrutamiento de dominios SSO {#3-sso-domain-routing}
 
-Cuando se especifica `AllowedDomains` (en la configuración o mediante la API de creación), los mapeos de dominios SSO se registran automáticamente. Cuando un usuario ingresa `user@acme.com` en la página de inicio de sesión, la SPA detecta que se requiere SSO y muestra "Continuar con SSO". Un dominio solo puede asignarse a una conexión; la API rechaza un dominio ya reclamado por una conexión distinta.
+Cuando se especifica `AllowedDomains` (en la configuración o mediante la API de creación), las asignaciones de dominios SSO se registran automáticamente. Cuando un usuario introduce `user@acme.com` en la página de inicio de sesión, la SPA detecta que el SSO es obligatorio y muestra «Continuar con SSO». Un dominio solo puede asignarse a una conexión; la API rechaza un dominio que ya haya reclamado otra conexión.
 
-También puede gestionar dominios en tiempo de ejecución mediante la API de administración; ver [API de administración](admin-api).
+También puede gestionar los dominios en tiempo de ejecución mediante la API de administración; consulte [API de administración](admin-api).
 
-## Metadatos XML pegados
+## XML de metadatos pegado {#pasted-metadata-xml}
 
-Algunos IdP no publican una URL de metadatos (Google Workspace), o su endpoint de metadatos es inaccesible desde el SP (ADFS en red privada). Para esos casos, pegue el documento de metadatos en su lugar: suministre `metadataXml` en la creación/actualización. Debe proporcionarse exactamente uno entre `metadataLocation` o `metadataXml`; suministrar uno en una actualización borra el otro.
+Algunos IdP no publican ninguna URL de metadatos (Google Workspace), o su endpoint de metadatos no es accesible desde el SP (ADFS en una red privada). En esos casos, pegue el documento de metadatos: proporcione `metadataXml` al crear o actualizar. Debe proporcionarse exactamente uno de `metadataLocation` o `metadataXml`; proporcionar uno en una actualización borra el otro.
 
-Los metadatos pegados se validan en el momento de guardar y se **condensan** (`SamlMetadataParser.Condense`) a un `EntityDescriptor` mínimo y canónico que contiene exactamente lo que consume el SP: entityID, certificados de firma, el endpoint SSO, el endpoint SLO si está presente y la marca `WantAuthnRequestsSigned`. Los documentos de proveedores pueden superar los 100KB (el `FederationMetadata.xml` de ADFS), por encima del límite de 64KB de una propiedad de Azure Table, mientras que las partes que usa el SP ocupan unos pocos KB. Los pegados que no se pueden analizar se rechazan con un 400; el documento debe contener un `IDPSSODescriptor` con un certificado de firma y un `SingleSignOnService`.
+Los metadatos pegados se validan al guardar y se **condensan** (`SamlMetadataParser.Condense`) en un `EntityDescriptor` mínimo canónico que contiene exactamente lo que consume el SP: el entityID, los certificados de firma, el endpoint de SSO, el endpoint de SLO si existe y el indicador `WantAuthnRequestsSigned`. Los documentos de los fabricantes pueden superar los 100 KB (`FederationMetadata.xml` de ADFS), por encima del límite de 64 KB por propiedad de Azure Table, mientras que las partes que usa el SP ocupan unos pocos KB. Los documentos pegados que no se pueden interpretar se rechazan con un 400; el documento debe contener un `IDPSSODescriptor` con un certificado de firma y un `SingleSignOnService`.
 
-## Formato de NameID
+## Formato de NameID {#nameid-format}
 
-El campo `nameIdFormat` controla el Format de `NameIDPolicy` solicitado en la AuthnRequest:
+El campo `nameIdFormat` controla el Format de `NameIDPolicy` que se solicita en el AuthnRequest:
 
 | Valor | Comportamiento |
 |---|---|
-| omitido / null | `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress` (el valor predeterminado histórico) |
-| `"none"` | Omite por completo el elemento `NameIDPolicy`. El ajuste seguro para ADFS: ADFS falla todo el inicio de sesión (MSIS7070) cuando sus reglas de claims no emiten el formato solicitado. |
-| cualquier otro valor | Se envía tal cual como el Format URN (debe comenzar con `urn:`) |
+| omitido / null | `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress` (el valor por defecto histórico) |
+| `"none"` | Omite por completo el elemento `NameIDPolicy`. Es el ajuste seguro para ADFS: ADFS hace fallar todo el inicio de sesión (MSIS7070) cuando sus reglas de claims no emiten el formato solicitado. |
+| cualquier otro valor | Se envía literalmente como URN de Format (debe empezar por `urn:`) |
 
-En una actualización, `""` restablece el valor predeterminado emailAddress. Los metadatos del SP anuncian el formato solicitado por la conexión (y omiten `NameIDFormat` cuando se establece en `"none"`).
+En una actualización, `""` restablece el valor por defecto emailAddress. Los metadatos del SP anuncian el formato solicitado por la conexión (y omiten `NameIDFormat` cuando está establecido en `"none"`).
 
-## Endpoints
+## Endpoints {#endpoints}
 
 | Endpoint | Descripción |
 |---|---|
-| `GET /saml/{connectionId}/login?returnUrl=...&loginHint=...` | Inicia el SSO iniciado por el SP. Construye una AuthnRequest (firmada cuando corresponde) y redirige al IdP. `loginHint` se pasa como `login_hint` para los IdP que lo respetan (Entra, Google). |
-| `POST /saml/{connectionId}/acs` | Servicio consumidor de aserciones. Recibe la respuesta SAML, la valida, crea/inicia sesión del usuario. |
-| `GET /saml/{connectionId}/metadata` | XML de metadatos SP para configurar el IdP. |
-| `GET /saml/{connectionId}/logout?returnUrl=...` | Cierre de sesión único iniciado por el SP. Finaliza la sesión local y luego envía una LogoutRequest al IdP cuando este soporta SLO. |
-| `GET/POST /saml/{connectionId}/slo` | Endpoint de cierre de sesión único. Recibe LogoutRequests iniciadas por el IdP (binding Redirect o POST) y el tramo de LogoutResponse del SLO iniciado por el SP. |
+| `GET /saml/{connectionId}/login?returnUrl=...&loginHint=...` | Inicia el SSO iniciado por el SP. Construye un AuthnRequest (firmado cuando corresponde) y redirige al IdP. `loginHint` se pasa como `login_hint` a los IdP que lo respetan (Entra, Google). |
+| `POST /saml/{connectionId}/acs` | Assertion Consumer Service. Recibe la respuesta SAML, la valida y crea al usuario o inicia su sesión. |
+| `GET /saml/{connectionId}/metadata` | XML de metadatos del SP para configurar el IdP. |
+| `GET /saml/{connectionId}/logout?returnUrl=...` | Single Logout iniciado por el SP. Termina la sesión local y, después, envía un LogoutRequest al IdP cuando este admite SLO. |
+| `GET/POST /saml/{connectionId}/slo` | Endpoint de Single Logout. Recibe los LogoutRequest iniciados por el IdP (binding Redirect o POST) y el tramo LogoutResponse del SLO iniciado por el SP. |
 
-La URL de retorno posterior al inicio de sesión se transporta del lado del servidor en la AuthnRequest almacenada (indexada por el ID de solicitud), no en RelayState: la especificación SAML limita RelayState a 80 bytes y algunos IdP lo truncan. RelayState solo se consulta para los flujos iniciados por el IdP.
+La URL de retorno tras el inicio de sesión se guarda en el servidor junto con el AuthnRequest almacenado (indexado por ID de solicitud), no en RelayState: la especificación SAML limita RelayState a 80 bytes y algunos IdP lo truncan. RelayState solo se consulta en los flujos iniciados por el IdP.
 
-## Par de claves de SP y aserciones cifradas
+## Par de claves del SP y aserciones cifradas {#sp-keypair--encrypted-assertions}
 
-Cada conexión creada mediante la API obtiene un par de claves de SP autogenerado: un certificado RSA de 2048 bits autofirmado (validez de 10 años), almacenado como PKCS#12 y protegido en reposo por el proveedor de secretos del host. Es exclusivo del servidor y la API nunca lo devuelve. El par de claves habilita:
+Cada conexión creada mediante la API recibe un par de claves del SP generado automáticamente: un certificado RSA autofirmado de 2048 bits (con validez de 10 años), guardado como PKCS#12 y protegido en reposo por el proveedor de secretos del host. Solo existe en el servidor y la API nunca lo devuelve. El par de claves permite:
 
-- **AuthnRequests firmados** (firma de los parámetros `SigAlg`/`Signature` en la query del binding redirect). La firma se activa automáticamente cuando los metadatos del IdP declaran `WantAuthnRequestsSigned`, o siempre cuando la conexión establece `signAuthnRequests: true`.
-- **Descifrado de aserciones cifradas.** Cuando los metadatos del SP anuncian un certificado de cifrado, ADFS empieza a cifrar las aserciones de forma predeterminada; el ACS las descifra con la clave privada del SP y hace pasar la aserción descifrada por el mismo pipeline de firma/condiciones que una en texto plano. Soportado: transporte de clave RSA-OAEP (SHA-1/SHA-256); cifrado de datos AES-128/192/256-CBC y 3DES. **El transporte de clave RSA-1.5 se rechaza** —el desempaquetado PKCS#1 v1.5 es un oráculo de Bleichenbacher/ROBOT— y **AES-GCM no está soportado** (limitación de `EncryptedXml` de .NET). Configure el IdP para RSA-OAEP y AES-CBC. Ambos fallos devuelven el mismo mensaje constante («Could not decrypt the assertion.»), de forma deliberada: nombrar el algoritmo o la etapa que falló es precisamente lo que construye el oráculo, así que diagnostique desde la configuración del IdP y no desde el error.
-- **Mensajes de cierre de sesión firmados** (LogoutRequest/LogoutResponse en el binding redirect).
+- **AuthnRequest firmados** (firma de consulta `SigAlg`/`Signature` en el binding Redirect). La firma se activa automáticamente cuando los metadatos del IdP declaran `WantAuthnRequestsSigned`, o siempre que la conexión establezca `signAuthnRequests: true`.
+- **Descifrado de aserciones cifradas.** Cuando los metadatos del SP anuncian un certificado de cifrado, ADFS empieza a cifrar las aserciones por defecto; el ACS las descifra con la clave privada del SP y hace pasar la aserción descifrada por la misma cadena de comprobación de firma y condiciones que una en texto plano. Se admiten: transporte de claves RSA-OAEP (SHA-1/SHA-256); cifrado de datos AES-128/192/256-CBC y 3DES. **El transporte de claves RSA-1.5 se rechaza** (el desenvolvimiento PKCS#1 v1.5 es un oráculo de Bleichenbacher/ROBOT) y **AES-GCM no se admite** (limitación de `EncryptedXml` de .NET). Configure el IdP para RSA-OAEP y AES-CBC. Ambos fallos devuelven deliberadamente el mismo mensaje constante ("Could not decrypt the assertion."): nombrar el algoritmo o la etapa que falló es precisamente lo que construye el oráculo, así que haga el diagnóstico a partir de la configuración del IdP y no del error.
+- **Mensajes de cierre de sesión firmados** (LogoutRequest/LogoutResponse en el binding Redirect).
 
 Los metadatos del SP publican el certificado como `KeyDescriptor` tanto de `signing` como de `encryption`, y establecen `AuthnRequestsSigned="true"` cuando la conexión fuerza la firma.
 
-## Cierre de sesión único (Single Logout)
+## Single Logout {#single-logout}
 
-El ACS registra la sesión SAML en la cookie de autenticación (claims `saml_connection`, `saml_name_id`, `saml_name_id_format`, `saml_session_index`) para que el cierre de sesión pueda vincularse de vuelta a la sesión del IdP.
+El ACS registra la sesión SAML en la cookie de autenticación (claims `saml_connection`, `saml_name_id`, `saml_name_id_format`, `saml_session_index`) para que el cierre de sesión pueda asociarse a la sesión del IdP.
 
-- **Iniciado por el SP:** `GET /saml/{connectionId}/logout` siempre finaliza primero la sesión local de la cookie (el usuario pidió cerrar sesión; el SLO del IdP es de mejor esfuerzo). Si la sesión del navegador provino de esta conexión y los metadatos del IdP anuncian un `SingleLogoutService`, se envía una LogoutRequest (NameID + SessionIndex, firmada cuando el SP tiene clave) mediante el binding redirect; la LogoutResponse del IdP vuelve a `/slo`, que lleva al usuario a la `returnUrl` almacenada. Los IdP sin endpoint SLO (Google) solo reciben el cierre de sesión local.
-- **Iniciado por el IdP:** el IdP envía una LogoutRequest a `/saml/{connectionId}/slo` (GET redirect o binding POST). Las solicitudes firmadas se validan contra los certificados de los metadatos del IdP. **Una LogoutRequest sin firmar o no verificable se rechaza con un 400** antes de consultar ninguna sesión. No hay un respaldo limitado a la sesión: una página de terceros que navegue el navegador de la *víctima* hasta aquí aporta la sesión de la víctima, no la del atacante, así que limitarlo a la sesión actual no habría restringido a quién se puede cerrar la sesión. Profiles §4.4.3.1 exige de todos modos que el IdP firme una LogoutRequest en el binding Redirect o POST, y los metadatos de la conexión ya aportan los certificados, por lo que rechazar una sin firmar no le cuesta nada a un IdP conforme. Se devuelve una LogoutResponse firmada cuando el IdP tiene un endpoint SLO. Solo por canal frontal: el mensaje llega en el navegador del usuario, por lo que finalizar la sesión de la cookie cierra la sesión exactamente de ese navegador.
+- **Iniciado por el SP:** `GET /saml/{connectionId}/logout` siempre termina primero la sesión de la cookie local (el usuario pidió cerrar sesión; el SLO en el IdP se hace en la medida de lo posible). Si la sesión del navegador procede de esta conexión y los metadatos del IdP anuncian un `SingleLogoutService`, se envía un LogoutRequest (NameID + SessionIndex, firmado cuando el SP tiene clave) mediante el binding Redirect; el LogoutResponse del IdP vuelve a `/slo`, que lleva al usuario a la `returnUrl` almacenada. Con los IdP sin endpoint de SLO (Google), solo se cierra la sesión local.
+- **Iniciado por el IdP:** el IdP envía un LogoutRequest a `/saml/{connectionId}/slo` (binding Redirect GET o POST). Las solicitudes firmadas se validan con los certificados de los metadatos del IdP. **Un LogoutRequest sin firmar o que no se puede verificar se rechaza con un 400** antes de consultar ninguna sesión. No hay recurso limitado a la sesión: una página de terceros que lleva hasta aquí el navegador de la *víctima* aporta la sesión de la víctima, no la del atacante, así que limitar ese recurso a la sesión actual no habría restringido a quién se podía desconectar. De todos modos, el §4.4.3.1 de Profiles exige que el IdP firme los LogoutRequest en los bindings Redirect y POST, y los metadatos de la conexión ya aportan los certificados, así que rechazar uno sin firmar no le cuesta nada a ningún IdP conforme. Se devuelve un LogoutResponse firmado cuando el IdP tiene un endpoint de SLO. Solo por front-channel: el mensaje llega al navegador del usuario, así que terminar la sesión de la cookie cierra la sesión exactamente de ese navegador.
 
-## Almacenamiento en cache de metadatos y rotación de certificados
+## Caché de metadatos y renovación de certificados {#metadata-caching--cert-rollover}
 
-- Los metadatos del IdP obtenidos de `MetadataLocation` se almacenan en cache en memoria durante 60 minutos (configurable mediante `Cache:SamlMetadataCacheMinutes`), indexados por la URL de metadatos (no por el ID de conexión, de modo que no es posible ninguna confusión de cache entre inquilinos).
-- Los metadatos pegados se almacenan en cache direccionados por contenido (hash del XML) y nunca se vuelven a obtener.
-- **Reobtención ante fallo de firma:** un fallo de validación de firma justo después de una rotación de certificado del IdP significa que los metadatos en cache están obsoletos. Ante ese fallo exacto, la entrada de cache se desaloja y los metadatos se vuelven a obtener una vez, luego se reintenta la validación, con un enfriamiento de 5 minutos por ubicación de metadatos para que una aserción basura no pueda martillear el endpoint de metadatos del IdP. Sin esto, una rotación de certificado haría fallar los inicios de sesión hasta que expirara el TTL de la cache. (Solo para metadatos obtenidos por URL; los metadatos pegados no tienen nada que reobtener.)
+- Los metadatos del IdP obtenidos de `MetadataLocation` se guardan en memoria durante 60 minutos (configurable mediante `Cache:SamlMetadataCacheMinutes`), indexados por la URL de los metadatos (no por el ID de conexión, así que no puede haber confusión de caché entre inquilinos).
+- Los metadatos pegados se guardan en caché por contenido (hash del XML) y nunca se vuelven a descargar.
+- **Nueva descarga ante un fallo de firma:** un fallo de validación de firma justo después de una renovación del certificado del IdP indica que los metadatos en caché están desactualizados. Ante ese fallo concreto, se expulsa la entrada de la caché y se vuelven a descargar los metadatos una vez, y después se reintenta la validación, con un periodo de espera de 5 minutos por ubicación de metadatos para que no se pueda usar una aserción basura para saturar el endpoint de metadatos del IdP. Sin esto, una renovación de certificado haría fallar los inicios de sesión hasta que caducara el TTL de la caché. (Solo para metadatos obtenidos por URL; en los pegados no hay nada que volver a descargar).
 
-## Compatibilidad con Azure AD
+## Compatibilidad con Azure AD {#azure-ad-compatibility}
 
-| Comportamiento de Azure AD | Manejo |
+| Comportamiento de Azure AD | Tratamiento |
 |---|---|
-| Firma solo la aserción (predeterminado) | Valida la firma en el elemento Assertion |
-| Firma solo la respuesta | Valida la firma en el elemento Response |
+| Firma solo la aserción (por defecto) | Valida la firma del elemento Assertion |
+| Firma solo la respuesta | Valida la firma del elemento Response |
 | Firma ambas | Valida ambas firmas |
-| SHA-256 (predeterminado) | Soporta SHA-256 y SHA-1 |
-| NameID: emailAddress | Extracción directa del email |
-| NameID: persistent (opaco) | Recurre al claim de email desde los atributos |
-| NameID: unspecified | Recurre al claim de email desde los atributos |
-| NameID: transient | Rota en cada inicio de sesión, por lo que nunca se usa como clave federada. En su lugar se usa el atributo de object-id estable del IdP; si no se afirma ninguno, el inicio de sesión se rechaza con un error accionable (configure un NameID persistent o emailAddress, o afirme un atributo de object-id). |
+| SHA-256 (por defecto) | Admite SHA-256 y SHA-1 |
+| NameID: emailAddress | Extracción directa del correo |
+| NameID: persistent (opaco) | Recurre al claim de correo de los atributos |
+| NameID: unspecified | Recurre al claim de correo de los atributos |
+| NameID: transient | Cambia en cada inicio de sesión, así que nunca se usa como clave federada. En su lugar se usa el atributo de object-id estable del IdP; si no se afirma ninguno, el inicio de sesión se rechaza con un error que indica cómo resolverlo (configure un NameID persistent o emailAddress, o afirme un atributo de object-id). |
 
-## Mapeo de atributos
+## Asignación de atributos {#attribute-mapping}
 
-Los atributos se indexan sin distinguir mayúsculas de minúsculas tanto bajo su `Name` como bajo su `FriendlyName` (Okta y Shibboleth emiten Names de OID con FriendlyNames legibles; coincidir con cualquiera de ellos es lo que hace funcionar el mapeo de proveedores). Cada campo prueba una lista de alias en orden; el primer alias es la URI de claim de Microsoft, de modo que el comportamiento de Entra/ADFS no cambia, y el resto cubre los nombres friendly y de OID que Okta, OneLogin, Ping, Google y Shibboleth emiten de forma predeterminada:
+Los atributos se indexan sin distinguir mayúsculas y minúsculas tanto por su `Name` como por su `FriendlyName` (Okta y Shibboleth emiten Names de tipo OID con FriendlyNames legibles; aceptar cualquiera de los dos es lo que hace funcionar la asignación de cada fabricante). Cada campo prueba una lista de alias en orden; el primer alias es el URI de claim de Microsoft, de modo que el comportamiento con Entra/ADFS no cambia, y el resto cubre los nombres legibles y OID que Okta, OneLogin, Ping, Google y Shibboleth emiten por defecto:
 
 | Campo | Nombres de atributo aceptados |
 |---|---|
@@ -167,21 +171,28 @@ Los atributos se indexan sin distinguir mayúsculas de minúsculas tanto bajo su
 | objectId | `http://schemas.microsoft.com/identity/claims/objectidentifier`, `objectGUID`, `user.objectid` |
 | groups | `.../claims/groups`, `groups`, `memberOf`, `.../claims/role`, `urn:oid:1.3.6.1.4.1.5923.1.5.1.1` |
 
-(`.../claims/...` abrevia la URI completa `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/...` o `http://schemas.microsoft.com/ws/2008/06/identity/claims/...`.)
+(`.../claims/...` abrevia el URI completo `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/...` o `http://schemas.microsoft.com/ws/2008/06/identity/claims/...`).
 
-Prioridad de resolución del email: atributo de email explícito (cualquier alias) → NameID cuando su formato es emailAddress → el claim `name` si contiene `@` → rechazar (se requiere un email).
+Prioridad para resolver el correo: atributo de correo explícito (cualquier alias) → NameID cuando su formato es emailAddress → el claim `name` si contiene `@` → rechazo (el correo es obligatorio).
 
-**Los grupos son multivaluados:** se captura cada elemento `AttributeValue` (uno por pertenencia a grupo), no solo el primero.
+**Los grupos tienen varios valores:** se captura cada elemento `AttributeValue` (uno por cada pertenencia a un grupo), no solo el primero.
 
-## Aprovisionamiento JIT
+## Aprovisionamiento JIT {#jit-provisioning}
 
-Los usuarios desconocidos se crean automáticamente en el primer inicio de sesión (email, nombre y apellido desde la aserción, email marcado como confirmado) y se vinculan a la conexión por su identidad federada estable (`saml:{connectionId}` + NameID, o el object-id para los NameID transient). Establezca `disableJitProvisioning: true` para rechazar usuarios desconocidos en su lugar. Los usuarios recurrentes se emparejan primero por el vínculo federado, nunca solo por email; una cuenta local existente se adjunta por email únicamente cuando los `AllowedDomains` de la conexión cubren el dominio de ese email (la declaración explícita del administrador de que este IdP posee el dominio), lo que evita el secuestro de cuentas mediante un IdP malicioso.
+El aprovisionamiento JIT está **desactivado por defecto**. Una conexión con `jitProvisioningEnabled: true` crea automáticamente los usuarios desconocidos en su primer inicio de sesión (correo, nombre y apellidos tomados de la aserción, con el correo marcado como confirmado) y los vincula a la conexión mediante su identidad federada estable (`saml:{connectionId}` + NameID, o el object-id en el caso de NameID transient). Sin ello, un usuario desconocido se rechaza. Una conexión que declara `provisioningAttributeParams` exige además ese contexto de invitación en el inicio de sesión, salvo que esté establecido `allowUninvitedJit`; consulte [SSO de autoservicio](self-service-sso). Los usuarios que vuelven se identifican primero por el vínculo federado, nunca solo por el correo; una cuenta local existente solo se vincula por correo cuando el `AllowedDomains` de la conexión cubre el dominio de ese correo (la declaración explícita del administrador de que este IdP es dueño del dominio), lo que impide la apropiación de cuentas mediante un IdP malicioso.
 
-## Seguridad
+## Vida útil de la sesión {#session-lifetime}
 
-- **Prevención de reutilización:** para los flujos iniciados por el SP, `InResponseTo` se valida contra un ID de solicitud almacenado (de un solo uso). De forma independiente, el ID de cada aserción aceptada se almacena y se aplica de un solo uso, lo que también cubre las respuestas iniciadas por el IdP y las respuestas cuyo `InResponseTo` fue eliminado (el ID de aserción vive dentro de la aserción firmada, por lo que no puede alterarse sin romper la firma).
-- **Tolerancia de reloj:** Tolerancia de 5 minutos en NotBefore/NotOnOrAfter
-- **Prevención de ataques de envoltura:** la URI de Reference de la firma debe coincidir con el ID del elemento firmado
-- **Prevención de redirección abierta:** la URL de retorno posterior al inicio de sesión debe ser una ruta relativa a la raíz (que comience con `/`, sin `//`, sin barras invertidas, ya que los navegadores tratan `\` como `/`)
-- **Verificación de dominio:** cuando `AllowedDomains` está configurado, las aserciones para emails fuera de esos dominios se rechazan, de modo que una conexión no puede afirmar el dominio de otra ni el email de un usuario local
-- **MFA:** la federación prueba solo el primer factor. Si la política efectiva del usuario requiere MFA, el inicio de sesión se enruta a través del desafío/configuración de MFA local en lugar de emitir una sesión completamente autenticada.
+Si el `AuthnStatement` de la aserción lleva un `SessionNotOnOrAfter`, ese es el límite superior que el propio IdP fija para la sesión que acaba de establecer, y Authagonal lo respeta. La cookie de inicio de sesión caduca como muy tarde en ese instante (cuando queda dentro de 30 días), y el mismo límite viaja en la sesión como `session_max_exp`, que limita todos los tokens de acceso, de ID y de actualización emitidos a partir de ella. Una aserción sin `SessionNotOnOrAfter` no impone ningún límite adicional. SAML no tiene token de actualización del IdP de origen, así que esta es la única forma en que un IdP limita una sesión después del inicio de sesión; para las conexiones OIDC, consulte [Sesiones federadas](federated-sessions).
+
+## Seguridad {#security}
+
+- **Prevención de reproducción:** en los flujos iniciados por el SP, `InResponseTo` se valida frente a un ID de solicitud almacenado (de un solo uso). De forma independiente, el ID de cada aserción aceptada se almacena y se exige que sea de un solo uso, lo que también cubre las respuestas iniciadas por el IdP y las respuestas a las que se ha quitado `InResponseTo` (el ID de la aserción está dentro de la aserción firmada, así que no se puede alterar sin romper la firma).
+- **Desfase de reloj:** tolerancia de 5 minutos en NotBefore/NotOnOrAfter
+- **Antigüedad máxima de la aserción:** una aserción presentada más de una hora (más el desfase) después de su propio `IssueInstant` se rechaza diga lo que diga su `NotOnOrAfter`, y se rechaza un `IssueInstant` en el futuro
+- **Emisor, destino y audiencia:** el `Issuer` de la Response y de la Assertion debe ser igual al entity ID del IdP de la conexión, una Response firmada debe llevar un `Destination` que coincida con la URL de este ACS, y la audiencia debe ser el entity ID del SP de esta conexión
+- **Validez del certificado del IdP:** un certificado de firma del IdP fijado que esté fuera de su propia ventana `NotBefore`/`NotAfter` (con 5 minutos de desfase) se omite, tanto para las aserciones como para las firmas de cierre de sesión del binding Redirect, así que actualice los metadatos tras una renovación
+- **Prevención de ataques de envoltura (wrapping):** el URI de Reference de la firma debe coincidir con el ID del elemento firmado
+- **Prevención de redirecciones abiertas:** la URL de retorno tras el inicio de sesión debe ser una ruta relativa a la raíz (que empiece por `/`, sin `//` y sin barras invertidas, ya que los navegadores tratan `\` como `/`)
+- **Garantía de dominio:** cuando se configura `AllowedDomains`, se rechazan las aserciones de correos fuera de esos dominios, de modo que una conexión no puede afirmar el dominio de otra ni el correo de un usuario local
+- **MFA:** la federación solo demuestra el primer factor. Si la política efectiva del usuario exige MFA, el inicio de sesión pasa por el desafío o la configuración inicial de MFA local en lugar de emitir una sesión completamente autenticada, salvo que la conexión establezca `challengeMfaAfterLogin: false`.

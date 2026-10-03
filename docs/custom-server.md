@@ -38,7 +38,7 @@ The minimum setup is three calls: `AddAuthagonal`, `UseAuthagonal`, and `MapAuth
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Register custom services BEFORE AddAuthagonal — yours take precedence
+// 1. Register custom services BEFORE AddAuthagonal (yours take precedence)
 builder.Services.AddSingleton<IAuthHook, AuditAuthHook>();
 builder.Services.AddSingleton<IEmailService, ConsoleEmailService>();
 
@@ -85,16 +85,16 @@ app.Run();
 | Key | Description |
 |---|---|
 | `Issuer` | The public URL of your auth server. Used in tokens and OIDC discovery. |
-| `Storage:ConnectionString` | Azure Table Storage connection string. |
+| `Storage:ConnectionString` | Azure Table Storage connection string. Alternatively set `Storage:TableServiceUri` to authenticate with a managed identity; one of the two is required. |
 | `Clients` | Array of OAuth clients seeded on startup. |
 
 ### Extensibility points
 
-Register your implementations **before** calling `AddAuthagonal()`, Authagonal uses `TryAdd`, so your registrations win.
+Register your implementations **before** calling `AddAuthagonal()`, Authagonal uses `TryAdd`, so your registrations win. `IAuthHook` is the exception in kind: you can register several and all of them run, and the built-in no-op hook is added only when you register none.
 
 | Interface | Purpose | Default |
 |---|---|---|
-| `IEmailService` | Send verification and password reset emails | Built-in Resend sender when `Email:ResendApiKey` is set; otherwise no-op (silently discards) |
+| `IEmailService` | Send verification, password reset and account-exists emails | Built-in Resend sender when `Email:ResendApiKey` is set; otherwise no-op (silently discards) |
 | `IAuthHook` | Gate or audit login, registration, and token events | No-op |
 | `IProvisioningOrchestrator` | Provision users into downstream apps at authorize time | TCC provisioning |
 | `ISecretProvider` | Resolve client secrets | Plaintext (or Key Vault with `SecretProvider:VaultUri`) |
@@ -124,7 +124,7 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
     public Task OnLoginFailedAsync(string email, string reason,
         CancellationToken ct = default)
     {
-        logger.LogWarning("Failed login: {Email} — {Reason}", email, reason);
+        logger.LogWarning("Failed login: {Email}: {Reason}", email, reason);
         return Task.CompletedTask;
     }
 
@@ -153,7 +153,7 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
 }
 ```
 
-The interface has further optional members with no-op default implementations (`OnMfaVerifyFailedAsync`, `OnEmailConfirmedAsync`, `OnMfaEnrolledAsync`, `OnMfaCredentialRemovedAsync`, `OnRecoveryCodesRegeneratedAsync`, `OnPasswordChangedAsync`), override them only if you need those events.
+The interface has further optional members with no-op default implementations (`OnMfaVerifyFailedAsync`, `OnEmailConfirmedAsync`, `OnMfaEnrolledAsync`, `OnMfaCredentialRemovedAsync`, `OnRecoveryCodesRegeneratedAsync`, `OnPasswordChangedAsync`, `OnTokenIssuingAsync`, `OnDelegationMintedAsync`, `OnApprovalRequestedAsync`, `OnApprovalResolvedAsync`, `OnAgentConsentChangedAsync`, `OnConsentRevokedAsync`, `OnCapabilityTicketRedeemedAsync`), override them only if you need those events.
 
 #### Example: email service
 
@@ -177,6 +177,8 @@ public class ConsoleEmailService(ILogger<ConsoleEmailService> logger) : IEmailSe
     }
 }
 ```
+
+`IEmailService` also has an optional `SendAccountExistsEmailAsync(email, signInUrl, ct)` (a no-op by default), sent when someone registers an address that already has an account.
 
 > **Email is the most common integration trap.** If you register no `IEmailService` and don't set `Email:ResendApiKey`, verification and password-reset mails are silently discarded, and because the confirmed-email login gate defaults to on, self-registered users can never log in (`UseAuthagonal` warns at startup). The built-in Resend sender activates automatically when `Email:ResendApiKey` + `Email:SenderEmail` are configured; for dev/test, `Auth:AutoConfirmEmailDomains` skips verification for listed domains. See [Configuration → Email](configuration#email).
 
@@ -226,7 +228,7 @@ npm install -D vite @vitejs/plugin-react typescript @types/react @types/react-do
 ### What the npm package exports
 
 ```typescript
-// Components — use as-is or as reference
+// Components: use as-is or as reference
 import {
   AuthLayout,
   LoginPage,
@@ -236,17 +238,19 @@ import {
   MfaSetupPage,
   RegisterPage,
   ConsentPage,
+  AgentConsentPage,
   GrantsPage,
   DevicePage,
-  App,              // Standalone SPA with full routing
+  App,              // Standalone SPA with full routing (accepts an extraRoutes prop)
 } from '@authagonal/login';
 
 // UI primitives
 import {
-  Button, Input, Label, Card, Alert, Separator, cn,
+  Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
+  Alert, Separator, Turnstile, cn,
 } from '@authagonal/login';
 
-// API clients — call from your custom pages
+// API clients: call from your custom pages
 import {
   login, register, logout, ssoCheck, forgotPassword, resetPassword,
   getSession, getProviders, getPasswordPolicy,
@@ -258,10 +262,14 @@ import {
 
 // Branding
 import {
-  loadBranding, useBranding, BrandingContext, resolveLocalized,
+  loadBranding, useBranding, BrandingContext, brandingDefaults, resolveLocalized,
+  getBoot, getOrganization,
 } from '@authagonal/login';
 
-// i18n — always import from this package, not react-i18next directly
+// Redirect helpers for the post-login hop
+import { resolveRedirect, isSameOriginPath } from '@authagonal/login';
+
+// i18n: always import from this package, not react-i18next directly
 import { useTranslation, i18n } from '@authagonal/login';
 
 // Styles
@@ -286,7 +294,7 @@ import '@authagonal/login/styles.css';
 import App from './App';
 
 loadBranding().then((config) => {
-  document.title = `Sign In — ${config.appName}`;
+  document.title = `Sign In | ${config.appName}`;
   createRoot(document.getElementById('root')!).render(
     <BrandingContext.Provider value={config}>
       <App />
@@ -297,28 +305,33 @@ loadBranding().then((config) => {
 
 ### Routing (App.tsx)
 
-Mix custom pages with the base package pages:
+Mix custom pages with the base package pages. The server sends users to paths under `/login` (the authorize endpoint redirects to `/login?returnUrl=...`, and emails link to `/login/reset-password`, `/login/consent`, `/login/device`), so the router must use `basename="/login"` and the routes below are relative to it:
 
 ```tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import {
-  ForgotPasswordPage, ResetPasswordPage, ConsentPage, DevicePage, GrantsPage,
+  RegisterPage, ForgotPasswordPage, ResetPasswordPage, MfaChallengePage, MfaSetupPage,
+  ConsentPage, AgentConsentPage, DevicePage, GrantsPage,
 } from '@authagonal/login';
 import MyLoginPage from './MyLoginPage';
 import MyLayout from './MyLayout';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/login">
       <MyLayout>
         <Routes>
-          <Route path="/login" element={<MyLoginPage />} />
+          <Route path="/" element={<MyLoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/mfa-challenge" element={<MfaChallengePage />} />
+          <Route path="/mfa-setup" element={<MfaSetupPage />} />
           <Route path="/consent" element={<ConsentPage />} />
+          <Route path="/consent/agents/:clientId" element={<AgentConsentPage />} />
           <Route path="/device" element={<DevicePage />} />
           <Route path="/grants" element={<GrantsPage />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </MyLayout>
     </BrowserRouter>
@@ -326,16 +339,22 @@ export default function App() {
 }
 ```
 
+If you only want to add pages to the stock app, render `<App extraRoutes={...} />` from the package instead. It already provides every route above (plus `/account`).
+
 ### Custom login page
 
 Build your own login form using the API clients from the npm package:
 
 ```tsx
 import { useState } from 'react';
-import { login, ssoCheck, ApiRequestError, useBranding } from '@authagonal/login';
+import { useNavigate, useSearchParams } from 'react-router';
+import { login, resolveRedirect, ApiRequestError, useBranding } from '@authagonal/login';
 
 export default function MyLoginPage() {
   const branding = useBranding();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnUrl = searchParams.get('returnUrl') || '';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -343,10 +362,29 @@ export default function MyLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login(email, password);
-      // Login sets a cookie — redirect to the return URL
-      const params = new URLSearchParams(window.location.search);
-      window.location.href = params.get('returnUrl') || '/';
+      const result = await login(email, password, returnUrl || undefined);
+
+      // A second factor is still owed: hand over to the package's MFA pages.
+      if (result.mfaRequired && result.challengeId) {
+        const params = new URLSearchParams({
+          challengeId: result.challengeId,
+          ...(returnUrl ? { returnUrl } : {}),
+          ...(result.methods ? { methods: result.methods.join(',') } : {}),
+          ...(result.webAuthn ? { webAuthn: JSON.stringify(result.webAuthn) } : {}),
+        });
+        navigate(`/mfa-challenge?${params.toString()}`);
+        return;
+      }
+      if (result.mfaSetupRequired) {
+        navigate(`/mfa-setup${returnUrl ? `?returnUrl=${encodeURIComponent(returnUrl)}` : ''}`, {
+          state: { setupToken: result.setupToken },
+        });
+        return;
+      }
+
+      // Login sets a cookie. resolveRedirect only returns a same-origin path or the origin of a
+      // registered client's home URI; anything else falls back to the default.
+      window.location.href = await resolveRedirect(returnUrl, () => '/login/account');
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message || 'Login failed');
@@ -390,7 +428,7 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
     <>
       <AuthLayout>{children}</AuthLayout>
       <footer>
-        &copy; {new Date().getFullYear()} My Company —
+        &copy; {new Date().getFullYear()} My Company |
         <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a>
       </footer>
     </>

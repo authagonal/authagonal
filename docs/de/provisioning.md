@@ -1,35 +1,45 @@
 ---
 layout: default
-title: Bereitstellung
+title: Provisionierung
 locale: de
 ---
 
-# TCC-Bereitstellung
+# TCC-Provisionierung
 
-Authagonal stellt Benutzer mithilfe des **Try-Confirm-Cancel (TCC)**-Musters in nachgelagerte Anwendungen bereit. Dies stellt sicher, dass alle Apps zustimmen, bevor ein Benutzer Zugriff erhält, mit sauberem Rollback, falls eine App ablehnt.
+Authagonal provisioniert Benutzer in nachgelagerte Anwendungen nach dem Muster **Try-Confirm-Cancel (TCC)**. So stimmen alle Apps zu, bevor ein Benutzer Zugriff erhält, und lehnt eine App ab, wird sauber zurückgerollt.
 
-## Wann die Bereitstellung läuft
+## Wann die Provisionierung läuft {#when-provisioning-runs}
 
-Die Bereitstellung läuft automatisch, sobald ein Benutzer erstellt wird, unabhängig vom Erstellungspfad:
+Die Provisionierung läuft automatisch, sobald ein Benutzer angelegt wird, unabhängig vom Weg, auf dem er angelegt wird:
 
 | Endpunkt | Auslöser |
 |---|---|
-| `POST /api/v1/profile/` | Admin-Benutzererstellung |
-| `POST /api/auth/register` | Self-Service-Registrierung |
-| SAML ACS (`POST /saml/{id}/acs`) | Erste SSO-Anmeldung (neuer Benutzer) |
-| OIDC-Callback (`GET /oidc/callback`) | Erste SSO-Anmeldung (neuer Benutzer) |
-| SCIM (`POST /scim/v2/Users`) | Bereitstellung durch den Identity Provider |
+| `POST /api/v1/profile/` | Anlegen eines Benutzers durch einen Administrator |
+| `POST /api/auth/register` | Selbstregistrierung |
+| SAML ACS (`POST /saml/{id}/acs`) | Erster SSO-Login (neuer Benutzer) |
+| OIDC-Callback (`GET /oidc/callback`) | Erster SSO-Login (neuer Benutzer) |
+| SCIM (`POST /scim/v2/Users`) | Provisionierung durch den Identity Provider |
 | `GET /connect/authorize` | Erste Autorisierung über einen Client mit `ProvisioningApps` |
 
-Bereits bereitgestellte App-/Benutzer-Kombinationen werden übersprungen (nachverfolgt in der Tabelle `UserProvisions`).
+Bereits provisionierte Kombinationen aus App und Benutzer werden übersprungen (nachverfolgt in der Tabelle `UserProvisions`).
 
-Die Benutzererstellungspfade stellen in **jede konfigurierte App** bereit. Der Autorisierungs-Endpunkt stellt nur in die `ProvisioningApps`-Liste des Clients bereit.
+Die Pfade zum Anlegen von Benutzern provisionieren in **jede konfigurierte App**. Der Authorize-Endpunkt provisioniert nur in die Apps der Liste `ProvisioningApps` des Clients.
 
-**Bei Ablehnung:** Lehnt eine Bereitstellungs-App den Benutzer in der Try-Phase ab, wird der neu erstellte Benutzer gelöscht. Dies verhindert halb erstellte Benutzer. Die API-Erstellungspfade (Admin, Registrierung, SCIM) geben `422 Unprocessable Entity` mit dem Ablehnungsgrund zurück; die SAML-/OIDC-SSO-Callbacks geben `400 Bad Request` zurück; der Autorisierungs-Endpunkt leitet mit `error=access_denied` zurück zum Client um.
+**Bei Ablehnung:** Lehnt irgendeine Provisionierungs-App den Benutzer in der Try-Phase ab (oder schlägt ein Callback fehl), wird der neu angelegte Benutzer gelöscht. Das verhindert halb angelegte Benutzer. Was der Aufrufer sieht, hängt vom Pfad ab:
 
-## Konfiguration
+| Pfad | Antwort |
+|---|---|
+| Anlegen durch einen Administrator (`POST /api/v1/profile/`), Selbstregistrierung | `422 Unprocessable Entity` mit dem Ablehnungsgrund |
+| SAML ACS, OIDC-Callback | `400 Bad Request`, `{ "error": "provisioning_rejected", "message": "..." }` |
+| Anlegen per SCIM | SCIM-`400`, `scimType: invalidValue`, mit einer festen Meldung (der Text der nachgelagerten App wird nicht an den Identity Provider zurückgegeben) |
+| Bestätigung der Übernahme eines passwortlosen Kontos | `400 provisioning_rejected` als JSON bzw. bei einem Klick im Browser eine Weiterleitung auf `/login?error=provisioning_rejected&error_description=...` (siehe [Upgrade eines Benutzers](user-upgrade)) |
+| `GET /connect/authorize` | Weiterleitung zurück zum Client mit `error=access_denied` |
 
-### 1. Bereitstellungs-Apps definieren
+Der Request zum Anlegen durch einen Administrator akzeptiert `skipProvisioning: true`, gedacht für einen eigenen Aufrufer, der selbst das Ziel der Provisionierung ist und nicht möchte, dass sein eigener Callback erneut aufgerufen wird, während er den Benutzer gerade einrichtet. Für diesen Benutzer wird dann nichts provisioniert, und es werden keine Apps aufgerufen.
+
+## Konfiguration {#configuration}
+
+### 1. Provisionierungs-Apps definieren {#1-define-provisioning-apps}
 
 In `appsettings.json`:
 
@@ -45,30 +55,30 @@ In `appsettings.json`:
 }
 ```
 
-`TryTimeoutSeconds` ist optional (Standard 60). Erhöhen Sie den Wert, wenn die nachgelagerte App während der Try-Phase echte Arbeit verrichtet. Confirm und Cancel verwenden immer ein kurzes, festes Timeout (10 Sekunden) und sind nicht konfigurierbar; sie sollten stets günstig sein.
+`TryTimeoutSeconds` ist optional (Standard 60). Erhöhen Sie den Wert, wenn die nachgelagerte App während Try echte Arbeit leistet. Confirm, Cancel und Deprovision verwenden immer ein kurzes festes Timeout (10 Sekunden), das sich nicht einstellen lässt; diese Aufrufe sollten immer günstig sein.
 
-### 2. Apps Clients zuweisen
+Der Konfigurationsabschnitt `ProvisioningApps` wird nur gelesen, wenn kein `IProvisioningAppStore` registriert ist. Die Provider für Azure Table, AWS und SQL registrieren jeweils einen, und die Bibliothek ermittelt die Apps dann stattdessen aus dem Speicher (siehe [Eigene Ermittlung der Apps](#custom-app-resolution)). Mit einem persistenten Provider definieren Sie Apps daher über die Admin-API statt in `appsettings.json`.
 
-Jeder Client deklariert über das Feld `provisioningApps` im Client-Datensatz, in welche Apps seine Benutzer bereitgestellt werden müssen. Setzen Sie dies über die Client-Admin-API (die `Clients`-Seed-Konfiguration führt dieses Feld nicht):
+### 2. Apps Clients zuordnen {#2-assign-apps-to-clients}
+
+Jeder Client legt über das Feld `provisioningApps` seines Client-Datensatzes fest, in welche Apps seine Benutzer provisioniert werden müssen. Setzen Sie es über die Client-Admin-API (die Seed-Konfiguration `Clients` enthält dieses Feld nicht). Beim Anlegen eines Clients wird der gesamte Datensatz gebunden, und `PUT /api/v1/clients/{clientId}` führt die gesendeten Felder mit dem gespeicherten Client zusammen. Ein Request, der nur `provisioningApps` enthält, lässt den Rest des Clients also unverändert:
 
 ```
 PUT /api/v1/clients/web-app
 {
-  "clientId": "web-app",
-  "provisioningApps": ["my-backend"],
-  ...
+  "provisioningApps": ["my-backend"]
 }
 ```
 
-Wenn sich ein Benutzer über `web-app` autorisiert, wird er in `my-backend` bereitgestellt, sofern dies noch nicht geschehen ist.
+Autorisiert sich ein Benutzer über `web-app`, wird er in `my-backend` provisioniert, sofern das noch nicht geschehen ist.
 
-## TCC-Protokoll
+## TCC-Protokoll {#tcc-protocol}
 
-Authagonal führt drei Arten von HTTP-Aufrufen an Ihren Bereitstellungsendpunkt durch. Alle verwenden `POST` mit JSON-Körpern und `Authorization: Bearer {ApiKey}`.
+Authagonal ruft Ihren Provisionierungs-Endpunkt mit drei Arten von HTTP-Aufrufen auf. Alle verwenden `POST` mit JSON-Body und `Authorization: Bearer {ApiKey}`.
 
-### Phase 1: Versuch (Try)
+### Phase 1: Try {#phase-1-try}
 
-**Anfrage:** `POST {CallbackUrl}/try`
+**Request:** `POST {CallbackUrl}/try`
 
 ```json
 {
@@ -82,25 +92,28 @@ Authagonal führt drei Arten von HTTP-Aufrufen an Ihren Bereitstellungsendpunkt 
 }
 ```
 
-Leere Felder (einschließlich `customAttributes`, wenn der Benutzer keine hat) werden aus dem Payload weggelassen.
+Felder mit dem Wert null (auch `customAttributes`, wenn der Benutzer keine hat) werden im Payload weggelassen.
 
 **Erwartete Antworten:**
 
 | Status | Body | Bedeutung |
 |---|---|---|
-| `200` | `{ "approved": true }` | Benutzer kann bereitgestellt werden. App erstellt einen **ausstehenden** Datensatz. |
-| `200` | `{ "approved": false, "reason": "..." }` | Benutzer wird abgelehnt. Kein Datensatz erstellt. |
-| Nicht-2xx | Beliebig | Wird als Fehlschlag behandelt. |
+| `200` | `{ "approved": true }` | Der Benutzer kann provisioniert werden. Die App legt einen **ausstehenden** Datensatz an. |
+| `200` | `{ "approved": false, "reason": "..." }` | Der Benutzer wird abgelehnt. Es wird kein Datensatz angelegt. |
+| `2xx` | Leerer oder nicht auswertbarer Body | Wird als Zustimmung behandelt. |
+| Nicht 2xx | Beliebig | Wird als Fehlschlag behandelt. |
 
-Die `transactionId` identifiziert diesen Bereitstellungsversuch. Ihre App sollte sie zusammen mit dem ausstehenden Datensatz speichern.
+Geben Sie einen expliziten `approved`-Wert zurück. Eine Antwort, deren Body sich nicht als JSON lesen lässt, gilt als Zustimmung; ein falsch konfigurierter Endpunkt, der mit `200` und einer HTML-Seite antwortet, stimmt also jedem Benutzer zu.
 
-Eine genehmigte Antwort kann zusätzlich `organizationId` und/oder `customAttributes` zurückgeben. Authagonal führt diese mit dem Benutzer zusammen: `organizationId` wird nur angewendet, wenn der Benutzer noch keine hat (spätere Apps innerhalb derselben Transaktion sehen die zuvor vorgenommene Zuweisung), und `customAttributes`-Einträge werden Schlüssel für Schlüssel zusammengeführt. Beide fließen in Tokens ein (Claim `org_id`; benutzerdefinierte Attribute über die Scope-Konfiguration `UserClaims`).
+Die `transactionId` identifiziert diesen Provisionierungsversuch. Ihre App sollte sie zusammen mit dem ausstehenden Datensatz speichern.
 
-### Phase 2: Bestätigung (Confirm)
+Eine zustimmende Antwort kann außerdem `organizationId`, `customAttributes` und `emailVerified` zurückgeben. Authagonal führt sie mit dem Benutzer zusammen: `organizationId` wird nur übernommen, wenn der Benutzer noch keine hat (spätere Apps in derselben Transaktion sehen die frühere Zuordnung), Einträge in `customAttributes` werden Schlüssel für Schlüssel zusammengeführt, und `emailVerified: true` markiert die E-Mail-Adresse des Benutzers als bestätigt (verwenden Sie das, wenn die nachgelagerte App die Adresse bereits verifiziert hat; die Selbstregistrierung überspringt dann die Bestätigungs-E-Mail). Sowohl `organizationId` als auch die Attribute gelangen in die Tokens (Claim `org_id`; benutzerdefinierte Attribute über die Scope-Konfiguration `UserClaims`). Die zusammengeführten Werte werden am Benutzer gespeichert, sobald jede App bestätigt hat.
+
+### Phase 2: Confirm {#phase-2-confirm}
 
 Wird nur aufgerufen, wenn **alle** Apps in der Try-Phase `approved: true` zurückgegeben haben.
 
-**Anfrage:** `POST {CallbackUrl}/confirm`
+**Request:** `POST {CallbackUrl}/confirm`
 
 ```json
 {
@@ -108,13 +121,13 @@ Wird nur aufgerufen, wenn **alle** Apps in der Try-Phase `approved: true` zurüc
 }
 ```
 
-**Erwartete Antwort:** `200` (beliebiger Body). Ihre App befördert den ausstehenden Datensatz zum bestätigten Datensatz.
+**Erwartete Antwort:** `2xx` (beliebiger Body). Ihre App macht aus dem ausstehenden Datensatz einen bestätigten. Eine Antwort außerhalb von 2xx oder ein Timeout (10 Sekunden) gilt als fehlgeschlagenes Confirm.
 
-### Phase 3: Abbruch (Cancel)
+### Phase 3: Cancel {#phase-3-cancel}
 
-Wird aufgerufen, wenn der Try-Versuch **einer** App abgelehnt wurde oder fehlgeschlagen ist, um die Apps zu bereinigen, die in der Try-Phase erfolgreich waren.
+Wird aufgerufen, wenn das Try **irgendeiner** App abgelehnt wurde oder fehlgeschlagen ist, um bei den Apps aufzuräumen, deren Try erfolgreich war.
 
-**Anfrage:** `POST {CallbackUrl}/cancel`
+**Request:** `POST {CallbackUrl}/cancel`
 
 ```json
 {
@@ -124,9 +137,9 @@ Wird aufgerufen, wenn der Try-Versuch **einer** App abgelehnt wurde oder fehlges
 
 **Erwartete Antwort:** `200` (beliebiger Body). Ihre App löscht den ausstehenden Datensatz.
 
-Cancel erfolgt auf Best-Effort-Basis: Schlägt es fehl, protokolliert Authagonal den Fehler und fährt fort. Ihre App sollte **unbestätigte Datensätze nach einer TTL bereinigen** (z. B. 1 Stunde) als Sicherheitsnetz.
+Cancel erfolgt nach bestem Bemühen: Schlägt es fehl, protokolliert Authagonal den Fehler und macht weiter. Ihre App sollte zur Absicherung **unbestätigte Datensätze nach einer TTL aufräumen** (z. B. nach 1 Stunde).
 
-## Ablaufdiagramm
+## Ablaufdiagramm {#flow-diagram}
 
 ```
 Authorize Endpoint
@@ -147,7 +160,7 @@ Authorize Endpoint
     └─ Redirect to client
 ```
 
-### Bei Fehlschlag
+### Bei einem Fehlschlag {#on-failure}
 
 ```
     ├─ TRY A ──────────► App A: create pending record
@@ -161,30 +174,57 @@ Authorize Endpoint
     └─ Redirect with error=access_denied
 ```
 
-### Bei teilweisem Bestätigungsfehler
+### Bei einem teilweise fehlgeschlagenen Confirm {#on-partial-confirm-failure}
 
-Schlagen manche Bestätigungen fehl, während andere gelingen, werden für die erfolgreich bestätigten Apps ihre Bereitstellungsdatensätze gespeichert (sodass sie nicht erneut versucht werden), und alle Apps, die noch auf die Bestätigung warten, werden abgebrochen. Der Benutzer sieht einen Fehler und kann es erneut versuchen; nur die Apps, die nicht bestätigt haben, werden beim nächsten Mal versucht.
+Schlägt ein Confirm fehl, rollt Authagonal die gesamte Transaktion zurück:
 
-## Benutzerdefinierte App-Auflösung
+1. Apps, die noch nicht bestätigt wurden, erhalten `POST {CallbackUrl}/cancel`.
+2. Apps, die **in dieser Transaktion** bereits bestätigt haben, werden mit `DELETE {CallbackUrl}/users/{userId}` kompensiert (derselbe Aufruf wie beim [Deprovisionieren](#deprovisioning)), und ihre Provisionierungsdatensätze werden entfernt. Apps, in die der Benutzer durch eine frühere Transaktion provisioniert wurde, bleiben unberührt.
+3. Es wird ein Provisionierungsfehler ausgelöst, und der aufrufende Pfad löscht den neu angelegten Benutzer (bzw. antwortet beim Authorize-Endpunkt mit einem Fehler).
 
-Standardmäßig werden Bereitstellungs-Apps über `ConfigProvisioningAppProvider` aus dem Konfigurationsabschnitt `ProvisioningApps` gelesen. Überschreiben Sie `IProvisioningAppProvider`, um Apps dynamisch aufzulösen, zum Beispiel aus einer Datenbank oder pro Mandant:
+Provisionierungsdatensätze werden erst gespeichert, wenn jedes Confirm erfolgreich war; ein erneuter Versuch spricht also wieder alle Apps an. Die Kompensation erfolgt nach bestem Bemühen: Ein fehlgeschlagenes `DELETE` wird protokolliert, und das Konto in der App muss gegebenenfalls von Hand entfernt werden.
+
+## Eigene Ermittlung der Apps {#custom-app-resolution}
+
+Die Bibliothek wählt die Quelle der Apps für Sie:
+
+- Ist ein `IProvisioningAppStore` registriert, was die Provider für Azure Table, AWS und SQL alle tun, stammen die Apps aus dem Speicher (`StoreProvisioningAppProvider`) und werden über die unten beschriebene Admin-API verwaltet.
+- Andernfalls werden sie aus dem Konfigurationsabschnitt `ProvisioningApps` gelesen (`ConfigProvisioningAppProvider`).
+
+Registrieren Sie vor `AddAuthagonal` einen eigenen `IProvisioningAppProvider`, um Apps auf andere Weise zu ermitteln, zum Beispiel pro Mandant; der Standard der Bibliothek wird nur hinzugefügt, wenn keiner registriert ist:
 
 ```csharp
 builder.Services.AddSingleton<IProvisioningAppProvider, MyAppProvider>();
 builder.Services.AddAuthagonal(builder.Configuration);
 ```
 
-Der Provider gibt eine Liste von Apps und deren Callback-URLs zurück. Der `TccProvisioningOrchestrator` ruft für jede App Try/Confirm/Cancel auf.
+Der Provider liefert eine Liste von Apps samt ihrer Callback-URLs. Der `TccProvisioningOrchestrator` ruft für jede davon Try/Confirm/Cancel auf.
 
-Für Laufzeit-CRUD ohne einen benutzerdefinierten Provider liefert die Bibliothek `StoreProvisioningAppProvider`, unterstützt durch `IProvisioningAppStore`. Registrieren Sie ihn explizit (nach demselben Muster wie oben) und verwalten Sie Apps über die Admin-API unter `/api/v1/provisioning/apps` (Auflisten/Erstellen/Aktualisieren/Löschen sowie `POST /{appId}/test`, um den Try-Endpunkt einer App zu testen).
+> **`CallbackUrl` muss standardmäßig öffentlich routbar sein.** Authagonal validiert die URL beim Schreiben und erneut bei jedem Request, den es stellt, und lehnt Ziele unter Loopback, RFC1918, Link-Local sowie `.internal`/`.local` ab (ein Provisionierungs-Callback ist eine vom Server abgerufene URL). Eine Provisionierungs-App, die in Ihrem eigenen Netz läuft, ist eine unterstützte Bereitstellungsform: Tragen Sie sie in [`Auth:AllowedInternalTargets`](configuration#outbound-fetches-ssrf-guard) ein.
 
-## Deprovisioning
+### Admin-API {#admin-api}
 
-Wird ein Benutzer über die Admin-API gelöscht (`DELETE /api/v1/profile/{userId}`) oder über SCIM deprovisioniert (`DELETE /scim/v2/Users/{id}`, ein Soft-Delete, das den Benutzer deaktiviert), ruft Authagonal `DELETE {CallbackUrl}/users/{userId}` für jede App auf, in der der Benutzer bereitgestellt war. Dies erfolgt auf Best-Effort-Basis: Fehler werden protokolliert, blockieren aber nicht die Löschung.
+Die im Speicher gehaltenen Apps werden unter `/api/v1/provisioning/apps` verwaltet (Richtlinie `IdentityAdmin`; jede Änderung wird im Audit-Log erfasst):
 
-## Upstream-Endpunkte implementieren
+| Route | Verhalten |
+|---|---|
+| `GET /` | `{ "apps": [{ "appId", "name", "callbackUrl", "hasApiKey", "tryTimeoutSeconds" }], "limit": n }`. Der API-Schlüssel wird nie zurückgegeben, nur `hasApiKey`. `limit` ist das App-Kontingent, null, wenn es keines gibt. |
+| `POST /` | Anlegen. `name` und `callbackUrl` sind Pflicht; `apiKey` und `tryTimeoutSeconds` sind optional. Es wird eine `appId` mit 12 Zeichen erzeugt. Bei überschrittenem Kontingent `400 provisioning_app_limit`. |
+| `PUT /{appId}` | Ersetzt `name`, `callbackUrl` und `tryTimeoutSeconds` (`name` und `callbackUrl` sind wieder Pflicht). Ein weggelassenes oder auf null gesetztes `apiKey` lässt den Schlüssel unverändert; eine leere Zeichenfolge löscht ihn. `404 app_not_found` bei einer unbekannten App. |
+| `DELETE /{appId}` | `{ "removed": true }`. |
+| `POST /{appId}/test` | Sendet ein Try mit einem festen Testbenutzer (`test-user`, `test@example.com`) an die App, mit einem Timeout von 10 Sekunden. Gibt `{ "success", "statusCode", "body" }` zurück (Body auf 1000 Zeichen gekürzt). Verbindungsfehler liefern `success: false, statusCode: 0` statt eines Fehlerstatus. |
 
-### Minimales Beispiel (Node.js/Express)
+`callbackUrl` muss wie oben beschrieben eine absolute `http`- oder `https`-URL auf einem externen Host sein. `tryTimeoutSeconds` wird auf 5 bis 300 Sekunden begrenzt. Die `appId` ist der Wert, den ein Client in `provisioningApps` aufführt.
+
+## Deprovisionierung {#deprovisioning}
+
+Wird ein Benutzer über die Admin-API gelöscht (`DELETE /api/v1/profile/{userId}`) oder per SCIM deprovisioniert (`DELETE /scim/v2/Users/{id}`, ein Soft Delete, der den Benutzer deaktiviert), ruft Authagonal bei jeder App, in die der Benutzer provisioniert wurde, `DELETE {CallbackUrl}/users/{userId}` mit einem Timeout von 10 Sekunden auf und entfernt den Provisionierungsdatensatz. Das erfolgt nach bestem Bemühen: Fehlschläge werden protokolliert, blockieren das Löschen aber nicht. Eine App, die nicht mehr konfiguriert ist, wird mit einer Warnung übersprungen.
+
+`ReprovisionAsync` an `IProvisioningOrchestrator` führt Try und Confirm für jede App erneut aus, auch dort, wo der Benutzer bereits provisioniert ist. Die Bibliothek verwendet es, wenn ein passwortloses Konto übernommen wird (siehe [Upgrade eines Benutzers](user-upgrade)); ein einfacher erneuter Login tut das nie.
+
+## Die Upstream-Endpunkte implementieren {#implementing-the-upstream-endpoints}
+
+### Minimalbeispiel (Node.js/Express) {#minimal-example-nodejsexpress}
 
 ```javascript
 const pending = new Map(); // transactionId → user data
@@ -192,12 +232,12 @@ const pending = new Map(); // transactionId → user data
 app.post('/provisioning/try', (req, res) => {
   const { transactionId, userId, email } = req.body;
 
-  // Ihre Geschäftslogik: Darf dieser Benutzer bereitgestellt werden?
+  // Your business logic: can this user be provisioned?
   if (!isAllowed(email)) {
     return res.json({ approved: false, reason: 'Domain not allowed' });
   }
 
-  // Ausstehenden Datensatz mit TTL speichern
+  // Store pending record with TTL
   pending.set(transactionId, { userId, email, createdAt: Date.now() });
 
   res.json({ approved: true });
@@ -208,7 +248,7 @@ app.post('/provisioning/confirm', (req, res) => {
   const data = pending.get(transactionId);
 
   if (data) {
-    createUser(data); // Zum echten Datensatz befördern
+    createUser(data); // Promote to real record
     pending.delete(transactionId);
   }
 
@@ -220,7 +260,7 @@ app.post('/provisioning/cancel', (req, res) => {
   res.sendStatus(200);
 });
 
-// Unbestätigte Datensätze bereinigen, die älter als 1 Stunde sind
+// Cleanup unconfirmed records older than 1 hour
 setInterval(() => {
   const cutoff = Date.now() - 3600000;
   for (const [id, data] of pending) {

@@ -12,6 +12,7 @@ import pt from './pt.json';
 import ar from './ar.json';
 import af from './af.json';
 import hi from './hi.json';
+import ja from './ja.json';
 
 /// The single source of truth for shipped UI languages: this list drives BOTH i18next resource
 /// registration and every language picker (AuthLayout switcher, AccountPage select). Adding a
@@ -29,6 +30,7 @@ export const LANGUAGES: { code: string; label: string; resource: object }[] = [
   { code: 'ar', label: 'العربية', resource: ar },
   { code: 'af', label: 'Afrikaans', resource: af },
   { code: 'hi', label: 'हिन्दी', resource: hi },
+  { code: 'ja', label: '日本語', resource: ja },
 ];
 
 /**

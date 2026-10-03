@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" msdata:Ordinal="0" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>1.3</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <!-- Authentication messages -->
+  <data name="Auth_ResetTokenRequired" xml:space="preserve"><value>رمز إعادة التعيين مطلوب.</value></data>
+  <data name="Auth_PasswordRequired" xml:space="preserve"><value>كلمة المرور مطلوبة.</value></data>
+  <data name="Auth_WeakPassword" xml:space="preserve"><value>كلمة المرور لا تستوفي متطلبات القوة.</value></data>
+  <data name="Auth_InvalidTokenFormat" xml:space="preserve"><value>تنسيق رمز إعادة التعيين غير صالح.</value></data>
+  <data name="Auth_TokenExpired" xml:space="preserve"><value>انتهت صلاحية رابط إعادة التعيين هذا.</value></data>
+  <data name="Auth_TokenUsedOrExpired" xml:space="preserve"><value>تم استخدام رابط إعادة التعيين هذا من قبل أو انتهت صلاحيته.</value></data>
+  <data name="Auth_InvalidToken" xml:space="preserve"><value>رمز إعادة التعيين غير صالح.</value></data>
+  <data name="Auth_EmailConfirmed" xml:space="preserve"><value>تم تأكيد البريد الإلكتروني بنجاح</value></data>
+  <data name="Auth_VerificationSent" xml:space="preserve"><value>تم إرسال رسالة التحقق عبر البريد الإلكتروني</value></data>
+
+  <!-- Password validation -->
+  <data name="Password_Required" xml:space="preserve"><value>كلمة المرور مطلوبة.</value></data>
+  <data name="Password_MinLength" xml:space="preserve"><value>يجب أن تتكون كلمة المرور من {0} أحرف على الأقل.</value></data>
+  <data name="Password_RequireUppercase" xml:space="preserve"><value>يجب أن تحتوي كلمة المرور على حرف كبير واحد على الأقل.</value></data>
+  <data name="Password_RequireLowercase" xml:space="preserve"><value>يجب أن تحتوي كلمة المرور على حرف صغير واحد على الأقل.</value></data>
+  <data name="Password_RequireDigit" xml:space="preserve"><value>يجب أن تحتوي كلمة المرور على رقم واحد على الأقل.</value></data>
+  <data name="Password_RequireSpecialChar" xml:space="preserve"><value>يجب أن تحتوي كلمة المرور على رمز واحد على الأقل غير أبجدي رقمي.</value></data>
+  <data name="Password_MinUniqueChars" xml:space="preserve"><value>يجب أن تحتوي كلمة المرور على {0} أحرف مختلفة على الأقل.</value></data>
+
+  <!-- Password policy labels -->
+  <data name="PasswordPolicy_MinLength" xml:space="preserve"><value>{0} أحرف على الأقل</value></data>
+  <data name="PasswordPolicy_Uppercase" xml:space="preserve"><value>حرف كبير</value></data>
+  <data name="PasswordPolicy_Lowercase" xml:space="preserve"><value>حرف صغير</value></data>
+  <data name="PasswordPolicy_Digit" xml:space="preserve"><value>رقم</value></data>
+  <data name="PasswordPolicy_SpecialChar" xml:space="preserve"><value>رمز خاص</value></data>
+
+  <!-- Error messages -->
+  <data name="Error_BadRequest" xml:space="preserve"><value>الطلب غير صالح.</value></data>
+  <data name="Error_Unauthorized" xml:space="preserve"><value>المصادقة مطلوبة.</value></data>
+  <data name="Error_NotFound" xml:space="preserve"><value>لم يتم العثور على المورد المطلوب.</value></data>
+  <data name="Error_ServerError" xml:space="preserve"><value>حدث خطأ غير متوقع.</value></data>
+
+  <!-- End session -->
+  <data name="EndSession_SignedOut" xml:space="preserve"><value>لقد تم تسجيل خروجك.</value></data>
+  <data name="EndSession_ConfirmPrompt" xml:space="preserve"><value>هل تريد تسجيل الخروج من {0}؟</value></data>
+  <data name="EndSession_ConfirmButton" xml:space="preserve"><value>تسجيل الخروج</value></data>
+  <data name="EndSession_CancelButton" xml:space="preserve"><value>إلغاء</value></data>
+
+  <!-- Admin user endpoint messages -->
+  <data name="Admin_UserNotFound" xml:space="preserve"><value>المستخدم "{0}" غير موجود</value></data>
+  <data name="Admin_EmailRequired" xml:space="preserve"><value>البريد الإلكتروني مطلوب</value></data>
+  <data name="Admin_PasswordRequired" xml:space="preserve"><value>كلمة المرور مطلوبة</value></data>
+  <data name="Admin_UserExists" xml:space="preserve"><value>يوجد مستخدم بهذا البريد الإلكتروني بالفعل</value></data>
+  <data name="Admin_UserIdInUse" xml:space="preserve"><value>يوجد مستخدم بهذا المعرّف بالفعل</value></data>
+  <data name="Admin_UserIdRequired" xml:space="preserve"><value>معرّف المستخدم مطلوب</value></data>
+  <data name="Admin_TokenRequired" xml:space="preserve"><value>الرمز مطلوب</value></data>
+  <data name="Admin_InvalidTokenFormat" xml:space="preserve"><value>تنسيق الرمز غير صالح</value></data>
+  <data name="Admin_VerificationExpired" xml:space="preserve"><value>انتهت صلاحية رابط التحقق هذا</value></data>
+  <data name="Admin_UserNotFoundSimple" xml:space="preserve"><value>لم يتم العثور على المستخدم</value></data>
+  <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>الرمز غير صالح أو منتهي الصلاحية</value></data>
+  <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>تم تأكيد البريد الإلكتروني بالفعل</value></data>
+  <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>المزوّد ومفتاح المزوّد مطلوبان</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>هناك معلومة ناقصة</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>رابط التأكيد هذا غير مكتمل. افتح أحدث رسالة تحقق وصلتك عبر البريد الإلكتروني واستخدم الرابط الموجود فيها.</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>يبدو أن هذا الرابط غير صحيح</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>افتح أحدث رسالة تحقق وصلتك عبر البريد الإلكتروني واستخدم الرابط الموجود فيها.</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>انتهت صلاحية هذا الرابط</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>سجّل الدخول ليتم إرسال رسالة تحقق جديدة.</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>تم تأكيد بريدك الإلكتروني بالفعل</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>يمكنك تسجيل الدخول الآن.</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>أكّد بريدك الإلكتروني</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>أكّد أن هذا العنوان يعود إليك.</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>تأكيد بريدي الإلكتروني</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>الانتقال إلى تسجيل الدخول</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>تحقق من عنوان بريدك الإلكتروني</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>تحقق من بريدك الإلكتروني</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>انقر على الرابط أدناه للتحقق من عنوان بريدك الإلكتروني:</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>تحقق من البريد الإلكتروني</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>إذا لم تقم بإنشاء حساب، يمكنك تجاهل هذه الرسالة بأمان.</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>إعادة تعيين كلمة المرور</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>إعادة تعيين كلمة المرور</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>انقر على الرابط أدناه لتعيين كلمة مرور جديدة:</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>إعادة تعيين كلمة المرور</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>تنتهي صلاحية هذا الرابط خلال ساعة واحدة. إذا لم تطلب إعادة تعيين كلمة المرور، يمكنك تجاهل هذه الرسالة بأمان.</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>لديك حساب بالفعل</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>لديك حساب بالفعل</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>حاول شخص ما التسجيل باستخدام هذا البريد الإلكتروني، لكن الحساب موجود بالفعل. سجّل الدخول بدلاً من ذلك، أو أعد تعيين كلمة المرور إذا نسيتها.</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>تسجيل الدخول</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>إذا لم تكن أنت من قام بذلك، يمكنك تجاهل هذه الرسالة بأمان.</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>تم تسجيل الخروج</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>تسجيل الخروج</value></data>
+</root>

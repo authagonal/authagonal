@@ -32,28 +32,33 @@ Storage can be configured one of two ways, supply **either** `Storage:Connection
 |---|---|---|
 | `Authentication:CookieLifetimeHours` | `48` | Cookie session lifetime (sliding) |
 | `Authentication:AllowInsecureCookie` | `false` | Let the session cookie be sent over plain http (`SameAsRequest` instead of `Always`). **Development only.** The cookie IS the session, and `SameAsRequest` only looks equivalent behind a TLS-terminating proxy: it depends on `X-Forwarded-Proto` arriving and being trusted, so a misconfigured ingress, a health probe on plain HTTP, or a proxy that drops the header yields a non-Secure cookie that then rides any plaintext request to the same host. The failure is silent. |
-| `Authentication:CookieDomain` | *(unset)* | Scope the session cookie to a parent domain, so it is sent to sibling subdomains (`app.example.com` as well as `auth.example.com`). **This costs origin binding:** the cookie can no longer carry the `__Host-` prefix, which is what makes the browser refuse it unless it is Secure, `Path=/` and has no `Domain` — so any subdomain that can set cookies on the parent, and anything that can take over one, is in scope. Leave it unset unless a sibling origin genuinely needs the session. |
-| `Auth:AllowInsecureHttp` | `false` | Let the OAuth endpoints (`/connect/*`) answer plain http requests. **Development only.** RFC 6749 §3.1/§3.2 require TLS at the authorization and token endpoints, so by default a non-https request to any of them is refused with `invalid_request`. The scheme is evaluated *after* forwarded-header processing, so a proxy that terminates TLS and forwards `X-Forwarded-Proto: https` passes the gate with this left off — provided that proxy is declared in [`ForwardedHeaders:KnownNetworks` / `KnownProxies`](#the-two-headers-are-not-trusted-on-the-same-terms), without which the header is ignored. Only a genuinely plaintext deployment (the shipped `docker-compose.yml`, the custom-server demo) needs it, and the server logs a warning at startup whenever it is on. Propagated to `AuthagonalProtocolOptions.AllowInsecureHttp`, so it also governs the endpoints owned by `Authagonal.Protocol` (see [Extensibility](extensibility#embedding-authagonalprotocol-alone)). |
-| `Auth:RequireMinimumRuntime` | `false` | Refuse to start when the .NET shared framework is older than the security floor Authagonal requires (**9.0.18 / 10.0.10**). The floor exists because the fixes for GHSA-37gx-xxp4-5rgx and GHSA-w3x6-4m5h-cxqf — an infinite loop and an XXE / resource-exhaustion pair in `System.Security.Cryptography.Xml`, both reachable from the **anonymous** SAML ACS endpoint — ship in the runtime, not in a package this library can pin, so no dependency of yours can guarantee them. Left `false`, an old runtime is a `Critical` log and the server starts: refusing by default would turn a version bump of Authagonal into an outage on a fleet whose runtime is one patch behind. Set it `true` where not starting is preferable to serving unauthenticated XML on an unpatched runtime. |
+| `Authentication:CookieDomain` | *(unset)* | Scope the session cookie to a parent domain, so it is sent to sibling subdomains (`app.example.com` as well as `auth.example.com`). **This costs origin binding:** the cookie can no longer carry the `__Host-` prefix, which is what makes the browser refuse it unless it is Secure, `Path=/` and has no `Domain`, so any subdomain that can set cookies on the parent, and anything that can take over one, is in scope. Leave it unset unless a sibling origin genuinely needs the session. |
+| `Auth:AllowInsecureHttp` | `false` | Let the OAuth endpoints (`/connect/*`) answer plain http requests. **Development only.** RFC 6749 §3.1/§3.2 require TLS at the authorization and token endpoints, so by default a non-https request to any of them is refused with `invalid_request`. The scheme is evaluated *after* forwarded-header processing, so a proxy that terminates TLS and forwards `X-Forwarded-Proto: https` passes the gate with this left off, provided that proxy is declared in [`ForwardedHeaders:KnownNetworks` / `KnownProxies`](#the-two-headers-are-not-trusted-on-the-same-terms), without which the header is ignored. Only a genuinely plaintext deployment (the shipped `docker-compose.yml`, the custom-server demo) needs it, and the server logs a warning at startup whenever it is on. Propagated to `AuthagonalProtocolOptions.AllowInsecureHttp`, so it also governs the endpoints owned by `Authagonal.Protocol` (see [Extensibility](extensibility#embedding-authagonalprotocol-alone)). |
+| `Auth:RequireMinimumRuntime` | `false` | Refuse to start when the .NET shared framework is older than the security floor Authagonal requires (**9.0.18 / 10.0.10**). The floor exists because the fixes for GHSA-37gx-xxp4-5rgx and GHSA-w3x6-4m5h-cxqf (an infinite loop and an XXE / resource-exhaustion pair in `System.Security.Cryptography.Xml`, both reachable from the **anonymous** SAML ACS endpoint) ship in the runtime, not in a package this library can pin, so no dependency of yours can guarantee them. Left `false`, an old runtime is a `Critical` log and the server starts: refusing by default would turn a version bump of Authagonal into an outage on a fleet whose runtime is one patch behind. Set it `true` where not starting is preferable to serving unauthenticated XML on an unpatched runtime. |
 | `Auth:MaxFailedAttempts` | `5` | Failed login attempts before account lockout |
 | `Auth:LockoutDurationMinutes` | `10` | Account lockout duration after max failed attempts |
+| `Auth:MaxLoginAttemptsPerIp` | `30` | Password attempts allowed per source address per `Auth:LoginWindowMinutes`, and (separately) per submitted email in the same window. Per-account lockout cannot bound a spray (one attempt each against thousands of accounts), and every unauthenticated attempt pays a full PBKDF2, so this bounds both. Exceeding it answers `429 too_many_attempts` (`AuthEndpoints.cs:107-119`). |
+| `Auth:LoginWindowMinutes` | `5` | Window for `Auth:MaxLoginAttemptsPerIp` |
 | `Auth:MaxRegistrationsPerIp` | `5` | Maximum registrations per IP address within the window |
 | `Auth:RegistrationWindowMinutes` | `60` | Registration rate limiting window |
 | `Auth:MaxPasswordResetsPerEmail` | `3` | Maximum password-reset emails per target address within the window (keyed on the email, not the caller IP, so one address can't be email-bombed) |
 | `Auth:MaxPasswordResetsPerIp` | `15` | Maximum forgot-password requests per source IP within the window. The per-email cap bounds mail to one victim; this bounds a caller working through an address list, which is otherwise unbounded anonymous mail from your verified sending domain plus a store read per address. |
 | `Auth:PasswordResetWindowMinutes` | `60` | Password-reset rate limiting window |
-| `Auth:DurableRateLimiting` | `false` | Keep rate-limit counters in the configured store so every replica shares one budget, instead of each node keeping its own. Costs a store round trip per check; a single-node deployment gains nothing. Requires a provider that supplies `IRateLimitCounterStore` (Azure, SQL, AWS) — the host refuses to start otherwise rather than silently reverting to per-node limits. See [Cluster-wide limits](#cluster-wide-limits-authdurableratelimiting). |
+| `Auth:DurableRateLimiting` | `false` | Keep rate-limit counters in the configured store so every replica shares one budget, instead of each node keeping its own. Costs a store round trip per check; a single-node deployment gains nothing. Requires a provider that supplies `IRateLimitCounterStore` (Azure, SQL, AWS). The host refuses to start otherwise rather than silently reverting to per-node limits. See [Cluster-wide limits](#cluster-wide-limits-authdurableratelimiting). |
 | `Auth:AutoConfirmEmailDomains` | *(empty)* | Email domains (string array) whose self-service registrations are auto-confirmed, they skip the verification email. Empty (the default) means every registration must verify. Intended only for dev/test; never list a domain that can receive real mail. |
+| `Auth:AllowPasswordlessAccountClaim` | `false` | Registering an email that belongs to an existing account with **no local credential** (federated or JIT-provisioned) stages a password on it instead of returning the enumeration-neutral duplicate response. The staged credential and any attributes stay inert until the claimant clicks a fresh verification email, so knowing a federated account's email is not enough to take it over. An account that already has a password is never affected. See [User Upgrade](user-upgrade). |
+| `Auth:ClaimAllowedAttributeKeys` | *(empty)* | Custom-attribute keys a passwordless claim may carry from the register request onto the claimed account. Empty allows every key (back-compat); list keys to restrict what a claim can inject into downstream provisioning and tokens. |
 | `Auth:EmailVerificationExpiryHours` | `24` | Email verification link lifetime |
 | `Auth:PasswordResetExpiryMinutes` | `60` | Password reset link lifetime |
 | `Auth:MfaChallengeExpiryMinutes` | `5` | MFA challenge token lifetime |
 | `Auth:MfaSetupTokenExpiryMinutes` | `15` | MFA setup token lifetime (for forced enrollment) |
+| `Auth:WebAuthnAllowedHosts` | *(empty)* | Hosts permitted to act as a WebAuthn relying party. Empty accepts any host (existing deployments keep working) and is a gap: the RP ID and expected origin are otherwise derived from the request being validated. On a multi-tenant deployment list every tenant host. See [MFA](mfa). |
 | `Auth:Pbkdf2Iterations` | `100000` | PBKDF2 iteration count for password hashing |
-| `Auth:FailedLoginMinimumMilliseconds` | `250` | Wall-clock floor a failed login is held to before `invalid_credentials` is returned, measured from the start of the request. Closes the user-enumeration timing oracle: a missing account is verified against a dummy hash in the native PBKDF2 format, but a real account may still hold an imported bcrypt, Scrypt.NET, or ASP.NET Identity V3 hash at a different cost, so equal work is impossible and equal elapsed time is what's enforced. Raise it above the slowest hash the deployment holds, e.g. if you imported bcrypt above cost 11, a Scrypt.NET `$s2$` hash at a high `N`, or raised `Pbkdf2Iterations` well past the default — a single warning is logged the first time a failed login overruns it. `0` disables the pad and re-opens the oracle. |
+| `Auth:FailedLoginMinimumMilliseconds` | `250` | Wall-clock floor a failed login is held to before `invalid_credentials` is returned, measured from the start of the request. Closes the user-enumeration timing oracle: a missing account is verified against a dummy hash in the native PBKDF2 format, but a real account may still hold an imported bcrypt, Scrypt.NET, or ASP.NET Identity V3 hash at a different cost, so equal work is impossible and equal elapsed time is what's enforced. Raise it above the slowest hash the deployment holds, e.g. if you imported bcrypt above cost 11, a Scrypt.NET `$s2$` hash at a high `N`, or raised `Pbkdf2Iterations` well past the default. A single warning is logged the first time a failed login overruns it. `0` disables the pad and re-opens the oracle. |
 | `Auth:RefreshTokenReuseGraceSeconds` | `0` | Opt-in grace window (seconds) for concurrent refresh token reuse. `0` (default) keeps the strict posture: any reuse of a consumed refresh token revokes all tokens for that user+client. Set `> 0` to treat a reuse within the window as an idempotent retry (re-delivers the successor tokens), useful for mobile clients with connectivity flaps. |
 | `Auth:DynamicClientRegistrationEnabled` | `false` | Enable the `POST /connect/register` dynamic client registration endpoint (RFC 7591). Off by default because open registration can be abused in multi-tenant deployments. See [Dynamic Client Registration](client-registration). |
-| `Auth:DynamicClientRegistrationScopes` | *(empty)* | Scopes an anonymous registrant may assign to itself, on top of the always-registrable OIDC built-ins (`openid`, `profile`, `email`, `offline_access`). Empty means the built-ins and nothing else: a scope existing in the store is not permission for a self-registered client to declare it. Role-gated scopes are never registrable regardless. See [Dynamic Client Registration](client-registration). |
-| `Auth:SigningKeyLifetimeDays` | `90` | RSA signing key lifetime before automatic rotation |
+| `Auth:DynamicClientRegistrationScopes` | *(empty)* | Scopes an anonymous registrant may assign to itself, on top of the always-registrable OIDC built-ins (`openid`, `profile`, `email`, `phone`, `offline_access`). Empty means the built-ins and nothing else: a scope existing in the store is not permission for a self-registered client to declare it. Role-gated scopes are never registrable regardless. See [Dynamic Client Registration](client-registration). |
+| `Auth:SigningKeyLifetimeDays` | `90` | Signing key lifetime before automatic rotation (keys are ES256 / P-256) |
 | `Auth:SigningKeyCacheRefreshMinutes` | `60` | How often signing keys are reloaded from storage |
 | `Auth:KeyRotationEnabled` | `false` | Enable automatic signing key rotation |
 | `Auth:KeyRotationCheckIntervalMinutes` | `360` | How often to check if the active key needs rotation |
@@ -61,6 +66,9 @@ Storage can be configured one of two ways, supply **either** `Storage:Connection
 | `Auth:SecurityStampRevalidationMinutes` | `30` | Interval between cookie security stamp checks |
 | `Auth:AllowedInternalTargets` | *(empty)* | Internal destinations Authagonal may fetch from on the paths where **you** supplied the URL: upstream SAML metadata, upstream OIDC discovery, provisioning callbacks. Empty means every internal address is refused. See [Outbound fetches](#outbound-fetches-ssrf-guard). |
 | `Auth:AllowOutboundProxy` | `false` | Send those same operator-configured fetches through the ambient HTTP proxy, accepting that the address check cannot see through it. Never applies to a client-registered `jwks_uri` or back-channel logout URI. See [Outbound fetches](#outbound-fetches-ssrf-guard). |
+| `Auth:AtRestBackfillEnabled` | `false` | Run the at-rest backfill once at startup, on the cluster leader. It rewrites every existing user row and its profile-derived index rows to the current at-rest scheme, which is the migration path for enabling `IFieldCipher` / `IIndexTokenizer` on a deployment that already has data (see [Extensibility](extensibility#pii-field-encryption-ifieldcipher)). Registering a cipher alone encrypts only rows written afterwards. It is real write volume, idempotent, and runs once per process, so turn it off once the log reports a complete run. |
+| `Auth:MaxScimGroupsPerClient` | `5000` | Most SCIM groups one provisioning client may own; the create is refused past it. Group storage is unindexed, so an unbounded table would make every token mint pay for it. |
+| `Auth:MaxScimGroupMembers` | `10000` | Most members one SCIM group may carry; create, replace and patch are refused past it. |
 
 ## Data Protection
 
@@ -69,11 +77,11 @@ ASP.NET Core Data Protection keys (which encrypt the session cookie) must be sha
 | Setting | Default | Description |
 |---|---|---|
 | `DataProtection:BlobUri` | *(none)* | Explicit Azure Blob URI for the key ring (e.g. `https://{account}.blob.core.windows.net/dataprotection/keys.xml`). Authenticates via `DefaultAzureCredential`, the preferred production path alongside `Storage:TableServiceUri`. |
-| *(fallback)* | — | When `DataProtection:BlobUri` is unset, the key ring is persisted automatically: to a `dataprotection` container in the account named by `Storage:ConnectionString` (unless that is Azurite), or — on the managed-identity path — to the blob endpoint derived from `Storage:TableServiceUri` (`https://{account}.table.…` → `https://{account}.blob.…/dataprotection/keys.xml`), which needs Storage Blob Data Contributor on the same account. Only an unrecognised table endpoint (Azurite, path-style emulators) falls back to the per-machine file store, which is ephemeral and per-pod — `KeyRingStartupCheck` logs Critical when it does. |
+| *(fallback)* | *(none)* | When `DataProtection:BlobUri` is unset, the key ring is persisted automatically: to a `dataprotection` container in the account named by `Storage:ConnectionString` (unless that is Azurite), or, on the managed-identity path, to the blob endpoint derived from `Storage:TableServiceUri` (`https://{account}.table.…` → `https://{account}.blob.…/dataprotection/keys.xml`), which needs Storage Blob Data Contributor on the same account. Only an unrecognised table endpoint (Azurite, path-style emulators) falls back to the per-machine file store, which is ephemeral and per-pod; `KeyRingStartupCheck` logs Critical when it does. |
 
 On the AWS backend, pass an S3 client + bucket to `AddAuthagonalAwsStorage` to persist the key ring to S3, see [Installation → AWS backend](installation#aws-backend). On the SQL backend the key ring is persisted by `AddAuthagonalPostgres` / `AddAuthagonalSqlite`, see [Installation → SQL backend](installation#sql-backend).
 
-Persisting is not encrypting. Whichever backend holds the ring, it is written as plaintext XML — master key included — unless one of these is set. That ring protects the authentication cookie, so a store read is the ability to forge a session for any user:
+Persisting is not encrypting. Whichever backend holds the ring, it is written as plaintext XML (master key included) unless one of these is set. That ring protects the authentication cookie, so a store read is the ability to forge a session for any user:
 
 | Setting | Default | Description |
 |---|---|---|
@@ -93,6 +101,7 @@ Startup enforces this from the *resolved* key-ring options, so it applies identi
 | `Cache:OidcStateLifetimeMinutes` | `10` | OIDC authorization state parameter lifetime |
 | `Cache:SamlReplayLifetimeMinutes` | `10` | SAML AuthnRequest ID lifetime (replay prevention) |
 | `Cache:HealthCheckTimeoutSeconds` | `5` | Table Storage health check timeout |
+| `Cache:HealthCheckCacheSeconds` | `5` | How long the `/health` answer is reused before storage is queried again (matches the `Cache-Control: max-age` the endpoint advertises). `0` probes on every request, which re-opens the anonymous amplification the cache closes. |
 
 ## Background Services
 
@@ -103,12 +112,27 @@ Startup enforces this from the *resolved* key-ring options, so it applies identi
 | `BackgroundServices:GrantReconciliationDelayMinutes` | `10` | Initial delay before first grant reconciliation |
 | `BackgroundServices:GrantReconciliationIntervalMinutes` | `30` | Grant reconciliation interval |
 
+### Expiry sweeps (Azure Table)
+
+Azure Table Storage has no TTL, so on the Azure backend the server runs a `TableExpirySweepService` per table (every 15 minutes, on the cluster leader only) over `MfaChallenges`, `RevokedTokens` and `UpstreamRefreshTokens`, deleting rows whose expiry has passed. It is retention only: every one of those rows is already refused on read by its own expiry check. A row with no stated expiry (possible on `UpstreamRefreshTokens`) is deliberately never swept. DynamoDB and SQL collect the same three tables natively. Nothing to configure.
+
+## Bot Protection (Cloudflare Turnstile)
+
+Opt-in. When a secret key is set, login, registration, forgot-password and reset-password verify a `turnstileToken` against Cloudflare before doing any work; with no secret key, nothing changes and no widget renders.
+
+| Setting | Default | Description |
+|---|---|---|
+| `Turnstile:SiteKey` | *(unset)* | Public sitekey, surfaced to the login UI (`turnstileSiteKey` on `GET /api/auth/providers`) so it can render the widget |
+| `Turnstile:SecretKey` | *(unset)* | Secret for server-side verification. Unset or empty disables Turnstile entirely |
+
+A host serving customer-supplied domains cannot use one key pair (Cloudflare caps a widget's hostnames); it replaces [`ITurnstileKeyProvider`](extensibility#iturnstilekeyprovider). See [Auth API](auth-api#providers) for the `captcha_failed` error.
+
 ## Roles
 
 Roles are defined in the `Roles` array and seeded on startup, alongside clients, scopes and
 providers. Seeding them matters most when a scope is gated with
 [`AllowedRoles`](scopes#role-gated-scopes): a scope gated on a role that nothing creates is gated
-against everybody, including the operator who configured it, and it fails silently — the scope is
+against everybody, including the operator who configured it, and it fails silently: the scope is
 simply never granted.
 
 ```json
@@ -127,7 +151,7 @@ simply never granted.
 |---|---|
 | `Name` | The role name, as used in `Scope.AllowedRoles` and on the `roles` token claim |
 | `Description` | Human-readable; updated on later boots when the seed states one |
-| `Members` | Emails placed in the role on every boot. An address with no user yet is skipped with a warning and retried next boot — startup never depends on an account someone has not created |
+| `Members` | Emails placed in the role on every boot. An address with no user yet is skipped with a warning and retried next boot, so startup never depends on an account someone has not created |
 
 Seeding is **additive and idempotent**. It never removes a role or revokes a membership: config is
 not the system of record for who holds what, so a role granted through the admin API survives the
@@ -143,7 +167,7 @@ Clients are defined in the `Clients` array and seeded on startup. Each client ca
     {
       "ClientId": "my-app",
       "ClientName": "My Application",
-      "ClientSecretHashes": ["sha256-hash-here"],
+      "SecretHashes": ["pbkdf2-hash-here"],
       "AllowedGrantTypes": ["authorization_code"],
       "RedirectUris": ["https://app.example.com/callback"],
       "PostLogoutRedirectUris": ["https://app.example.com"],
@@ -161,35 +185,49 @@ Clients are defined in the `Clients` array and seeded on startup. Each client ca
       "SlidingRefreshTokenLifetimeSeconds": 1296000,
       "RefreshTokenUsage": "OneTime",
       "MfaPolicy": "Enabled",
-      "RequireConsent": false,
       "BackChannelLogoutUri": "https://app.example.com/logout-callback",
-      "ProvisioningApps": ["my-backend"]
+      "RestrictedToOrganizationIds": [],
+      "InitiateLoginUri": "https://app.example.com/login",
+      "ClientUri": "https://app.example.com",
+      "IsDefaultApplication": false
     }
   ]
 }
 ```
 
+Seeding is **read-merge-write**: a field the seed does not state keeps the stored value, so a restart never undoes a change made through the admin API (a disabled client stays disabled, a rotated secret survives, `Audiences` and client JWKS are preserved). A field the seed does state is overwritten on every boot.
+
+Notes on the fields (from `ClientSeedService.ClientSeedConfig`):
+
+- **Aliases.** `ClientId`/`Id`, `ClientName`/`Name`, `AllowedGrantTypes`/`GrantTypes`, `AllowedScopes`/`Scopes`, `AllowedCorsOrigins`/`CorsOrigins` and `RequireClientSecret`/`RequireSecret` are interchangeable. A single `SeedClient` object is also read as one more entry.
+- **Secrets.** Give either `SecretHashes` (already hashed) or `ClientSecret` (plaintext, hashed on startup, used only when no hashes are given). The seed is applied only when it supplies one, so a secret rotated through the admin API survives the next restart. There is no `ClientSecretHashes` key in the seed shape.
+- **`BackChannelLogoutUri`**: where back-channel logout tokens are POSTed; see [Back-Channel Logout](#back-channel-logout).
+- **`RestrictedToOrganizationIds`**: organisation ids the client may be used with. Empty means unrestricted; a single entry also selects that organisation for a request that names none (see [Organizations](organizations)).
+- **`InitiateLoginUri`, `ClientUri`, `IsDefaultApplication`**: feed the `/api/auth/apps` list and the login screen's continue-to-app button.
+- **Not seedable.** `RequireConsent`, `ProvisioningApps`, `RequirePushedAuthorizationRequests`, client JWKS and the front-channel logout fields have no key in the seed shape, so config cannot set them. Unknown keys are ignored without a warning.
+- A seed whose scopes or audiences break the reserved-scope or audience rules is refused with an error log and skipped.
+
 ### Audiences and resource indicators (RFC 8707)
 
 `Audiences` is the client's allowlist for the `resource` parameter (RFC 8707) and the `audience` parameter of a token exchange (RFC 8693). Whatever survives that check becomes the `aud` claim of the issued access token; with no `resource` on the request, `aud` falls back to `Audiences`, and with neither it is the `client_id`.
 
-An empty `Audiences` list means **"none"** for any client that actually answered the question — one whose creating request carried the `audiences` field, whether through dynamic registration (where the field is an Authagonal extension to RFC 7591), the admin API, or seed configuration. Such a client may not name a `resource` at all, on any path: authorize, `client_credentials` and token exchange agree.
+An empty `Audiences` list means **"none"** for any client that actually answered the question: one whose creating request carried the `audiences` field, whether through dynamic registration (where the field is an Authagonal extension to RFC 7591), the admin API, or seed configuration. Such a client may not name a `resource` at all, on any path: authorize, `client_credentials` and token exchange agree.
 
-A dynamic registration that **omits** `audiences` — every stock RFC 7591 client, which is to say every MCP client — was never asked. Its list is "unset" and it may name any absolute URI as `resource`; the MCP authorization spec depends on this. The same reading applies to clients stored before `AudiencesDeclared` existed, because tightening every stored client on upgrade would break flows that work today.
+A dynamic registration that **omits** `audiences` (every stock RFC 7591 client, which is to say every MCP client) was never asked. Its list is "unset" and it may name any absolute URI as `resource`; the MCP authorization spec depends on this. The same reading applies to clients stored before `AudiencesDeclared` existed, because tightening every stored client on upgrade would break flows that work today.
 
 | Client | Empty `Audiences` means |
 |---|---|
-| Creating request carried `audiences` (DCR extension field, admin API, seed) | **deny** — no `resource` may be named |
-| DCR registration that omitted `audiences` | **"unset"** — any absolute URI is accepted as `resource` |
-| Stored before `AudiencesDeclared` existed | **"unset"** — any absolute URI is accepted as `resource` |
+| Creating request carried `audiences` (DCR extension field, admin API, seed) | **deny**: no `resource` may be named |
+| DCR registration that omitted `audiences` | **"unset"**: any absolute URI is accepted as `resource` |
+| Stored before `AudiencesDeclared` existed | **"unset"**: any absolute URI is accepted as `resource` |
 
 **Retrofitting a legacy client** is a `PUT` to the admin client API with `audiencesDeclared: true` (and whatever `audiences` it should be pinned to). The flag only ever tightens: an update can set it and cannot clear it, so an unrelated edit will never silently return a client to the permissive reading.
 
 The consequence for the legacy rows is worth stating plainly rather than burying:
 
-> A pre-existing client with no configured `Audiences` may name **any** absolute URI as `resource` at the authorization endpoint or under `client_credentials`, and receive an access token whose `aud` is that value — signed by this tenant's key, carrying the requesting user's `sub` and whatever scopes the client is allowed.
+> A pre-existing client with no configured `Audiences` may name **any** absolute URI as `resource` at the authorization endpoint or under `client_credentials`, and receive an access token whose `aud` is that value, signed by this tenant's key, carrying the requesting user's `sub` and whatever scopes the client is allowed.
 
-A declared `audiences` list is validated where it is written: at most 20 entries of at most 512 characters, each an absolute URI with an explicit scheme and no fragment. `resource` values are held to the same shape — note that a bare path such as `/admin` is **not** accepted, even though .NET's `Uri` parser will call it an absolute `file:` URI on Linux.
+A declared `audiences` list is validated where it is written: at most 20 entries of at most 512 characters, each an absolute URI with an explicit scheme and no fragment. `resource` values are held to the same shape; note that a bare path such as `/admin` is **not** accepted, even though .NET's `Uri` parser will call it an absolute `file:` URI on Linux.
 
 Naming a resource is not access to it. But it does mean the authorization server cannot be the only thing standing between a client and an API it was never meant to call, so:
 
@@ -197,7 +235,7 @@ Naming a resource is not access to it. But it does mean the authorization server
 - **Resource servers MUST validate `aud` against their own identifier**, not merely against "some value is present".
 - **Set `Audiences` on every client that should be pinned to a fixed set of APIs.** With it configured, an unlisted `resource` is refused with `invalid_target` at the authorization endpoint and on `client_credentials`. This is the only place the restriction can be enforced.
 - **Retrofit `audiencesDeclared: true` onto clients created before it existed**, so their empty audience list means "none" rather than "anything".
-- **A self-registered client may declare `audiences`** at registration and is held to what it declares — including to an empty list. `Auth:DynamicClientRegistrationEnabled` is still off by default; see [Dynamic Client Registration](client-registration).
+- **A self-registered client may declare `audiences`** at registration and is held to what it declares, including to an empty list. `Auth:DynamicClientRegistrationEnabled` is still off by default; see [Dynamic Client Registration](client-registration).
 
 ### Grant Types
 
@@ -217,7 +255,31 @@ Naming a resource is not access to it. But it does mean the authorization server
 
 ### Provisioning Apps
 
-The `ProvisioningApps` array references app IDs defined in the `ProvisioningApps` configuration section. When a user authorizes through this client, they are provisioned into those apps via TCC. See [Provisioning](provisioning) for details.
+A client's `ProvisioningApps` array (read at authorize time, `AuthorizeEndpoint.cs:578`; the config seeder does not bind it and the Admin API client routes do not carry it, so it is set on the stored client record by the host) references app IDs defined in the `ProvisioningApps` configuration section. When a user authorizes through this client, they are provisioned into those apps via TCC. See [Provisioning](provisioning) for details.
+
+## Scopes
+
+Custom [OAuth scopes](scopes) can be seeded from the `Scopes` array. Each entry is upserted by `Name` at startup (an entry with no `Name` is skipped with a warning):
+
+```json
+{
+  "Scopes": [
+    {
+      "Name": "billing.read",
+      "DisplayName": "Billing (read-only)",
+      "Description": "View invoices and payment history",
+      "UserClaims": ["billing_plan"],
+      "ShowInDiscoveryDocument": true,
+      "Emphasize": false,
+      "Group": "Billing",
+      "Required": false,
+      "AllowedRoles": ["finance"]
+    }
+  ]
+}
+```
+
+A field you set wins over the stored value on every start; a field you omit preserves the stored value. Config can therefore add or change `UserClaims` and `AllowedRoles` but cannot empty them (use `PUT /api/v1/scopes/{name}` for that). Field meanings are in [Scope model](scopes#scope-model).
 
 ## Provisioning Apps
 
@@ -333,8 +395,16 @@ Define SAML identity providers in configuration. These are seeded on startup:
 | `ConnectionId` | Yes | Stable identifier (used in URLs like `/saml/{connectionId}/login`) |
 | `ConnectionName` | No | Display name (defaults to ConnectionId) |
 | `EntityId` | Yes | **This server's** SP entity ID, the identifier you register at the IdP, not the IdP's own entity ID |
-| `MetadataLocation` | Yes | URL to the IdP's SAML metadata XML. Must be https, and publicly routable unless the host is named in [`Auth:AllowedInternalTargets`](#outbound-fetches-ssrf-guard) — this document carries the certificates every assertion is validated against. Paste the XML into `MetadataXml` instead if your IdP publishes no https metadata endpoint. |
+| `MetadataLocation` | Yes | URL to the IdP's SAML metadata XML. Must be https, and publicly routable unless the host is named in [`Auth:AllowedInternalTargets`](#outbound-fetches-ssrf-guard): this document carries the certificates every assertion is validated against. If your IdP publishes no https metadata endpoint, set `metadataXml` through the [Admin API](admin-api) instead; the config seed has no key for it. |
 | `AllowedDomains` | No | Email domains routed to this provider via SSO |
+| `OrganizationId` | No | Scope this connection to one [organisation](organizations). Null (the default) makes it a tenant-level connection; only tenant-level connections register their `AllowedDomains` as SSO domain routes |
+| `JitProvisioningEnabled` | No | Create a user on first sign-in. Default `false` |
+| `AllowUninvitedJit` | No | Let JIT create a user into an organisation they were not invited to. Default `false` |
+| `ChallengeMfaAfterLogin` | No | Challenge for the app's MFA policy after the IdP sign-in. Default `true` |
+| `ProvisioningAttributeParams` | No | Assertion attributes passed to downstream provisioning |
+| `AllowUnsolicitedResponses` | No | Accept IdP-initiated (unsolicited) responses on this connection. Default `false` |
+
+The booleans are written from the seed on every boot, default included, so a seeded connection that an operator changed through the Admin API reverts them on the next restart. Fields the seed has no key for (`SpCertificate`, `SignAuthnRequests`, `NameIdFormat`, `MetadataXml`, `IconUrl`) are preserved.
 
 ## OIDC Providers
 
@@ -363,8 +433,21 @@ Define OIDC identity providers in configuration. These are seeded on startup:
 | `MetadataLocation` | Yes | URL to the IdP's OpenID Connect discovery document |
 | `ClientId` | Yes | OAuth2 client ID registered with the IdP |
 | `ClientSecret` | Yes | OAuth2 client secret (protected via `ISecretProvider` at startup) |
-| `RedirectUrl` | No | **Ignored.** The redirect URI is derived per request as `{Issuer}/oidc/callback` — register *that* with the IdP. A value here has no effect and is logged as ignored. |
+| `RedirectUrl` | No | **Ignored.** The redirect URI is derived per request as `{Issuer}/oidc/callback`: register *that* with the IdP. A value here has no effect and is logged as ignored. |
 | `AllowedDomains` | No | Email domains routed to this provider via SSO |
+| `OrganizationId` | No | Scope this connection to one [organisation](organizations); null means tenant-level |
+| `JitProvisioningEnabled` | No | Create a user on first sign-in. Default `false` |
+| `AllowUninvitedJit` | No | Let JIT create a user into an organisation they were not invited to. Default `false` |
+| `UseUpstreamSubjectAsUserId` | No | Use the upstream `sub` as the local user id. Default `false` |
+| `ShowOnLogin` | No | Show a button for this connection on the login screen. Default `true`; domain-routed connections are reached email-first regardless |
+| `ChallengeMfaAfterLogin` | No | Challenge for the app's MFA policy after the IdP sign-in. Default `true` |
+| `AutoLinkExistingByEmail` | No | Link a first-time sign-in to an existing local account with the same email. Default `false` |
+| `PassthroughParams`, `ProvisioningAttributeParams` | No | Parameters passed through to the IdP / on to downstream provisioning |
+| `RevalidateOnRefresh` | No | Re-check the upstream session when a refresh token is redeemed. Default `false` |
+| `IsExternalConnection`, `SessionExpClaim` | No | Federated-session settings; see [Federated Sessions](federated-sessions) |
+| `InteractionPath` | No | Login-app path (for example `/guest`) shown before an unauthenticated `idp_hint` request is federated through this connection. Empty federates directly |
+
+The OIDC seed overwrites more than the SAML one does, on every boot. The booleans are written from the seed, default included, so a seeded connection that an operator changed through the Admin API reverts them on the next restart. The same applies to `AllowedDomains`, `PassthroughParams`, `ProvisioningAttributeParams`, `SessionExpClaim` and `InteractionPath`: a key the seed omits resets to empty or its default rather than keeping the stored value. Only `IconUrl` and `CreatedAt` are always preserved, and `ConnectionName` and `OrganizationId` are preserved when the seed omits them.
 
 > **Note:** Providers can also be managed at runtime via the [Admin API](admin-api). Config-seeded providers are upserted on every startup, so config changes take effect on restart.
 
@@ -381,9 +464,9 @@ When configured, secret values that look like Key Vault references are resolved 
 
 ### Migrating into a vault, and closing the door afterwards
 
-Both vault-backed providers return an unprefixed reference verbatim, treating it as a plaintext value written before the deployment had a vault. That is what lets a running system be migrated a secret at a time rather than all at once — but left open it is a permanent downgrade path: anything that can write one configuration column (a half-finished migration, an admin path that stores a raw value where a reference belongs, an attacker with storage access but none to the vault) replaces a vault-protected secret with a value of its own choosing, and it verifies perfectly, because for an unprefixed reference the reference *is* the value.
+Both vault-backed providers return an unprefixed reference verbatim, treating it as a plaintext value written before the deployment had a vault. That is what lets a running system be migrated a secret at a time rather than all at once, but left open it is a permanent downgrade path: anything that can write one configuration column (a half-finished migration, an admin path that stores a raw value where a reference belongs, an attacker with storage access but none to the vault) replaces a vault-protected secret with a value of its own choosing, and it verifies perfectly, because for an unprefixed reference the reference *is* the value.
 
-Set `SecretProvider:RequireVaultReferences` when the migration is done. Resolving an unprefixed reference then throws instead of quietly returning cleartext. Setting it while the resolved provider is the plaintext one is refused at startup, since that combination has no working state — every reference the plaintext provider writes is unprefixed.
+Set `SecretProvider:RequireVaultReferences` when the migration is done. Resolving an unprefixed reference then throws instead of quietly returning cleartext. Setting it while the resolved provider is the plaintext one is refused at startup, since that combination has no working state: every reference the plaintext provider writes is unprefixed.
 
 The server also logs a startup warning whenever the plaintext provider is what a non-Development host ends up with.
 
@@ -445,9 +528,9 @@ The clustering layer provides **leader election** (so leader-gated jobs like sig
 | Setting | Env Variable | Default | Description |
 |---|---|---|---|
 | `Cluster:Enabled` | `Cluster__Enabled` | `true` | Master switch. When `false` the node runs standalone (always leader, in-process event bus). |
-| `Cluster:Secret` | `Cluster__Secret` | *(none)* | Shared secret required on the internal-only `/_internal/backchannel-logout` endpoint. When set, callers must present it in the `X-Cluster-Secret` header (compared in constant time). When **unset the endpoint authorizes nobody** and answers 404 — a source address is not a credential, and loopback is exactly what a same-host reverse proxy presents for every request it forwards, internet-originated ones included. |
-| `Cluster:AllowLoopbackWithoutSecret` | `Cluster__AllowLoopbackWithoutSecret` | `false` | Development opt-in: with no `Cluster:Secret`, accept a caller whose **pre-forwarding peer address** is loopback. Private ranges are still refused — in a shared cluster network that would trust every neighbouring workload. Do not set it on a host behind a reverse proxy. |
-| `Cluster:RunLeaderElection` | `Cluster__RunLeaderElection` | `true` | Whether this node runs the lease-renewal loop and can become leader. `false` still joins the cluster and consumes the event bus; it just never contends for the lease — for a node that must receive cluster events but must never hold leadership. |
+| `Cluster:Secret` | `Cluster__Secret` | *(none)* | Shared secret required on the internal-only `/_internal/backchannel-logout` endpoint. When set, callers must present it in the `X-Cluster-Secret` header (compared in constant time). When **unset the endpoint authorizes nobody** and answers 404: a source address is not a credential, and loopback is exactly what a same-host reverse proxy presents for every request it forwards, internet-originated ones included. |
+| `Cluster:AllowLoopbackWithoutSecret` | `Cluster__AllowLoopbackWithoutSecret` | `false` | Development opt-in: with no `Cluster:Secret`, accept a caller whose **pre-forwarding peer address** is loopback. Private ranges are still refused: in a shared cluster network that would trust every neighbouring workload. Do not set it on a host behind a reverse proxy. |
+| `Cluster:RunLeaderElection` | `Cluster__RunLeaderElection` | `true` | Whether this node runs the lease-renewal loop and can become leader. `false` still joins the cluster and consumes the event bus; it just never contends for the lease. It suits a node that must receive cluster events but must never hold leadership. |
 | `Cluster:LeaseTtlSeconds` | `Cluster__LeaseTtlSeconds` | `30` | Leadership lease duration. Renewed at roughly half this interval. |
 | `Cluster:PollIntervalSeconds` | `Cluster__PollIntervalSeconds` | `3` | How often the event-bus backend polls for messages published by other nodes. |
 
@@ -478,7 +561,7 @@ Authagonal keys rate limiting and account lockout on the client IP, and only emi
 | Setting | Env Variable | Default | Description |
 |---|---|---|---|
 | `ForwardedHeaders:ForwardLimit` | `ForwardedHeaders__ForwardLimit` | `1` | Number of proxy hops to honour from the right of the `X-Forwarded-For` chain. The default of `1` trusts only the single hop your ingress appends and ignores anything further left in the chain. |
-| `ForwardedHeaders:KnownNetworks` | `ForwardedHeaders__KnownNetworks__0` (array) | *(empty)* | CIDR ranges (string array, e.g. `"10.0.0.0/8"`) permitted to set forwarded headers. Set this to your proxy / ingress / pod CIDR. Declaring it is what allows `X-Forwarded-Proto` to be honoured at all — see below. |
+| `ForwardedHeaders:KnownNetworks` | `ForwardedHeaders__KnownNetworks__0` (array) | *(empty)* | CIDR ranges (string array, e.g. `"10.0.0.0/8"`) permitted to set forwarded headers. Set this to your proxy / ingress / pod CIDR. Declaring it is what allows `X-Forwarded-Proto` to be honoured at all; see below. |
 | `ForwardedHeaders:KnownProxies` | `ForwardedHeaders__KnownProxies__0` (array) | *(empty)* | Individual proxy IP addresses (string array) permitted to set forwarded headers. Use alongside or instead of `KnownNetworks`. |
 
 ```json
@@ -493,11 +576,11 @@ Authagonal keys rate limiting and account lockout on the client IP, and only emi
 
 ### The two headers are not trusted on the same terms
 
-`X-Forwarded-For` adjusts the **client IP** — the key rate limiting, lockout and the `/_internal` guard hang off. With nothing declared, Authagonal honours it from the loopback and RFC1918 ranges and logs a warning. That is a best-effort default, and it beats the framework's behaviour with an empty trust set, which is to honour the header from *any* caller alive.
+`X-Forwarded-For` adjusts the **client IP**, the key rate limiting, lockout and the `/_internal` guard hang off. With nothing declared, Authagonal honours it from the loopback and RFC1918 ranges and logs a warning. That is a best-effort default, and it beats the framework's behaviour with an empty trust set, which is to honour the header from *any* caller alive.
 
 `X-Forwarded-Proto` changes the **scheme**, and the scheme decides whether `/connect/*` answers at all (RFC 6749 §3.1/§3.2), whether cookies are marked `Secure`, and whether generated absolute URLs are https. It is honoured **only** from a proxy you have declared in `KnownNetworks` / `KnownProxies`. A private address is not a declaration: Authagonal ships as a library and cannot see the network it was deployed onto, so "the peer holds a private address" is a guess about topology. On a flat LAN, a shared VPC or a shared container bridge, every neighbouring workload is inside those ranges and could assert `https` over a request that arrived in cleartext.
 
-**If your proxy has no fixed address** — a Kubernetes ingress, a rotating load balancer, a platform that will not tell you the hop's CIDR — declare every peer a proxy:
+**If your proxy has no fixed address** (a Kubernetes ingress, a rotating load balancer, a platform that will not tell you the hop's CIDR), declare every peer a proxy:
 
 ```json
 {
@@ -507,21 +590,21 @@ Authagonal keys rate limiting and account lockout on the client IP, and only emi
 }
 ```
 
-That is safe exactly when nothing but the proxy can reach the process, which is the assumption such a deployment is already relying on. Writing it down puts it somewhere it can be reviewed, rather than leaving the library to infer it. If other workloads *can* reach Kestrel directly, they can spoof the scheme and the client IP under this setting — pin the real CIDR instead.
+That is safe exactly when nothing but the proxy can reach the process, which is the assumption such a deployment is already relying on. Writing it down puts it somewhere it can be reviewed, rather than leaving the library to infer it. If other workloads *can* reach Kestrel directly, they can spoof the scheme and the client IP under this setting, so pin the real CIDR instead.
 
 ### Undeclared proxy: every per-source quota is shared
 
-Rate limits keyed on the caller's address — login, registration, forgot-password, dynamic client registration, the SAML ACS — need to know which client made the request. Behind a reverse proxy that is the forwarded client IP, and the forwarded client IP is only evidence if you declared the proxy that wrote it. With nothing declared, Authagonal keys those quotas on the peer it actually observes, which behind a proxy is the proxy: **every client shares one budget, and any single caller can spend it for everybody** (the login default is 30 attempts per 5 minutes).
+Rate limits keyed on the caller's address (login, registration, forgot-password, dynamic client registration, the SAML ACS) need to know which client made the request. Behind a reverse proxy that is the forwarded client IP, and the forwarded client IP is only evidence if you declared the proxy that wrote it. With nothing declared, Authagonal keys those quotas on the peer it actually observes, which behind a proxy is the proxy: **every client shares one budget, and any single caller can spend it for everybody** (the login default is 30 attempts per 5 minutes).
 
-That is deliberate rather than a bug, and it cannot be fixed in the server. The alternative — keying on the forwarded value anyway — hands a caller a fresh budget per request by varying one header, because behind an L4 load balancer the rightmost forwarded hop *is* the caller's own header. Which of the two situations you are in is exactly what the declaration tells the server and nothing else can. Declare the proxy and the quotas become per-client.
+That is deliberate rather than a bug, and it cannot be fixed in the server. The alternative, keying on the forwarded value anyway, hands a caller a fresh budget per request by varying one header, because behind an L4 load balancer the rightmost forwarded hop *is* the caller's own header. Which of the two situations you are in is exactly what the declaration tells the server and nothing else can. Declare the proxy and the quotas become per-client.
 
-> ⚠️ **TLS-terminating proxy required, and it must be declared.** Authagonal must run behind a TLS-terminating reverse proxy (or terminate TLS itself). HSTS (`Strict-Transport-Security`) is only emitted on HTTPS requests, and the OAuth endpoints refuse plaintext requests outright unless `Auth:AllowInsecureHttp` is set — so the proxy must forward `X-Forwarded-Proto: https` **and** be named in `ForwardedHeaders:KnownNetworks` / `ForwardedHeaders:KnownProxies` for HSTS to be sent and `/connect/*` to answer at all. Declaring nothing is the common upgrade failure: the header arrives, nothing is entitled to act on it, and every `/connect/*` request answers 400 on a deployment that genuinely is on TLS. The startup log says so, and so does the refusal body.
+> ⚠️ **TLS-terminating proxy required, and it must be declared.** Authagonal must run behind a TLS-terminating reverse proxy (or terminate TLS itself). HSTS (`Strict-Transport-Security`) is only emitted on HTTPS requests, and the OAuth endpoints refuse plaintext requests outright unless `Auth:AllowInsecureHttp` is set, so the proxy must forward `X-Forwarded-Proto: https` **and** be named in `ForwardedHeaders:KnownNetworks` / `ForwardedHeaders:KnownProxies` for HSTS to be sent and `/connect/*` to answer at all. Declaring nothing is the common upgrade failure: the header arrives, nothing is entitled to act on it, and every `/connect/*` request answers 400 on a deployment that genuinely is on TLS. The startup log says so, and so does the refusal body.
 
 ## Outbound fetches (SSRF guard)
 
 Authagonal makes server-initiated HTTP requests to URLs it did not choose: an upstream IdP's SAML metadata or OIDC discovery document, a client's `jwks_uri` during `private_key_jwt` authentication, a back-channel logout URI, a provisioning callback. Some of those URLs are supplied by whoever registered a client, and a URL naming `169.254.169.254` or a host inside your cluster is then a request Authagonal makes on an attacker's behalf.
 
-Every one of those fetches is guarded twice. The **URL check** refuses non-http(s) schemes, literal internal addresses, and `localhost` / `.local` / `.internal` names, at the point the URL is accepted — an admin write, a dynamic client registration — where the error is attributable to whoever typed it. The **address check** runs at the socket: it resolves the host, refuses every returned address that is internal, and connects to an address it actually checked rather than handing the name back to the OS. That second one is what a text check cannot do, because a hostname is not text the attacker has to be honest about: `logout.attacker.test` passes every suffix and literal rule and then answers with the cloud metadata address. Because a redirect is a new connection, the address check re-runs on every hop.
+Every one of those fetches is guarded twice. The **URL check** refuses non-http(s) schemes, literal internal addresses, and `localhost` / `.local` / `.internal` names, at the point the URL is accepted (an admin write, a dynamic client registration), where the error is attributable to whoever typed it. The **address check** runs at the socket: it resolves the host, refuses every returned address that is internal, and connects to an address it actually checked rather than handing the name back to the OS. That second one is what a text check cannot do, because a hostname is not text the attacker has to be honest about: `logout.attacker.test` passes every suffix and literal rule and then answers with the cloud metadata address. Because a redirect is a new connection, the address check re-runs on every hop.
 
 Both are on by default and most deployments never notice them. Two things make them visible.
 
@@ -546,23 +629,23 @@ Federating with an IdP that is only reachable over your private network, or prov
 
 Env-variable form is `Auth__AllowedInternalTargets__0`, `__1`, and so on. A malformed CIDR entry fails at startup rather than silently permitting nothing.
 
-**This list only reaches the URLs you supplied.** The upstream SAML metadata fetch, upstream OIDC discovery — including the `token_endpoint`, `userinfo_endpoint` and `jwks_uri` that document names — and provisioning callbacks. It deliberately does **not** reach a client-registered `jwks_uri` or back-channel logout URI, where an internal host is never a deployment, so opening a federation target cannot also open the metadata service to an anonymous `/connect/token` request. There is no global "off".
+**This list only reaches the URLs you supplied.** The upstream SAML metadata fetch, upstream OIDC discovery (including the `token_endpoint`, `userinfo_endpoint` and `jwks_uri` that document names) and provisioning callbacks. It deliberately does **not** reach a client-registered `jwks_uri` or back-channel logout URI, where an internal host is never a deployment, so opening a federation target cannot also open the metadata service to an anonymous `/connect/token` request. There is no global "off".
 
 Note that https is still required on both federation metadata URLs regardless of this list. That document carries the keys and certificates every upstream assertion is validated against, and a private network is not a secure channel.
 
-> ⚠️ **Multi-tenant hosts: check who writes the metadata URL before you list anything.** This list is scoped to targets *you* configured, and in a single-tenant deployment the connection admin is you. If you run Authagonal for other people — a SaaS where tenant admins configure their own SAML/OIDC connections through the portal or admin API — then `MetadataLocation` is **customer**-supplied, and every entry you add here is reachable by any tenant who points a connection at it. Leave it empty on such a host (the default), and if one tenant genuinely needs an on-premises IdP, give them an egress path that terminates outside your network rather than opening one from inside it.
+> ⚠️ **Multi-tenant hosts: check who writes the metadata URL before you list anything.** This list is scoped to targets *you* configured, and in a single-tenant deployment the connection admin is you. If you run Authagonal for other people (a SaaS where tenant admins configure their own SAML/OIDC connections through the portal or admin API), then `MetadataLocation` is **customer**-supplied, and every entry you add here is reachable by any tenant who points a connection at it. Leave it empty on such a host (the default), and if one tenant genuinely needs an on-premises IdP, give them an egress path that terminates outside your network rather than opening one from inside it.
 
 ### If your egress requires an HTTP proxy
 
-The address check is attached to `SocketsHttpHandler.ConnectCallback`, and with a proxy in effect .NET invokes that callback with the **proxy's** endpoint and never the target's — so the check would inspect the proxy, find it perfectly routable, and permit everything. It would fail open in precisely the networks most likely to have a proxy. So the guarded clients set `UseProxy = false`, and in a proxy-only network their fetches fail.
+The address check is attached to `SocketsHttpHandler.ConnectCallback`, and with a proxy in effect .NET invokes that callback with the **proxy's** endpoint and never the target's, so the check would inspect the proxy, find it perfectly routable, and permit everything. It would fail open in precisely the networks most likely to have a proxy. So the guarded clients set `UseProxy = false`, and in a proxy-only network their fetches fail.
 
-`Auth:AllowOutboundProxy` sends the operator-configured fetches (SAML metadata, OIDC discovery, provisioning callbacks) back through the proxy. You keep the URL check and lose the address check for them: a hostname resolving to an internal address is no longer caught. It does **not** reach the client `jwks_uri` fetch or back-channel logout delivery — those targets are registrant-chosen and reachable from anonymous requests, so there is no switch for them. A network that must proxy those needs an SSRF-filtering egress gateway in front of them.
+`Auth:AllowOutboundProxy` sends the operator-configured fetches (SAML metadata, OIDC discovery, provisioning callbacks) back through the proxy. You keep the URL check and lose the address check for them: a hostname resolving to an internal address is no longer caught. It does **not** reach the client `jwks_uri` fetch or back-channel logout delivery: those targets are registrant-chosen and reachable from anonymous requests, so there is no switch for them. A network that must proxy those needs an SSRF-filtering egress gateway in front of them.
 
-`UseAuthagonal()` logs a warning at startup when it finds `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` set, naming which clients bypass it — otherwise the symptom is "SSO stopped working" with nothing pointing at the cause.
+`UseAuthagonal()` logs a warning at startup when it finds `HTTPS_PROXY`, `HTTP_PROXY` or `ALL_PROXY` set, naming which clients bypass it; otherwise the symptom is "SSO stopped working" with nothing pointing at the cause.
 
 ### What is not guarded
 
-The BFF's outbound clients and email delivery. `AuthagonalBffOptions.Upstreams[].TargetBaseUrl` is your own configuration whose documented example is an internal address, the BFF's token client talks to the authority you configured, and the proxy already refuses any composed target that left the configured upstream authority — so a caller cannot steer those requests. `Resend` posts to a compile-time constant. All three use the ambient proxy normally.
+The BFF's outbound clients and email delivery. `AuthagonalBffOptions.Upstreams[].TargetBaseUrl` is your own configuration whose documented example is an internal address, the BFF's token client talks to the authority you configured, and the proxy already refuses any composed target that left the configured upstream authority, so a caller cannot steer those requests. `Resend` posts to a compile-time constant. All three use the ambient proxy normally.
 
 ## Rate Limiting
 
@@ -570,6 +653,7 @@ Built-in rate limits protect the abuse-prone endpoints:
 
 | Endpoint | Limit | Window | Keyed on |
 |---|---|---|---|
+| `POST /api/auth/login` | 30 (`Auth:MaxLoginAttemptsPerIp`) | 5 minutes (`Auth:LoginWindowMinutes`) | Source address, and separately the submitted email |
 | `POST /api/auth/register` | 5 (`Auth:MaxRegistrationsPerIp`) | 1 hour (`Auth:RegistrationWindowMinutes`) | Client IP |
 | `POST /api/auth/forgot-password` | 3 (`Auth:MaxPasswordResetsPerEmail`) | 1 hour (`Auth:PasswordResetWindowMinutes`) | Target email |
 | `POST /api/auth/forgot-password` | 15 (`Auth:MaxPasswordResetsPerIp`) | 1 hour (`Auth:PasswordResetWindowMinutes`) | Client IP |
@@ -590,7 +674,7 @@ runs, so every replica shares one budget and the ceiling stops multiplying by in
 | Survives a pod restart | no | yes |
 | Backends | any | Azure Table, SQL, DynamoDB |
 
-Worth turning on when a budget guards something guessable — the device-flow `user_code` above all, where
+Worth turning on when a budget guards something guessable, the device-flow `user_code` above all, where
 the attempt limit is the only thing between an attacker and a code that grants a live session, and a
 budget that scales with replica count is the wrong shape. Less useful for the volume limits, where the
 edge is the authoritative bound anyway.
@@ -601,26 +685,26 @@ Details that matter in production:
   and SCIM paths. A single-node deployment gains nothing (there, per-node *is* cluster-wide) and should
   leave it off.
 - **Fixed windows, so bursts can straddle a boundary.** A budget of N is "N per window, and up to 2N
-  across a boundary" — the shipped budgets have that headroom. This is what lets the counter be a single
+  across a boundary", and the shipped budgets have that headroom. This is what lets the counter be a single
   atomic increment on every backend, which is the property the correctness rests on.
 - **It fails open.** If the store is unreachable the request is allowed and an error is logged: the
   limiter guards the login path and must not become a way to take it down. Keep the edge rule in place.
-- **The host will not start** if you set this without a provider that supplies `IRateLimitCounterStore`
-  — it refuses rather than quietly falling back to the per-node limiting you just turned off.
+- **The host will not start** if you set this without a provider that supplies `IRateLimitCounterStore`.
+  It refuses rather than quietly falling back to the per-node limiting you just turned off.
 - **Counter rows are collected automatically**: DynamoDB by native TTL, SQL by `SqlExpiryReaper`, Azure
   Table by a leader-only sweep (Table Storage has neither TTL nor server-side arithmetic, so it is also
   the backend where an increment costs a read plus a conditional write).
 
 ## CORS
 
-CORS is configured dynamically, and **scoped by path** — the previous one-line description ("origins from all
+CORS is configured dynamically, and **scoped by path**: the previous one-line description ("origins from all
 registered clients are automatically allowed") described considerably more than the provider does.
 
 - **Client-registered origins** (`AllowedCorsOrigins` on a client) are honoured only under `/connect/` and
   `/.well-known/`. They do **not** open `/api/auth/`, `/api/v1/` or `/scim/`. A disabled client contributes
   nothing, and a malformed origin is dropped.
 - **Credentials are never allowed** under `/api/auth/`, `/api/v1/`, `/scim/`, `/consent` or `/approvals`, for
-  any origin — operator-configured or client-registered. A browser client calling those with
+  any origin, operator-configured or client-registered. A browser client calling those with
   `credentials: 'include'` from another origin will fail regardless of configuration; use a
   backend-for-frontend (see the `@authagonal/bff` package) rather than credentialed cross-origin calls.
 - Resolved policies are cached for 60 minutes.
@@ -630,7 +714,7 @@ work. That is deliberate: those paths carry the session cookie and the admin sur
 
 ## HashiCorp Vault Transit
 
-`VaultTransitClient` talks to Vault's Transit secrets engine — sign, verify, encrypt, decrypt and keyed HMAC.
+`VaultTransitClient` talks to Vault's Transit secrets engine: sign, verify, encrypt, decrypt and keyed HMAC.
 It is the building block for a Vault-backed `IFieldCipher` or `IIndexTokenizer`, which you register yourself.
 
 **JWT signing is not delegated to Vault.** `ProtocolKeyManager` always signs with the key in

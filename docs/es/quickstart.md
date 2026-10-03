@@ -6,17 +6,19 @@ locale: es
 
 # Inicio rápido
 
-Ponga Authagonal en funcionamiento localmente en 5 minutos.
+Ponga Authagonal en marcha en local en 5 minutos.
 
-## 1. Iniciar el servidor
+## 1. Iniciar el servidor {#1-start-the-server}
 
 ```bash
 docker compose up
 ```
 
-Esto inicia Authagonal en `http://localhost:8080` con Azurite para el almacenamiento.
+Esto inicia Authagonal en `http://localhost:8080` con Azurite como almacenamiento.
 
-## 2. Verificar que está funcionando
+> El archivo compose establece `Auth__AllowInsecureHttp=true`, porque RFC 6749 §3.1/§3.2 exigen TLS en los endpoints de autorización y de token, y de lo contrario Authagonal rechaza las solicitudes en texto plano a `/connect/*`. Ese interruptor es para un portátil. Todo lo que otra persona pueda alcanzar debe ir detrás de un proxy que termine TLS y reenvíe `X-Forwarded-Proto: https`, sin ese interruptor: consulte [Instalación](installation).
+
+## 2. Comprobar que está en ejecución {#2-verify-its-running}
 
 ```bash
 # Health check
@@ -29,9 +31,9 @@ curl http://localhost:8080/.well-known/openid-configuration
 curl http://localhost:8080/login
 ```
 
-## 3. Registrar un cliente
+## 3. Registrar un cliente {#3-register-a-client}
 
-Agregue un cliente a su `appsettings.json` (o páselo mediante variables de entorno):
+Añada un cliente a su `appsettings.json` (o páselo mediante variables de entorno):
 
 ```json
 {
@@ -51,9 +53,9 @@ Agregue un cliente a su `appsettings.json` (o páselo mediante variables de ento
 }
 ```
 
-Los clientes se inyectan al inicio, seguro en cada despliegue.
+Los clientes se cargan al iniciar, y es seguro hacerlo en cada despliegue.
 
-## 4. Iniciar un inicio de sesión
+## 4. Iniciar un inicio de sesión {#4-initiate-a-login}
 
 Redirija a sus usuarios a:
 
@@ -68,11 +70,11 @@ http://localhost:8080/connect/authorize
   &code_challenge_method=S256
 ```
 
-El usuario ve la página de inicio de sesión, se autentica y es redirigido con un código de autorización.
+El usuario ve la página de inicio de sesión, se autentica y se le redirige de vuelta con un código de autorización.
 
-> **Primer usuario:** registre uno en `http://localhost:8080/login/register`, o cree uno mediante la [API de administración](admin-api). El autorregistro envía un correo de verificación y, sin un remitente de correo configurado (el valor predeterminado local), ese correo se descarta, así que para pruebas locales establezca `Auth__AutoConfirmEmailDomains__0=example.dev` (cualquier dominio con el que se registre) para omitir la verificación, o configure `Email:ResendApiKey` + `Email:SenderEmail`. Consulte [Configuración → Email](configuration#email).
+> **Primer usuario:** registre uno en `http://localhost:8080/login/register`, o cree uno mediante la [API de administración](admin-api). El autorregistro envía un correo de verificación y, sin un remitente de correo configurado (el valor predeterminado en local), ese correo se descarta; por eso, para pruebas locales, establezca `Auth__AutoConfirmEmailDomains__0=example.dev` (cualquier dominio con el que se registre) para omitir la verificación, o configure `Email:ResendApiKey` + `Email:SenderEmail`. Consulte [Configuración → Correo electrónico](configuration#email).
 
-## 5. Intercambiar el código
+## 5. Canjear el código {#5-exchange-the-code}
 
 ```bash
 curl -X POST http://localhost:8080/connect/token \
@@ -90,18 +92,21 @@ Respuesta:
   "access_token": "eyJ...",
   "id_token": "eyJ...",
   "token_type": "Bearer",
-  "expires_in": 1800
+  "expires_in": 1800,
+  "scope": "openid profile email"
 }
 ```
 
-## Demo funcional
+`expires_in` es el `AccessTokenLifetimeSeconds` del cliente (1800 para un cliente cargado desde la configuración, salvo que usted lo establezca). Aquí no aparece ningún `refresh_token`: un cliente solo recibe uno cuando establece `AllowOfflineAccess` y la solicitud pide el ámbito `offline_access`.
 
-El directorio `demos/sample-app/` contiene una SPA React completa + API que implementa el flujo OIDC completo descrito anteriormente. Consulte el [README de demos](https://github.com/authagonal/authagonal/tree/master/demos) para las instrucciones.
+## Demo funcional {#working-demo}
 
-## Próximos pasos
+El directorio `demos/sample-app/` contiene una SPA de React + API completa que implementa todo el flujo OIDC anterior. Consulte el [README de las demos](https://github.com/authagonal/authagonal/tree/master/demos) para ver las instrucciones.
+
+## Próximos pasos {#next-steps}
 
 - [Configuración](configuration): referencia completa de todos los ajustes
-- [Extensibilidad](extensibility): alojar como biblioteca, agregar hooks personalizados
-- [Personalización visual](branding): personalizar la interfaz de inicio de sesión
-- [SAML](saml): agregar proveedores SSO SAML
-- [Aprovisionamiento](provisioning): aprovisionar usuarios en aplicaciones posteriores
+- [Extensibilidad](extensibility): alojar como biblioteca y añadir hooks personalizados
+- [Personalización de marca](branding): personalizar la interfaz de inicio de sesión
+- [SAML](saml): añadir proveedores de SSO SAML
+- [Aprovisionamiento](provisioning): aprovisionar usuarios en aplicaciones descendentes

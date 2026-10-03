@@ -6,24 +6,29 @@ locale: zh-Hans
 
 # OAuth 作用域
 
-Authagonal 同时支持**内置**的 OAuth/OIDC 作用域和在运行时管理的**自定义**作用域。自定义作用域会被持久化、通过发现文档公布，并与内置作用域一起显示在同意界面上。
+Authagonal 同时支持**内置**的 OAuth/OIDC 作用域和在运行时管理的**自定义**作用域。自定义作用域会被持久化，通过发现文档公布，并与内置作用域一起显示在同意屏幕上。
 
-## 内置作用域
+## 内置作用域 {#built-in-scopes}
 
 这些作用域始终可用，无需注册：
 
 | 作用域 | 用途 |
 |---|---|
-| `openid` | 发起 OIDC 流程所必需。签发一个 ID 令牌。 |
-| `profile` | 标准的个人资料声明（name、family_name、given_name 等） |
+| `openid` | 发起 OIDC 流程所必需。会签发 ID 令牌。 |
+| `profile` | 标准个人资料声明（name、family_name、given_name 等） |
 | `email` | 电子邮件地址和 `email_verified` 声明 |
-| `offline_access` | 在访问令牌之外再签发一个刷新令牌 |
+| `phone` | `phone_number` 和 `phone_number_verified` 声明（OIDC Core 5.4） |
+| `roles` | `roles` 声明。它不是 OIDC 标准作用域：角色成员资格是需要最终用户同意披露的声明 |
+| `groups` | `groups` 声明（SCIM 组成员资格）。它不是 OIDC 标准作用域，管控方式与 `roles` 相同 |
+| `offline_access` | 在访问令牌之外签发刷新令牌 |
 
-## 自定义作用域
+客户端只能请求其自身 `AllowedScopes` 中列出的作用域。对于不在该列表中的作用域，`/connect/authorize` 会以 `invalid_scope` 拒绝，而不是将其过滤掉，因此如果在应用的请求中加入 `roles` 却没有将其加到客户端上，所有登录都会失败。
 
-自定义作用域通过管理 API 在 `/api/v1/scopes` 处管理。它们需要一个带有 `authagonal-admin` 作用域的 JWT 访问令牌（可通过 `AdminApi:Scope` 配置）。
+## 自定义作用域 {#custom-scopes}
 
-### 作用域模型
+自定义作用域通过位于 `/api/v1/scopes` 的管理 API 进行管理。调用这些接口需要带有 `authagonal-admin` 作用域的 JWT 访问令牌（可通过 `AdminApi:Scope` 配置）。
+
+### 作用域模型 {#scope-model}
 
 ```csharp
 public sealed class Scope
@@ -42,22 +47,21 @@ public sealed class Scope
 }
 ```
 
-| 字段 | 描述 |
+| 字段 | 说明 |
 |---|---|
 | `Name` | 在令牌请求中发送的作用域标识符（例如 `billing.read`） |
-| `DisplayName` | 显示在同意界面上的人类可读名称 |
-| `Description` | 显示在同意界面上的较长描述 |
-| `Emphasize` | 若为 `true`，同意界面会将此作用域突出显示为敏感 |
-| `Group` | 在同意界面上归类此作用域的标题。仅用于呈现——它绝不影响实际授予的内容 |
-| `Required` | 若为 `true`，用户在同意时无法取消勾选此作用域 |
-| `ShowInDiscoveryDocument` | 若为 `true`，此作用域会出现在 `/.well-known/openid-configuration` 的 `scopes_supported` 下 |
-| `AllowedRoles` | 用户必须持有才能被授予此作用域的角色。留空（默认）表示不加限制——参见[按角色限制的作用域](#role-gated-scopes) |
-| `UserClaims` | 授予此作用域时添加到访问令牌的声明 |
+| `DisplayName` | 显示在同意屏幕上的易读名称 |
+| `Description` | 显示在同意屏幕上的较长说明 |
+| `Emphasize` | 为 `true` 时，同意屏幕会将此作用域作为敏感项突出显示 |
+| `Group` | 此作用域在同意屏幕上归入的标题。仅用于展示：它从不影响授予的内容 |
+| `Required` | 为 `true` 时，用户在同意时无法取消选择此作用域 |
+| `ShowInDiscoveryDocument` | 为 `true` 时，此作用域会出现在 `/.well-known/openid-configuration` 的 `scopes_supported` 下 |
+| `AllowedRoles` | 用户必须持有其中之一才能被授予此作用域的角色。为空（默认）时不加管控，参见[按角色管控的作用域](#role-gated-scopes) |
+| `UserClaims` | 授予此作用域时会写入令牌的自定义属性声明名称白名单。保留的协议声明（例如 `org_id`）永远不会通过这种方式释放，因此存储的属性无法伪造它们 |
 
-### 按角色限制的作用域 {#role-gated-scopes}
+### 按角色管控的作用域 {#role-gated-scopes}
 
-客户端的 `AllowedScopes` 回答的是*这个应用是否可以请求该作用域*——一个在任何人登录之前就已确定的问题。
-`AllowedRoles` 回答另一半：*这个人是否可以拥有它*。两道关卡同时生效，任何一道都不能替代另一道。
+客户端的 `AllowedScopes` 回答的是*这个应用可以请求这个作用域吗*，这个问题在任何人登录之前就已确定。`AllowedRoles` 回答的是另一半：*这个人可以拥有它吗*。两道关卡都会生效，任何一道都不能替代另一道。
 
 ```json
 {
@@ -67,29 +71,55 @@ public sealed class Scope
 }
 ```
 
-对于不持有所列任何角色的用户，该作用域会被**从授权中剔除**，而不是被拒绝：客户端请求了它的完整集合，并
-通过令牌响应中回显的 `scope`（RFC 6749 §3.3）得知自己拿到的更少。正是这一点让同一个应用既能服务内部员工
-也能服务其他所有人——员工界面只是若干作用域中的一个，只有有权获得它的人才会拿到。
+对于不持有任何所列角色的用户，该作用域会**从授权中移除**，而不是被拒绝：客户端请求了完整的作用域集合，并通过令牌响应中回显的 `scope`（RFC 6749 §3.3）得知自己得到的少于所请求的。这正是同一个应用能够同时服务员工和其他所有人的原因：员工功能只是若干作用域中的一个，只有有权获得它的人才会收到它。
 
-如果一个请求中*所有*被请求的作用域都被剔除，则以 `access_denied` 失败，因为已经没有任何东西可供签发令牌。
+如果请求的*每一个*作用域都被移除，请求会以 `access_denied` 失败，因为已经没有任何可以为之签发令牌的内容了。
 
-只要是为自然人签发令牌的地方，这道关卡都会生效：
+只要是为人类用户签发令牌，这道关卡就会生效：
 
-| 流程 | 生效位置 |
+| 流程 | 执行位置 |
 |---|---|
-| 授权码 | 在 `/connect/authorize`，一旦用户身份确定并且在同意**之前**——这样界面就绝不会提供一个无法被授予的权限 |
-| 设备码 | 在 `/api/auth/device/approve`，即该流程中首次得知 subject 的位置 |
-| 刷新 | 每次轮换时，针对重新解析出的角色。撤销角色正是在这里真正生效，因为授权记录仍然保存着登录时批准的内容 |
-| 令牌交换 | 不单独设卡：交换只能在 subject token 自身的作用域内降级，因此永远无法触及 subject 未被授予的作用域 |
+| 授权码 | 在 `/connect/authorize`，一旦确定了用户，且在同意**之前**执行，因此同意屏幕永远不会提供无法授予的权限 |
+| 设备码 | 在 `/api/auth/device/approve`，这是该流程中第一个能确定主体的位置 |
+| 刷新 | 每次轮换时都会根据重新解析的角色执行。撤销角色真正生效的地方就在这里，因为授权记录中保存的仍然是登录时批准的内容 |
+| 令牌交换 | 不单独管控：交换只能在主体令牌自身的作用域范围内缩小权限，因此永远无法获得主体未被授予的作用域 |
 
-client_credentials 授权没有 subject，被有意不加干预——机器客户端的权限来自它的注册信息。
+客户端凭据授权没有主体，因此有意不受影响：机器客户端的权限就是它的注册信息。
 
-从配置播种作用域可以添加或更改 `AllowedRoles`，但无法将其清空（与 `UserClaims` 一样，省略某个字段会保留
-已存储的值）。要移除限制，请以显式的空数组 `PUT` 该作用域。
+从配置预置作用域时可以添加或更改 `AllowedRoles`，但不能将其清空（与 `UserClaims` 一样，省略的字段会保留已存储的值）。要移除管控，请使用显式的空数组对该作用域执行 `PUT`。
 
-## 管理端点
+## 从配置预置 {#seeding-from-configuration}
 
-### 列出作用域
+可以在 `Scopes` 配置节中声明作用域。它们会在启动时写入作用域存储，与[客户端预置](configuration#clients)一同进行。
+
+```json
+{
+  "Scopes": [
+    {
+      "Name": "billing.read",
+      "DisplayName": "Billing (read-only)",
+      "Description": "View invoices and payment history",
+      "UserClaims": ["billing_plan"],
+      "ShowInDiscoveryDocument": true,
+      "Emphasize": false,
+      "Group": "Billing",
+      "Required": false,
+      "AllowedRoles": ["finance"]
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `Name` | 必填。没有名称的条目会被跳过并记录警告 |
+| `DisplayName`, `Description`, `UserClaims`, `ShowInDiscoveryDocument`, `Emphasize`, `Group`, `Required`, `AllowedRoles` | 与 [作用域模型](#scope-model)中相同 |
+
+预置是按 `Name` 进行的 upsert。你设置的字段在每次启动时都会覆盖已存储的值，因此通过管理 API 对同样被预置的字段所做的修改会在下次启动时被覆盖。你省略的字段会保留已存储的值（对于新作用域则使用模型默认值）。由于省略意味着“保留”，配置可以添加或更改 `UserClaims` 和 `AllowedRoles`，但不能将它们清空：请使用 `PUT /api/v1/scopes/{name}` 并传入显式的空数组来完成。
+
+## 管理端点 {#admin-endpoints}
+
+### 列出作用域 {#list-scopes}
 
 ```
 GET /api/v1/scopes
@@ -97,15 +127,15 @@ GET /api/v1/scopes
 
 返回 `{ "scopes": [ ... ] }`。
 
-### 获取作用域
+### 获取作用域 {#get-scope}
 
 ```
 GET /api/v1/scopes/{name}
 ```
 
-返回该作用域，若未找到则返回 `404`。
+返回该作用域，如果不存在则返回 `404`。
 
-### 创建作用域
+### 创建作用域 {#create-scope}
 
 ```
 POST /api/v1/scopes
@@ -113,7 +143,7 @@ Content-Type: application/json
 
 {
   "name": "billing.read",
-  "displayName": "Billing — read-only",
+  "displayName": "Billing (read-only)",
   "description": "View invoices and payment history",
   "emphasize": false,
   "required": false,
@@ -122,16 +152,16 @@ Content-Type: application/json
 }
 ```
 
-返回 `201 Created` 及该作用域。如果已存在同名作用域，则返回 `409`。
+返回 `201 Created` 及该作用域。如果缺少 `name` 或其中包含空白字符，返回 `400`（`invalid_request`）；如果已存在同名作用域，返回 `409`（`scope_exists`）。
 
-### 更新作用域
+### 更新作用域 {#update-scope}
 
 ```
 PUT /api/v1/scopes/{name}
 Content-Type: application/json
 
 {
-  "displayName": "Billing — read",
+  "displayName": "Billing (read)",
   "description": "View invoices",
   "emphasize": true
 }
@@ -139,30 +169,30 @@ Content-Type: application/json
 
 只有提供的字段会被更新；省略的字段保留其当前值。
 
-### 删除作用域
+### 删除作用域 {#delete-scope}
 
 ```
 DELETE /api/v1/scopes/{name}
 ```
 
-返回 `204 No Content`（若作用域不存在则返回 `404`）。已签发且包含此作用域的令牌在过期前仍然有效——如有需要，请通过 `/connect/revocation` 显式撤销它们。
+返回 `204 No Content`（如果该作用域不存在则返回 `404`）。已经签发且包含此作用域的令牌在过期之前仍然有效，如有需要，请通过 `/connect/revocation` 显式撤销它们。
 
-## 发现文档
+## 发现文档 {#discovery-document}
 
-`ShowInDiscoveryDocument = true` 的作用域会出现在 `/.well-known/openid-configuration` 的 `scopes_supported` 下。内置作用域始终会被公布。
+`ShowInDiscoveryDocument = true` 的作用域会出现在 `/.well-known/openid-configuration` 的 `scopes_supported` 下。七个内置作用域始终会被公布。
 
 ```json
 {
-  "scopes_supported": ["openid", "profile", "email", "offline_access", "billing.read"]
+  "scopes_supported": ["openid", "profile", "email", "phone", "roles", "groups", "offline_access", "billing.read"]
 }
 ```
 
-## 同意界面
+## 同意屏幕 {#consent-screen}
 
-当客户端请求一个不在其“跳过同意”列表中的作用域时，同意页面会按 `DisplayName`（回退到 `Name`）列出每个所请求的作用域，并在其下方附上 `Description`。`Emphasize = true` 的作用域会获得独特的视觉呈现。`Required` 作用域无法被取消勾选。
+当客户端请求的作用域不在其免同意列表中时，同意页面会按 `DisplayName`（缺失时回退到 `Name`）列出每个请求的作用域，并在其下方显示 `Description`。`Emphasize = true` 的作用域会以醒目的样式显示。`Required` 作用域无法取消选择。
 
-面向用户的流程请参阅 [OAuth 同意界面](index#features)。
+面向用户的流程请参见 [OAuth 同意屏幕](index#key-features)。
 
-## 动态客户端注册
+## 动态客户端注册 {#dynamic-client-registration}
 
-通过[动态客户端注册](client-registration)注册的客户端只能请求内置的、或此前通过管理 API 创建的作用域。未知的作用域会以 `invalid_scope` 被拒绝。
+通过[动态客户端注册](client-registration)注册的客户端只能声明 OIDC 内置作用域（`openid`、`profile`、`email`、`phone`、`offline_access`），以及 `Auth:DynamicClientRegistrationScopes` 中列出的任何作用域。某个作用域仅仅存在于存储中，并不意味着自行注册的客户端可以声明它，而按角色管控的作用域（带有 `AllowedRoles` 的作用域）永远不可注册。其他任何作用域都会以 `invalid_scope` 被拒绝。

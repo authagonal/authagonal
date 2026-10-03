@@ -313,8 +313,8 @@ public sealed class AuthOptions
     public int MaxScimGroupMembers { get; set; } = 10_000;
 
     /// <summary>
-    /// Scopes an anonymous registrant may put in its own <c>AllowedScopes</c>, on top of the four
-    /// OIDC built-ins (<c>openid</c>, <c>profile</c>, <c>email</c>, <c>offline_access</c>) which are
+    /// Scopes an anonymous registrant may put in its own <c>AllowedScopes</c>, on top of the five
+    /// OIDC built-ins (<c>openid</c>, <c>profile</c>, <c>email</c>, <c>phone</c>, <c>offline_access</c>) which are
     /// always registrable. Empty — the default — means the built-ins and nothing else.
     /// </summary>
     /// <remarks>

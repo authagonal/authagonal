@@ -86,4 +86,37 @@
   <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>El token no es válido o ha expirado</value></data>
   <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>El correo electrónico ya está confirmado</value></data>
   <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>El proveedor y la clave del proveedor son obligatorios</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>Falta algo</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>Este enlace de confirmación está incompleto. Abre el correo de verificación más reciente y usa el enlace que aparece allí.</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>Este enlace no parece correcto</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>Abre el correo de verificación más reciente y usa el enlace que aparece allí.</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>Este enlace ha caducado</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>Inicia sesión para que te enviemos un nuevo correo de verificación.</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>Tu correo electrónico ya está confirmado</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>Ya puedes iniciar sesión.</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>Confirma tu correo electrónico</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>Confirma que esta dirección te pertenece.</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>Confirmar mi correo electrónico</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>Ir al inicio de sesión</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>Verifica tu correo electrónico</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>Verifica tu correo electrónico</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>Haz clic en el siguiente enlace para verificar tu dirección de correo electrónico:</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>Verificar correo</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>Si no creaste una cuenta, puedes ignorar este correo.</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>Restablece tu contraseña</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>Restablece tu contraseña</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>Haz clic en el siguiente enlace para establecer una nueva contraseña:</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>Restablecer contraseña</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>Este enlace caduca en 1 hora. Si no solicitaste restablecer tu contraseña, puedes ignorar este correo.</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>Ya tienes una cuenta</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>Ya tienes una cuenta</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>Alguien intentó registrarse con este correo electrónico, pero ya existe una cuenta. Inicia sesión o restablece tu contraseña si la olvidaste.</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>Iniciar sesión</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>Si no fuiste tú, puedes ignorar este correo.</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Sesión cerrada</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Cerrar sesión</value></data>
 </root>

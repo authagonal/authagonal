@@ -7,7 +7,7 @@ title: Multi-Factor Authentication
 
 Authagonal supports multi-factor authentication. Three methods are available: TOTP (authenticator apps), WebAuthn/passkeys (hardware keys and biometrics), and one-time recovery codes. Passkeys can also be used for [passwordless login](#passwordless-passkey-login).
 
-Federated logins (SAML/OIDC) are covered too: a SAML or OIDC assertion proves the first factor, not the second. A federated user with MFA enrolled is routed through the same local MFA challenge as a password login, and a `Required` policy forces enrollment before any session is issued. Only when MFA is neither enrolled nor required does federation stand alone.
+Federated logins (SAML/OIDC) are covered too: a SAML or OIDC assertion proves the first factor, not the second. A federated user with MFA enrolled is routed through the same local MFA challenge as a password login, and a `Required` policy forces enrollment before any session is issued. Only when MFA is neither enrolled nor required does federation stand alone. A connection can opt out of the local challenge with `ChallengeMfaAfterLogin: false` (see below).
 
 ## Supported Methods
 
@@ -15,7 +15,7 @@ Federated logins (SAML/OIDC) are covered too: a SAML or OIDC assertion proves th
 |---|---|
 | **TOTP** | Time-based one-time passwords (RFC 6238): 6 digits, 30-second step, SHA-1, verified with a one-step clock-skew window. Works with any authenticator app (Google Authenticator, Authy, 1Password, etc.). A code that has already been accepted cannot be replayed within its validity window. |
 | **WebAuthn / Passkeys** | FIDO2 hardware security keys, platform biometrics (Touch ID, Windows Hello), and synced passkeys. Users can register multiple passkeys, and passkeys can sign in passwordless. |
-| **Recovery codes** | 10 one-time backup codes (`XXXX-XXXX` format) for account recovery when other methods aren't available. Stored hashed and encrypted at rest. |
+| **Recovery codes** | 10 one-time backup codes (10 characters from a 32-character alphabet, shown as `XXXXX-XXXXX`) for account recovery when other methods aren't available. Stored hashed and encrypted at rest. |
 
 ## MFA Policy
 
@@ -103,13 +103,22 @@ Challenges expire after 5 minutes (configurable via `Auth:MfaChallengeExpiryMinu
 
 #### Retry Budget
 
-A wrong code does not burn the challenge. The verify endpoint validates the code first and consumes the challenge only on success, so a mistyped TOTP digit can simply be retried against the same `challengeId`. Failed attempts return `invalid_code` (or `assertion_failed` for WebAuthn) with a 401 and increment a bounded counter on the challenge; the fifth wrong attempt consumes the challenge and returns `too_many_attempts`, forcing a fresh login. This applies to all three methods and bounds TOTP brute-force to 5 guesses per challenge.
+A wrong code does not burn the challenge. The verify endpoint validates the code first and consumes the challenge only on success, so a mistyped TOTP digit can simply be retried against the same `challengeId`. Failed attempts return `invalid_code` (or `assertion_failed` for WebAuthn) with a 401 and increment a bounded counter on the challenge; the fifth wrong attempt consumes the challenge and returns `too_many_attempts`, forcing a fresh login. This applies to all three methods.
+
+The per-challenge budget is a fast path, not the security bound, so two further gates apply to `POST /api/auth/mfa/verify`:
+
+- **Per-user rate limit.** More than 10 verify attempts per minute for one user returns `too_many_attempts` with a 429, whatever `challengeId` is used.
+- **Shared account lockout.** Every failed code also counts against the same failed-attempt counter as the password step (`Auth:MaxFailedAttempts`, `Auth:LockoutDurationMinutes`). When it trips, the challenge is consumed and the response is `locked_out` (423). While the account is locked, verify is refused with `locked_out` before the code is checked.
+
+Only confirmed credentials can satisfy a verification; an enrolment that was started but never completed does not count as a factor.
 
 A missing, expired, or already-consumed challenge returns `invalid_challenge`.
 
 ### Federated Logins
 
 After a successful SAML or OIDC assertion, the server resolves the same effective MFA policy. An MFA-enrolled user is redirected to the hosted MFA challenge page (with a `challengeId`) instead of receiving a session; a user without MFA under a `Required` policy is redirected to the MFA setup page (with a `setupToken`). The session is only marked MFA-authenticated once verification completes.
+
+This challenge is per connection: a SAML or OIDC connection with `ChallengeMfaAfterLogin` set to `false` skips the local challenge for users who arrive through it. The default is `true`.
 
 ### Forced Enrollment
 
@@ -125,6 +134,8 @@ Users enroll MFA through the self-service setup endpoints. These require either 
 2. User scans the QR code with their authenticator app
 3. User enters the 6-digit code to confirm: `POST /api/auth/mfa/totp/confirm`
 
+The confirm step is throttled like verify: more than 10 attempts per minute for one user returns `too_many_attempts` (429), and with a setup token the fifth wrong code consumes the setup challenge. An unconfirmed enrolment expires after 30 minutes (`setup_expired`).
+
 ### WebAuthn / Passkey Setup
 
 1. Call `POST /api/auth/mfa/webauthn/setup`, returns a `setupToken` and `PublicKeyCredentialCreationOptions`
@@ -133,17 +144,19 @@ Users enroll MFA through the self-service setup endpoints. These require either 
 
 Passkey enrollment requires a confirmed TOTP credential first (`totp_required_first`). Passkeys are a per-device convenience layered on top of a portable base factor, so every account keeps a device-independent factor and a `Required` policy can't be satisfied by a passkey alone.
 
-Users can register multiple passkeys (one per device). A credential ID already registered — to any account, including the enrolling user's own — is rejected with `credential_already_registered` (409). Re-enrolling an authenticator that is already enrolled would create a second credential row sharing one credential ID: its signature counter would restart, weakening clone detection, and deleting either row would remove the lookup entry both depend on. The lookup entry is claimed with an insert-if-absent write, so two registrations of the same credential ID cannot both succeed. Users whose email domain is routed to an external IdP via forced SSO cannot enroll a local passkey (`sso_managed`), since it would bypass the IdP and its deprovisioning.
+Users can register multiple passkeys (one per device). A credential ID already registered (to any account, including the enrolling user's own) is rejected with `credential_already_registered` (409). Re-enrolling an authenticator that is already enrolled would create a second credential row sharing one credential ID: its signature counter would restart, weakening clone detection, and deleting either row would remove the lookup entry both depend on. The lookup entry is claimed with an insert-if-absent write, so two registrations of the same credential ID cannot both succeed. Users whose email domain is routed to an external IdP via forced SSO cannot enroll a local passkey (`sso_managed`), since it would bypass the IdP and its deprovisioning.
 
 ### Relying-party host
 
-The FIDO2 relying-party ID and origin are resolved per request from the host, so each tenant hostname is its own relying party. Set `Auth:WebAuthnAllowedHosts` to the hostnames you serve, so a host outside that list cannot act as a relying party. An empty list (the default) keeps the previous behaviour rather than locking out existing passkey users on upgrade, and is logged as a gap at first use — it is not a safe resting place. Setting `AllowedHosts` in `appsettings.json` as well, so ASP.NET Core's host filtering rejects unrecognised `Host` headers before any handler runs, is the cheaper outer layer.
+The FIDO2 relying-party ID and origin are resolved per request from the host, so each tenant hostname is its own relying party. Set `Auth:WebAuthnAllowedHosts` to the hostnames you serve, so a host outside that list cannot act as a relying party. An empty list (the default) keeps the previous behaviour rather than locking out existing passkey users on upgrade, and is logged as a gap at first use. It is not a safe resting place. Setting `AllowedHosts` in `appsettings.json` as well, so ASP.NET Core's host filtering rejects unrecognised `Host` headers before any handler runs, is the cheaper outer layer.
 
-Independently of that list, every credential records the relying party it was enrolled under and is refused anywhere else. That is the part the request cannot influence: both ceremonies otherwise build their expectations from the same `Host` header they are verifying, so origin and `rpIdHash` were compared against a value the caller supplied — and an on-path host that forwards its own `Host` would have the origin binding, the property that makes a passkey phishing-resistant, verify it rather than prevent it. Credentials enrolled before the RP ID was recorded carry none and keep working; they gain the binding when re-enrolled.
+Independently of that list, every credential records the relying party it was enrolled under and is refused anywhere else. That is the part the request cannot influence: both ceremonies otherwise build their expectations from the same `Host` header they are verifying, so origin and `rpIdHash` were compared against a value the caller supplied, and an on-path host that forwards its own `Host` would have the origin binding, the property that makes a passkey phishing-resistant, verify it rather than prevent it. Credentials enrolled before the RP ID was recorded carry none and keep working; they gain the binding when re-enrolled.
 
 ### Recovery Codes
 
-Call `POST /api/auth/mfa/recovery/generate` to generate 10 one-time codes. At least one primary method (TOTP or WebAuthn) must be enrolled first.
+Call `POST /api/auth/mfa/recovery/generate` to generate 10 one-time codes. At least one confirmed primary method (TOTP or WebAuthn) must be enrolled first (`primary_method_required`), and the call needs a real authenticated session: a setup token gets `session_required` (403).
+
+Each code is 10 characters from a 32-character alphabet, displayed as two groups of five (`XXXXX-XXXXX`).
 
 Regenerating codes replaces all existing recovery codes. Each code can only be used once; a redeemed code is marked consumed and no longer accepted.
 

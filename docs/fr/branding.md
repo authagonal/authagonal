@@ -1,30 +1,46 @@
 ---
 layout: default
-title: Personnalisation visuelle
+title: Personnalisation de l'apparence
 locale: fr
 ---
 
-# Personnalisation de l'interface de connexion
+# Personnaliser l'apparence de l'interface de connexion
 
-La SPA de connexion est configurable à l'exécution via un fichier `branding.json` servi depuis la racine web. Aucune recompilation n'est nécessaire : montez simplement votre configuration et vos ressources.
+La SPA de connexion se configure à l'exécution au moyen d'un fichier `branding.json` servi depuis la racine web. Aucune recompilation n'est nécessaire : il suffit de monter votre configuration et vos ressources.
 
-## Comment ça fonctionne
+## Fonctionnement {#how-it-works}
 
-Au démarrage, la SPA récupère `/branding.json`. Si le fichier n'existe pas ou est inaccessible, les valeurs par défaut sont utilisées. (Un serveur hôte peut aussi intégrer la configuration sous forme de payload de démarrage `<script type="application/json" id="authagonal-boot">` ; lorsqu'il est présent, la SPA le lit au lieu de faire la requête.) La configuration contrôle :
+Au démarrage, la SPA récupère `/branding.json`. Si le fichier n'existe pas ou est inaccessible, les valeurs par défaut sont utilisées. (Un serveur hôte peut aussi intégrer la configuration directement dans la page, sous forme d'une charge utile d'amorçage `<script type="application/json" id="authagonal-boot">` ; lorsqu'elle est présente, la SPA la lit au lieu d'effectuer la requête.) La configuration contrôle :
 
-- Le nom de l'application (affiché dans l'en-tête et le titre de la page)
-- L'image du logo, avec une "pastille" d'arrière-plan optionnelle par mode
-- La couleur principale (boutons, liens, indicateurs de focus), avec une variante optionnelle en mode sombre
-- Les couleurs d'arrière-plan de la page et de la carte, par mode
-- La visibilité des liens de mot de passe oublié et d'inscription
-- Le mode sombre par défaut (clair / suivre l'OS / sombre)
-- Les options du sélecteur de langue
-- Le pied de page "Powered by Authagonal"
-- Le CSS personnalisé pour une stylisation plus approfondie
+- le nom de l'application (affiché dans l'en-tête et le titre de la page) ;
+- l'image du logo, avec une « pastille » d'arrière-plan facultative propre à chaque mode ;
+- la couleur principale (boutons, liens, anneaux de focus), avec une variante facultative pour le mode sombre ;
+- les couleurs d'arrière-plan de la page et de la carte, pour chaque mode ;
+- la visibilité des liens de mot de passe oublié et d'inscription ;
+- le mode sombre par défaut (clair / selon le système d'exploitation / sombre) ;
+- les options du sélecteur de langue ;
+- le pied de page « Propulsé par Authagonal » ;
+- du CSS personnalisé pour un style plus poussé.
 
-## Configuration
+## Nom de l'organisation {#organisation-name}
 
-Placez un fichier `branding.json` dans le répertoire `wwwroot/` (ou montez-le dans le conteneur Docker) :
+Sur un hôte multi-locataire qui résout une organisation pour la requête (par exemple un domaine personnalisé rattaché à un seul client), la charge utile `authagonal-boot` peut porter un troisième membre, à côté de `branding` et de `providers` :
+
+```json
+{
+  "branding": { "appName": "Acme Corp", "...": "..." },
+  "providers": [],
+  "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
+}
+```
+
+`organization` vaut `null` (ou le membre est absent) lorsque la requête n'a été résolue vers aucune organisation : un déploiement mono-locataire, ou un déploiement sans domaine personnalisé rattaché pour cet hôte. Cette bibliothèque ne résout pas elle-même d'organisation pour une requête anonyme, antérieure à l'authentification (`OrganizationSelector` a besoin d'un `AuthUser` connecté) ; un hôte qui dispose de sa propre résolution avant authentification (Authagonal Cloud en rattache une par domaine personnalisé) définit `organization` lorsqu'il assemble la charge utile d'amorçage.
+
+Lorsque `organization.name` est présent et diffère de `branding.appName` (comparaison insensible à la casse, après suppression des espaces en début et en fin, afin qu'une organisation portant le même nom que le locataire ne produise pas « Acme / Connexion à Acme »), la carte de connexion affiche un sous-titre sous le titre : « Connexion à {name} » (`data-testid="login-org-name"`, clé i18n `login.signingInTo`). Il est affiché une seule fois, par l'en-tête partagé `AuthLayout`, de sorte que chaque route montée par son intermédiaire (connexion, inscription, mot de passe oublié et réinitialisation, pages de défi et de configuration MFA, page d'appareil, consentement et consentement d'agent, octrois et compte) l'affiche de manière identique. Rien n'est affiché, et l'en-tête conserve son espacement normal, lorsque `organization` est absent, vaut `null` ou que son nom correspond à `branding.appName`.
+
+## Configuration {#configuration}
+
+Placez un fichier `branding.json` dans le répertoire `wwwroot/` (ou montez-le dans le conteneur Docker) :
 
 ```json
 {
@@ -39,35 +55,35 @@ Placez un fichier `branding.json` dans le répertoire `wwwroot/` (ou montez-le d
 }
 ```
 
-### Options
+### Options {#options}
 
-| Propriété | Type | Défaut | Description |
+| Propriété | Type | Valeur par défaut | Description |
 |---|---|---|---|
 | `appName` | `string` | `"Authagonal"` | Affiché dans l'en-tête et le titre de l'onglet du navigateur |
-| `logoUrl` | `string \| null` | `null` | URL vers une image de logo. Lorsque définie, remplace l'en-tête texte. |
-| `primaryColor` | `string` | `"#2563eb"` | Couleur hexadécimale pour les boutons, liens et indicateurs de focus |
-| `supportEmail` | `string \| null` | `null` | Adresse email de support (réservé pour un usage futur) |
-| `showForgotPassword` | `boolean` | `true` | Afficher/masquer le lien "Mot de passe oublié ?" sur la page de connexion |
-| `showRegistration` | `boolean` | `false` | Afficher/masquer le lien d'inscription en libre-service |
-| `customCssUrl` | `string \| null` | `null` | URL vers un fichier CSS personnalisé chargé après les styles par défaut |
-| `welcomeTitle` | `LocalizedString` | `null` | Message d'accueil optionnel affiché sous l'en-tête des pages d'authentification (chaîne simple ou `{ "en": "...", "de": "..." }`). Rien n'est affiché s'il est absent. |
-| `welcomeSubtitle` | `LocalizedString` | `null` | Ligne optionnelle sous `welcomeTitle`, même forme. Rien n'est affiché si elle est absente. |
-| `languages` | `array \| null` | `null` | Options du sélecteur de langue (`[{ "code": "en", "label": "English" }, ...]`). `null` affiche toutes les langues livrées sauf les locales fantaisie (voir [Localisation](localization)). |
-| `poweredBy` | `boolean` | `true` | Afficher/masquer le pied de page "Powered by Authagonal" sur les pages d'authentification |
-| `darkMode` | `"off" \| "auto" \| "force"` | `"auto"` | Thème par défaut lorsque le visiteur n'en a pas choisi : `"off"` (clair uniquement), `"auto"` (suivre la préférence de l'OS), `"force"` (toujours sombre). Le basculeur de thème du visiteur garde toujours la priorité. |
+| `logoUrl` | `string \| null` | `null` | URL d'une image de logo. Lorsqu'elle est définie, elle remplace l'en-tête textuel. |
+| `primaryColor` | `string` | `"#2563eb"` | Couleur hexadécimale des boutons, des liens et des indicateurs de focus |
+| `supportEmail` | `string \| null` | `null` | Adresse e-mail de contact du support (réservée à un usage futur) |
+| `showForgotPassword` | `boolean` | `true` | Affiche ou masque le lien « Mot de passe oublié ? » sur la page de connexion |
+| `showRegistration` | `boolean` | `false` | Affiche ou masque le lien d'inscription en libre-service |
+| `customCssUrl` | `string \| null` | `null` | URL d'un fichier CSS personnalisé chargé après les styles par défaut |
+| `welcomeTitle` | `LocalizedString` | `null` | Message d'accueil facultatif affiché sous l'en-tête sur les pages d'authentification (chaîne simple ou `{ "en": "...", "de": "..." }`). Rien n'est affiché lorsqu'il n'est pas défini. |
+| `welcomeSubtitle` | `LocalizedString` | `null` | Ligne facultative sous `welcomeTitle`, sous la même forme. Rien n'est affiché lorsqu'elle n'est pas définie. |
+| `languages` | `array \| null` | `null` | Options du sélecteur de langue (`[{ "code": "en", "label": "English" }, ...]`). `null` affiche toutes les langues livrées, à l'exception des locales fantaisie (voir [Localisation](localization)). |
+| `poweredBy` | `boolean` | `true` | Affiche ou masque le pied de page « Propulsé par Authagonal » sur les pages d'authentification |
+| `darkMode` | `"off" \| "auto" \| "force"` | `"auto"` | Thème par défaut lorsque le visiteur n'en a pas choisi : `"off"` (clair uniquement), `"auto"` (suit la préférence du système d'exploitation), `"force"` (toujours sombre). Le sélecteur de thème du visiteur reste prioritaire. |
 | `lightBg` | `string \| null` | `null` | Couleur d'arrière-plan de la page en mode clair |
-| `lightCardBg` | `string \| null` | `null` | Couleur d'arrière-plan de la carte/du formulaire en mode clair |
+| `lightCardBg` | `string \| null` | `null` | Couleur d'arrière-plan de la carte ou du formulaire en mode clair |
 | `darkBg` | `string \| null` | `null` | Couleur d'arrière-plan de la page en mode sombre |
-| `darkCardBg` | `string \| null` | `null` | Couleur d'arrière-plan de la carte/du formulaire en mode sombre |
+| `darkCardBg` | `string \| null` | `null` | Couleur d'arrière-plan de la carte ou du formulaire en mode sombre |
 | `darkPrimaryColor` | `string \| null` | `null` | Remplace `primaryColor` en mode sombre |
 | `lightLogoBg` | `string \| null` | `null` | Arrière-plan de la pastille du logo en mode clair (voir ci-dessous) |
 | `darkLogoBg` | `string \| null` | `null` | Arrière-plan de la pastille du logo en mode sombre (voir ci-dessous) |
 
-Les valeurs de couleur doivent être une couleur hexadécimale (`#rgb`, `#rrggbb`, `#rrggbbaa`) ou une expression `rgb()`/`rgba()`/`hsl()`/`hsla()` ; tout le reste est ignoré. Les couleurs par mode sont injectées dans une règle `<style id="branding-theme-vars">` après les styles intégrés : les valeurs `light*` sur `:root:where(:not(.dark))`, afin qu'elles ne s'appliquent jamais en mode sombre ; les valeurs sombres sur `.dark` ; et `primaryColor` sur `:root`, car c'est la couleur de base des deux modes. `:where()` n'ajoute aucune spécificité, donc `customCssUrl` les remplace toujours toutes.
+Les valeurs de couleur doivent être une couleur hexadécimale (`#rgb`, `#rrggbb`, `#rrggbbaa`) ou une expression `rgb()`/`rgba()`/`hsl()`/`hsla()` ; toute autre valeur est ignorée. Les couleurs propres à chaque mode sont injectées sous forme d'une règle `<style id="branding-theme-vars">` après les styles intégrés : les valeurs `light*` sur `:root:where(:not(.dark))`, de sorte qu'elles ne s'appliquent jamais en mode sombre ; les valeurs sombres sur `.dark` ; et `primaryColor` sur `:root`, puisqu'il s'agit de la couleur de base des deux modes. `:where()` n'ajoute aucune spécificité ; `customCssUrl` les remplace donc toutes.
 
-### Pastille d'arrière-plan du logo
+### Pastille d'arrière-plan du logo {#logo-background-chip}
 
-Si votre logo a un dessin blanc ou transparent, il peut disparaître sur la carte claire. Définissez `lightLogoBg` et/ou `darkLogoBg` pour afficher le logo dans une "pastille" arrondie et avec marge intérieure de cette couleur d'arrière-plan :
+Si votre logo comporte des éléments blancs ou transparents, il peut disparaître sur la carte claire. Définissez `lightLogoBg` et/ou `darkLogoBg` pour afficher le logo dans une « pastille » arrondie, avec une marge intérieure et cette couleur d'arrière-plan :
 
 ```json
 {
@@ -77,11 +93,11 @@ Si votre logo a un dessin blanc ou transparent, il peut disparaître sur la cart
 }
 ```
 
-La pastille (un conteneur `data-auth="logo-chip"` piloté par la variable CSS `--auth-logo-bg`) ne reçoit sa marge intérieure et son arrière-plan que lorsqu'un arrière-plan de logo est configuré, de sorte que les tenants qui n'en définissent pas voient le logo directement sur la carte, exactement comme avant. Les deux champs sont indépendants : définissez uniquement `lightLogoBg` pour encadrer le logo en mode clair et le laisser nu en mode sombre.
+La pastille (un conteneur `data-auth="logo-chip"` piloté par la variable CSS `--auth-logo-bg`) ne reçoit sa marge intérieure et son arrière-plan que lorsqu'un arrière-plan de logo est configuré ; les locataires qui n'en définissent pas voient donc le logo directement sur la carte, exactement comme avant. Les deux champs sont indépendants : ne définissez que `lightLogoBg` pour placer le logo dans une pastille en mode clair et le laisser tel quel en mode sombre.
 
-## Exemple Docker
+## Exemple Docker {#docker-example}
 
-Montez vos fichiers de personnalisation dans le conteneur :
+Montez vos fichiers de personnalisation dans le conteneur :
 
 ```bash
 docker run -p 8080:8080 \
@@ -93,7 +109,7 @@ docker run -p 8080:8080 \
   authagonal
 ```
 
-Ou avec docker-compose :
+Ou avec docker-compose :
 
 ```yaml
 services:
@@ -109,27 +125,27 @@ services:
       - Issuer=https://auth.example.com
 ```
 
-## CSS personnalisé
+## CSS personnalisé {#custom-css}
 
-L'option `customCssUrl` charge une feuille de style supplémentaire après les styles par défaut, de sorte que vos règles ont la priorité. Utile pour changer les polices, ajuster l'espacement ou restyler des éléments spécifiques. L'URL doit être de même origine (les URLs relatives comme `/branding/custom.css` conviennent) ; les feuilles de style d'origine différente sont ignorées silencieusement.
+L'option `customCssUrl` charge une feuille de style supplémentaire après les styles par défaut ; vos règles sont donc prioritaires. Elle sert à changer de police, à ajuster les espacements ou à restyler des éléments précis. L'URL doit être de même origine (les URL relatives comme `/branding/custom.css` conviennent) ; les feuilles de style d'une autre origine sont ignorées sans avertissement.
 
-### Propriétés CSS personnalisées
+### Propriétés CSS personnalisées {#css-custom-properties}
 
-L'interface de connexion expose plusieurs propriétés CSS personnalisées pour un contrôle fin :
+L'interface de connexion expose plusieurs propriétés CSS personnalisées pour un contrôle fin :
 
-| Propriété | Défaut | Description |
+| Propriété | Valeur par défaut | Description |
 |---|---|---|
-| `--brand-primary` | `#2563eb` | Couleur principale pour les boutons, liens et indicateurs de focus |
+| `--brand-primary` | `#2563eb` | Couleur principale des boutons, des liens et des anneaux de focus |
 | `--auth-bg` | `#f3f4f6` | Couleur d'arrière-plan de la page |
-| `--auth-card-bg` | `#ffffff` | Couleur d'arrière-plan de la carte/du formulaire |
+| `--auth-card-bg` | `#ffffff` | Couleur d'arrière-plan de la carte ou du formulaire |
 | `--auth-logo-bg` | `transparent` | Arrière-plan de la pastille du logo (la marge intérieure de la pastille n'apparaît que lorsqu'un arrière-plan de logo est configuré) |
 | `--auth-radius` | `0.5rem` | Rayon de bordure de la carte d'authentification |
-| `--auth-font` | *(inherit; system font stack)* | Famille de polices de la carte d'authentification |
+| `--auth-font` | *(héritée ; pile de polices système)* | Famille de polices de la carte d'authentification |
 | `--auth-heading` | `#111827` | Couleur du texte des titres |
 
-Les variables de couleur ci-dessus correspondent directement aux champs de configuration (`primaryColor`, `lightBg`/`darkBg`, `lightCardBg`/`darkCardBg`, `lightLogoBg`/`darkLogoBg`) ; préférez donc la configuration pour les changements de couleur simples et réservez le CSS personnalisé à tout le reste.
+Les variables de couleur ci-dessus correspondent directement à des champs de configuration (`primaryColor`, `lightBg`/`darkBg`, `lightCardBg`/`darkCardBg`, `lightLogoBg`/`darkLogoBg`) ; préférez donc la configuration pour les simples changements de couleur et réservez le CSS personnalisé au reste.
 
-Remplacez-les dans votre CSS personnalisé :
+Redéfinissez-les dans votre CSS personnalisé :
 
 ```css
 :root {
@@ -142,20 +158,20 @@ Remplacez-les dans votre CSS personnalisé :
 
 L'interface de connexion utilise Tailwind CSS. Le CSS personnalisé peut cibler les éléments HTML standard et les classes utilitaires Tailwind. Les composants d'interface exportés (`Button`, `Input`, `Card`, `Alert`, etc.) utilisent Tailwind en interne.
 
-## Mode sombre
+## Mode sombre {#dark-mode}
 
-La SPA de connexion est livrée avec des thèmes clair, sombre et **système**. Le basculeur de thème est toujours visible dans la mise en page. La sélection de l'utilisateur est persistée dans `localStorage` sous la clé `auth-theme`.
+La SPA de connexion est livrée avec les thèmes clair, sombre et **système**. Le sélecteur de thème est toujours visible dans la mise en page. Le choix de l'utilisateur est conservé dans `localStorage` sous la clé `auth-theme`.
 
-### Comment ça fonctionne
+### Fonctionnement {#how-it-works-1}
 
-- **Par défaut** : jusqu'à ce que le visiteur choisisse un thème, l'option de personnalisation `darkMode` définit la valeur par défaut : `"off"` (clair), `"auto"` (système, la valeur par défaut) ou `"force"` (sombre). Une fois que le visiteur utilise le basculeur, son choix garde toujours la priorité.
-- **Détection** : lorsque le thème est "system", la SPA observe `window.matchMedia('(prefers-color-scheme: dark)')` et réapplique le thème automatiquement à mesure que la préférence de l'OS change.
-- **Application** : la SPA bascule une classe `.dark` sur `<html>`. La variante sombre de Tailwind (`&:where(.dark, .dark *)`) active les styles sombres compilés dans chaque composant.
-- **Persistance** : les choix explicites "light" / "dark" / "system" sont stockés dans `localStorage`.
+- **Par défaut** : tant que le visiteur n'a pas choisi de thème, l'option de personnalisation `darkMode` définit le thème par défaut : `"off"` (clair), `"auto"` (système, la valeur par défaut) ou `"force"` (sombre). Dès que le visiteur utilise le sélecteur, son choix l'emporte toujours.
+- **Détection** : lorsque le thème est « système », la SPA observe `window.matchMedia('(prefers-color-scheme: dark)')` et réapplique automatiquement le thème lorsque la préférence du système d'exploitation change.
+- **Application** : la SPA bascule une classe `.dark` sur `<html>`. La variante sombre de Tailwind (`&:where(.dark, .dark *)`) active les styles sombres compilés dans chaque composant.
+- **Persistance** : les choix explicites « clair », « sombre » ou « système » sont conservés dans `localStorage`.
 
-### Variables CSS
+### Variables CSS {#css-variables}
 
-Les valeurs claires sont déclarées sur `:root` ; les substitutions du mode sombre sont limitées à `.dark`, de sorte que la personnalisation du tenant dans `customCssUrl` a toujours la priorité lorsqu'elle est fournie.
+Les valeurs claires sont déclarées sur `:root` ; les redéfinitions du mode sombre sont limitées à `.dark`, de sorte que la personnalisation du locataire dans `customCssUrl` est toujours prioritaire lorsqu'elle est fournie.
 
 | Variable | Clair | Sombre |
 |---|---|---|
@@ -165,12 +181,12 @@ Les valeurs claires sont déclarées sur `:root` ; les substitutions du mode som
 | `--auth-logo-bg` | `transparent` (ou `lightLogoBg`) | `transparent` (ou `darkLogoBg`) |
 | `--brand-primary` | `#2563eb` (ou `primaryColor`) | la valeur claire (ou `darkPrimaryColor`) |
 
-### Désactiver ou remplacer
+### Désactivation ou redéfinition {#disabling-or-overriding}
 
-La personnalisation du tenant l'emporte toujours. Pour forcer un thème unique, définissez vos propres valeurs dans `customCssUrl` :
+La personnalisation du locataire l'emporte toujours. Pour imposer un seul thème, définissez vos propres valeurs dans `customCssUrl` :
 
 ```css
-/* Forcer la palette sombre quel que soit le choix de l'utilisateur */
+/* Force dark palette regardless of user choice */
 :root {
   --auth-bg: #0f172a;
   --auth-card-bg: #1e293b;
@@ -183,11 +199,11 @@ La personnalisation du tenant l'emporte toujours. Pour forcer un thème unique, 
 }
 ```
 
-Pour supprimer entièrement le basculeur de thème, utilisez la voie du package npm : importez `AuthLayout` et affichez sans le basculeur, ou forkez la SPA.
+Pour supprimer complètement le sélecteur de thème, passez par le paquet npm, importez `AuthLayout` et effectuez le rendu sans le sélecteur, ou forkez la SPA.
 
-### Attributs de données
+### Attributs de données {#data-attributes}
 
-Tous les éléments du formulaire de connexion possèdent des attributs `data-auth` pour le ciblage CSS et l'automatisation des tests :
+Tous les éléments du formulaire de connexion portent des attributs `data-auth` pour le ciblage CSS et l'automatisation des tests :
 
 | Attribut | Élément |
 |---|---|
@@ -195,14 +211,16 @@ Tous les éléments du formulaire de connexion possèdent des attributs `data-au
 | `data-auth="header"` | Section d'en-tête |
 | `data-auth="logo-chip"` | Conteneur autour de l'image du logo (avec marge intérieure uniquement lorsqu'un arrière-plan de logo est défini) |
 | `data-auth="logo"` | Image du logo |
-| `data-auth="app-name"` | Titre du nom de l'application |
+| `data-auth="app-name"` | Titre portant le nom de l'application |
+| `data-auth="welcome-title"` / `data-auth="welcome-subtitle"` | Les lignes facultatives `welcomeTitle` / `welcomeSubtitle` (présentes uniquement lorsqu'elles sont définies) |
 | `data-auth="content"` | Zone de contenu principale |
 | `data-auth="languages"` | Sélecteur de langue |
-| `data-auth="language-trigger"` | Bouton de déclenchement du sélecteur de langue |
-| `data-auth="theme-toggle"` | Basculeur de thème clair/système/sombre |
-| `data-auth="powered-by"` | Pied de page "Powered by Authagonal" |
+| `data-auth="language-trigger"` | Bouton d'ouverture du sélecteur de langue |
+| `data-auth="theme-toggle"` | Sélecteur de thème clair/système/sombre |
+| `data-auth="powered-by"` | Pied de page « Propulsé par Authagonal » |
+| `data-auth="login-form"`, `"email-field"`, `"password-field"`, `"submit-button"` | Le formulaire de connexion et ses éléments (page de connexion uniquement) |
 
-Ciblez-les dans votre CSS personnalisé :
+Ciblez-les dans votre CSS personnalisé :
 
 ```css
 [data-auth="header"] {
@@ -210,7 +228,7 @@ Ciblez-les dans votre CSS personnalisé :
 }
 ```
 
-### Exemple : Arrière-plan et police personnalisés
+### Exemple : arrière-plan et police personnalisés {#example-custom-background-and-font}
 
 ```css
 /* custom.css */
@@ -220,14 +238,14 @@ body {
 }
 ```
 
-## Niveaux de personnalisation
+## Niveaux de personnalisation {#customization-tiers}
 
-| Niveau | Ce que vous faites | Chemin de mise à jour |
+| Niveau | Ce que vous faites | Mises à jour |
 |---|---|---|
-| **Configuration seule** | Montez `branding.json` + logo | Transparent : mettez à jour l'image Docker, gardez vos montages |
-| **Configuration + CSS** | Ajoutez `customCssUrl` avec des substitutions de style | Idem : les classes CSS sont stables |
-| **Package npm** | `npm install @authagonal/login`, personnalisez `branding.json`, compilez dans `wwwroot/` | Mise à jour possible : `npm update` récupère les nouvelles versions |
-| **Forker la SPA** | Clonez `login-app/`, modifiez les sources, compilez votre propre version | Vous possédez l'interface : les mises à jour du serveur sont indépendantes |
-| **Écrire la vôtre** | Construisez un frontend entièrement personnalisé contre l'API d'authentification | Contrôle total : voir [API d'authentification](auth-api) pour le contrat |
+| **Configuration seule** | Monter `branding.json` et le logo | Transparentes : mettez à jour l'image Docker et conservez vos montages |
+| **Configuration + CSS** | Ajouter `customCssUrl` avec des redéfinitions de style | Identiques : les classes CSS sont stables |
+| **Paquet npm** | `npm install @authagonal/login`, personnaliser `branding.json`, compiler dans `wwwroot/` | Possibles : `npm update` récupère les nouvelles versions |
+| **Forker la SPA** | Cloner `login-app/`, modifier le code source, compiler votre propre version | L'interface vous appartient ; les mises à jour du serveur sont indépendantes |
+| **Écrire la vôtre** | Créer un frontend entièrement personnalisé reposant sur l'API d'authentification | Contrôle total ; voir [API d'authentification](auth-api) pour le contrat |
 
-Consultez `demos/custom-server/` pour un exemple fonctionnel avec personnalisation visuelle (thème vert, "Acme Corp").
+Voir `demos/custom-server/` pour un exemple fonctionnel avec une personnalisation (thème vert, « Acme Corp »).

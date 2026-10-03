@@ -6,25 +6,27 @@ locale: de
 
 # Skalierung
 
-Authagonal ist so konzipiert, dass es ohne besondere Konfiguration sowohl vertikal als auch horizontal skaliert.
+Authagonal ist darauf ausgelegt, ohne besondere Konfiguration sowohl vertikal als auch horizontal zu skalieren.
 
-## Zustandslos durch Design
+## Zustandslos durch Design {#stateless-by-design}
 
-Alle persistenten Zustände werden im zugrunde liegenden Tabellenspeicher abgelegt: Azure Table Storage oder, im AWS-Backend, DynamoDB. Es gibt keinen In-Process-Zustand, der Sticky Sessions oder eine Koordination zwischen Instanzen erfordert:
+Der gesamte persistente Zustand liegt im zugrunde liegenden Speicher (Azure Table Storage, DynamoDB im AWS-Backend oder PostgreSQL im selbst gehosteten SQL-Backend). Es gibt keinen prozessinternen Zustand, der Sticky Sitzungen oder eine Abstimmung zwischen Instanzen erfordern würde:
 
 - **Signaturschlüssel**: aus Table Storage geladen, stündlich aktualisiert
-- **Autorisierungscodes und Refresh Tokens**: in Table Storage gespeichert, mit Erzwingung der Einmalverwendung
-- **SAML-Replay-Schutz**: Anfrage-IDs werden in Table Storage verfolgt, mit atomarem Löschen
-- **OIDC State und PKCE-Verifier**: in Table Storage gespeichert
-- **Client- und Provider-Konfiguration**: pro Anfrage aus Table Storage abgerufen
+- **Autorisierungscodes und Refresh Tokens**: in Table Storage gespeichert, mit erzwungener Einmalverwendung
+- **Schutz vor SAML-Replays**: Request-IDs werden in Table Storage mit atomarem Löschen nachverfolgt
+- **OIDC-State und PKCE-Verifier**: in Table Storage gespeichert
+- **Client- und Provider-Konfiguration**: pro Request aus Table Storage abgerufen
 
-## Cookie-Verschlüsselung (Data Protection)
+## Cookie-Verschlüsselung (Data Protection) {#cookie-encryption-data-protection}
 
-Die Data-Protection-Schlüssel von ASP.NET Core werden automatisch in Azure Blob Storage persistiert, wenn eine echte Azure Storage-Verbindungszeichenfolge verwendet wird. Das bedeutet, dass Cookies, die von einer Instanz signiert wurden, von jeder anderen Instanz entschlüsselt werden können: Sticky Sessions sind nicht erforderlich.
+Der Data-Protection-Schlüsselring von ASP.NET Core schützt das Auth-Cookie, daher müssen sich alle Instanzen einen gemeinsamen Ring teilen. Er wird automatisch persistiert, in dieser Reihenfolge:
 
-Für die lokale Entwicklung mit Azurite fallen die Data-Protection-Schlüssel auf den standardmäßigen dateibasierten Speicher zurück.
+1. `DataProtection:BlobUri`, falls gesetzt (ein expliziter Blob, authentifiziert mit `DefaultAzureCredential`).
+2. Ein Container `dataprotection` in dem Konto, das `Storage:ConnectionString` benennt, sofern dies nicht Azurite ist.
+3. Auf dem Managed-Identity-Pfad (`Storage:TableServiceUri`) der benachbarte Blob-Endpunkt desselben Kontos, `https://{account}.blob.…/dataprotection/keys.xml`. Die Identität benötigt die Rolle Storage Blob Data Contributor für das Konto.
 
-Sie können über die Konfiguration auch auf eine explizite Blob-URI verweisen (der Managed-Identity-Pfad, in der Produktion bevorzugt):
+Nur bei einem nicht erkannten Table-Endpunkt (Azurite, Emulatoren mit Pfad-Adressierung) wird auf den Dateispeicher pro Maschine zurückgegriffen, der flüchtig ist und pro Pod gilt: Neustarts melden alle Benutzer ab, und Replikate können die Cookies der jeweils anderen nicht lesen. Die Startprüfung protokolliert in diesem Fall `Critical`.
 
 ```json
 {
@@ -34,74 +36,87 @@ Sie können über die Konfiguration auch auf eine explizite Blob-URI verweisen (
 }
 ```
 
-Übergeben Sie im AWS-Backend einen S3-Client und einen Bucket an `AddAuthagonalAwsStorage`, um den Key Ring in S3 zu persistieren: Ohne diesen Schritt liegt der Key Ring nur im Arbeitsspeicher, und Cookies werden bei einem Neustart sowie über Knoten hinweg ungültig. Siehe [Installation → AWS-Backend](installation#aws-backend).
+Übergeben Sie im AWS-Backend einen S3-Client samt Bucket an `AddAuthagonalAwsStorage`, um den Schlüsselring in S3 zu persistieren; ohne diese Angabe liegt der Schlüsselring nur im Arbeitsspeicher, und Cookies funktionieren nach einem Neustart und über Knoten hinweg nicht mehr. Siehe [Installation → AWS-Backend](installation#aws-backend). Im SQL-Backend persistiert `AddAuthagonalPostgres` / `AddAuthagonalSqlite` den Ring.
 
-## Caches pro Instanz
+Persistieren ist nicht Verschlüsseln: Der Ring ist Klartext-XML, sofern nicht `DataProtection:KeyVaultKeyId` oder `DataProtection:CertificateThumbprint` gesetzt ist. Beim Start wird ein unverschlüsselter Ring, der noch keine Schlüssel enthält, abgelehnt; einer, der bereits Schlüssel enthält, startet mit einem `Critical`-Log (`DataProtection:AllowUnencryptedKeyRing=true` akzeptiert ihn bewusst). Die vollständige Tabelle der `DataProtection:*`-Einstellungen finden Sie unter [Konfiguration](configuration).
 
-Eine kleine Anzahl von häufig gelesenen, sich selten ändernden Werten wird pro Instanz im Speicher zwischengespeichert, um Roundtrips zu Table Storage zu reduzieren:
+## Caches pro Instanz {#per-instance-caches}
 
-| Daten | Cache-Dauer | Auswirkung bei Veralterung |
+Einige wenige häufig gelesene, sich selten ändernde Werte werden pro Instanz im Arbeitsspeicher zwischengespeichert, um Roundtrips zu Table Storage zu reduzieren:
+
+| Daten | Cache-Dauer | Auswirkung veralteter Daten |
 |---|---|---|
-| OIDC-Discovery-Dokumente | 60 Minuten (konfigurierbar) | Verzögerte Erkennung einer IdP-Schlüsselrotation |
-| SAML-IdP-Metadaten | 60 Minuten (konfigurierbar) | Gleich |
-| Zulässige CORS-Origins | 60 Minuten (konfigurierbar) | Neue Origins benötigen bis zu einer Stunde zur Verbreitung |
+| OIDC-Discovery-Dokumente | 60 Minuten (konfigurierbar) | Schlüsselrotationen beim IdP werden verzögert bemerkt |
+| SAML-IdP-Metadaten | 60 Minuten (konfigurierbar) | Ebenso |
+| Erlaubte CORS-Origins | 60 Minuten (konfigurierbar) | Neue Origins werden erst nach bis zu einer Stunde wirksam |
 
-Diese Caches sind für den Produktionseinsatz unbedenklich. Alle Dauern lassen sich über den Konfigurationsabschnitt `Cache` konfigurieren: siehe [Konfiguration](configuration). Wenn Sie eine sofortige Verbreitung benötigen, starten Sie die betroffenen Instanzen neu.
+Diese Caches sind für den Produktivbetrieb vertretbar. Alle Zeiträume lassen sich über den Konfigurationsabschnitt `Cache` einstellen, siehe [Konfiguration](configuration). Sollen Änderungen sofort wirksam werden, starten Sie die betroffenen Instanzen neu.
 
-## Ratenbegrenzung
+## Ratenbegrenzung {#rate-limiting}
 
-Missbrauchsanfällige Endpunkte (Registrierung pro IP, Passwort-Zurücksetzen pro Ziel-E-Mail-Adresse, SCIM pro Client, dynamische Client-Registrierung pro IP; siehe [Konfiguration → Ratenbegrenzung](configuration#rate-limiting)) werden durch einen integrierten Rate Limiter geschützt.
+Missbrauchsanfällige Endpunkte (Registrierung pro IP, Passwort-Reset pro Ziel-E-Mail, SCIM pro Client, dynamische Client-Registrierung pro IP, siehe [Konfiguration → Ratenbegrenzung](configuration#rate-limiting)) werden durch einen integrierten Rate Limiter geschützt.
 
-Limits werden hinter der `IRateLimiter`-Abstraktion **In-Process pro Knoten** durchgesetzt, sodass die effektive Obergrenze bei N Instanzen dem N-Fachen des konfigurierten Werts entspricht. Das ist beabsichtigt: Der Limiter ist ein Backstop gegen ausufernden Missbrauch eines einzelnen Knotens, und das maßgebliche globale Limit gehört an den Rand (WAF / Ingress / CDN), der den gesamten Traffic sieht, bevor er lastverteilt wird.
+Standardmäßig werden die Grenzen **prozessintern pro Knoten** hinter der Schnittstelle `IRateLimiter` durchgesetzt; bei N Instanzen liegt die effektive Obergrenze also beim N-Fachen des konfigurierten Werts. Das ist beabsichtigt: Der Limiter ist eine Absicherung gegen ausufernden Missbrauch eines einzelnen Knotens, und die maßgebliche globale Grenze gehört an den Rand des Netzes (WAF / Ingress / CDN), wo der gesamte Verkehr vor der Lastverteilung sichtbar ist.
 
-## Clustering
+Dieser Kompromiss passt für die Volumengrenzen, aber in einem Fall nicht: bei einem Budget, das ein **erratbares Geheimnis** schützt. Der `user_code` des Device Flow ist eine kurze Zeichenfolge aus einem kleinen Alphabet, und die Begrenzung der Versuche ist das Einzige, was zwischen einem Angreifer und einem Code steht, der eine aktive Sitzung gewährt. Eine Obergrenze, die sich mit der Zahl der Replikate vervielfacht, ist dort die falsche Form, und sie macht die tatsächliche Grenze zu einer Eigenschaft Ihrer Ingress-Konfiguration statt des Servers.
 
-Mehrere Instanzen koordinieren sich über eine **Leader-Wahl** und einen **knotenübergreifenden Event Bus**, beide hinter austauschbaren Backends:
+Setzen Sie **`Auth:DurableRateLimiting=true`**, um die Zähler in den Speicher zu verlagern, den Sie ohnehin betreiben; dann teilen sich alle Replikate ein gemeinsames Budget. Das kostet pro Prüfung einen Roundtrip zum Speicher, verwendet feste Zeitfenster (ein Budget von N erlaubt über eine Fenstergrenze hinweg bis zu 2N) und lässt Requests durch, wenn der Speicher nicht erreichbar ist (Fail-Open). Es ergänzt die Regel am Netzwerkrand also, statt sie zu ersetzen. Zählerzeilen werden in allen drei Backends automatisch bereinigt. Siehe [Konfiguration → Clusterweite Grenzen](configuration#cluster-wide-limits-authdurableratelimiting).
 
-- **Leader-Wahl**: eine lease-basierte Wahl (`Cluster:LeaseTtlSeconds`, Standard 30s, erneuert in etwa der Hälfte dieses Intervalls). Genau ein Knoten hält die Lease; die Führung wird automatisch übertragen, wenn der Leader ausfällt. An den Leader gebundene Arbeit (derzeit die Signaturschlüsselrotation, wenn aktiviert) läuft nur auf dem Leader, um eine gleichzeitige Schlüsselerzeugung zu vermeiden.
-- **Event Bus**: knotenübergreifende Benachrichtigungen (z. B. Cache-Invalidierung in Multi-Mandanten-Hosts), abgefragt alle `Cluster:PollIntervalSeconds` (Standard 3s).
+## Clustering {#clustering}
 
-Jede Instanz generiert beim Start eine zufällige, 12-stellige hexadezimale Knoten-ID zu ihrer Identifizierung; sie wird nicht persistiert.
+Mehrere Instanzen stimmen sich über eine **Leader-Wahl** und einen **knotenübergreifenden Event-Bus** ab, beide hinter austauschbaren Backends:
 
-### Backends
+- **Leader-Wahl**: eine Lease-basierte Wahl (`Cluster:LeaseTtlSeconds`, Standard 30 s, erneuert etwa nach der Hälfte dieses Intervalls). Genau ein Knoten hält die Lease; fällt der Leader aus, geht die Führung automatisch über. An den Leader gebundene Aufgaben laufen nur auf dem Leader: die *Deaktivierung* von Signaturschlüsseln bei Ablauf (wenn `Auth:KeyRotationEnabled` aktiv ist), der Abgleichslauf für Grants (nur Azure-Backend), das Nachverschlüsseln ruhender Daten (wenn `Auth:AtRestBackfillEnabled` aktiv ist; ein Nicht-Leader wartet kurz auf die Führung und überspringt die Aufgabe dann) und die Bereinigung der Ratenbegrenzungs-Zähler (Azure-Backend mit `Auth:DurableRateLimiting`). Mit `Cluster:Enabled=false` ist der einzelne Knoten dauerhaft Leader, sodass auch eine eigenständige Bereitstellung all diese Aufgaben ausführt.
+- **Event-Bus**: knotenübergreifende Benachrichtigungen (z. B. Cache-Invalidierung in mandantenfähigen Hosts), abgefragt alle `Cluster:PollIntervalSeconds` (Standard 3 s).
 
-Der **Standard ist In-Process**: Ein einzelner Knoten ist immer sein eigener Leader, und Ereignisse bleiben lokal, korrekt für eine einzelne Instanz ohne jede Konfiguration. Multi-Knoten-Deployments setzen über den `configureClustering`-Callback von `AddAuthagonal` ein echtes Backend ein:
+Jede Instanz erzeugt beim Start eine zufällige Knoten-ID aus 12 Hexadezimalzeichen, um sich zu identifizieren; sie wird nicht persistiert.
+
+### Backends {#backends}
+
+Der **Standard ist prozessintern**: Ein einzelner Knoten ist immer sein eigener Leader, und Events bleiben lokal. Für eine einzelne Instanz ist das ohne jede Konfiguration korrekt. Bereitstellungen mit mehreren Knoten setzen über den Callback `configureClustering` von `AddAuthagonal` ein echtes Backend ein:
 
 ```csharp
-// Azure: Führung über eine Blob-Lease, Event Bus über ein Table-Log (Authagonal.AzureProvider)
+// Azure: leadership via a blob lease, event bus via a table log (Authagonal.AzureProvider)
 builder.Services.AddAuthagonal(builder.Configuration,
     cluster => cluster.UseAzureStorage(blobServiceClient, tableServiceClient));
 
-// AWS: Führung + Event Bus über DynamoDB (Authagonal.AwsProvider)
+// AWS: leadership + event bus via DynamoDB (Authagonal.AwsProvider)
 builder.Services.AddAuthagonal(builder.Configuration,
     cluster => cluster.UseAwsDynamo(dynamoDb));
+
+// PostgreSQL: leadership via a conditional-upsert lease row, event bus via an
+// append-only log in the same database (Authagonal.SqlProvider)
+builder.Services.AddAuthagonal(builder.Configuration,
+    cluster => cluster.UseSql(sqlDataSource));
 ```
 
-`UseAzureStorageBus` / `UseAwsDynamoBus` registrieren nur den Event Bus und behalten die In-Process-Lease (immer Leader) bei: Verwenden Sie sie auf Knoten, die Cluster-Ereignisse empfangen müssen, aber niemals um die Führung konkurrieren dürfen.
+`UseAzureStorageBus` / `UseAwsDynamoBus` / `UseSqlBus` registrieren nur den Event-Bus und behalten die prozessinterne Lease (immer Leader) bei. Verwenden Sie sie auf Knoten, die Cluster-Events empfangen müssen, aber nie um die Führung konkurrieren dürfen.
 
-> **Hinweis:** Beim In-Process-Standard auf mehreren Knoten glaubt *jeder* Knoten, der Leader zu sein. Das ist für die meisten Workloads unbedenklich, aber aktivieren Sie ein echtes Lease-Backend, bevor Sie `Auth:KeyRotationEnabled` über mehrere Instanzen hinweg einschalten.
+> **Hinweis:** Mit dem prozessinternen Standard auf mehreren Knoten hält sich *jeder* Knoten für den Leader. Für die meisten Workloads ist das unschädlich, aber aktivieren Sie ein echtes Lease-Backend, bevor Sie `Auth:KeyRotationEnabled` über mehrere Instanzen hinweg einschalten.
 
-Siehe die Seite [Konfiguration](configuration#cluster) für alle Cluster-Einstellungen.
+Die **Erzeugung** von Signaturschlüsseln ist von dieser an den Leader gebundenen Deaktivierung getrennt und wird nicht von ihr gesteuert: Jeder Knoten ruft `EnsureActiveKeyAsync` beim Start und bei jeder Aktualisierung gemäß `Auth:SigningKeyCacheRefreshMinutes` auf. Ist `KeyRotationEnabled` ausgeschaltet (der Standard), wird der Schlüsselwechsel beim Ablauf nach 90 Tagen also vollständig über diesen Pfad ausgelöst. Die Erzeugung nimmt eine eigene kurze Cluster-Lease, sodass es überall dort, wo ein echtes Lease-Backend konfiguriert ist, nur einen Schreiber gibt. Mit dem prozessinternen Standard auf mehreren Knoten gibt es keine solche Abstimmung, und zwei Knoten, die im selben Moment auf einen abgelaufenen Schlüssel stoßen, können jeweils einen erzeugen. Beide landen im JWKS, und mit beiden signierte Tokens lassen sich verifizieren, aber welcher Schlüssel als aktiv gemeldet wird, kann hin und her springen. Ein weiterer Grund, für Bereitstellungen mit mehreren Knoten ein echtes Lease-Backend zu konfigurieren.
 
-### Multi-Mandanten-Deployments
+Alle Cluster-Einstellungen finden Sie auf der Seite [Konfiguration](configuration#cluster).
 
-Im Multi-Mandanten-Modus (`AddAuthagonalCore()`) werden keine Hintergrunddienste registriert: `TokenCleanupService`, `GrantReconciliationService`, `SigningKeyRotationService` und die Config-Seed-Dienste sind allesamt Teil der Single-Mandanten-Komposition `AddAuthagonal()`. Der Host verwaltet diese pro Mandant.
+### Mandantenfähige Bereitstellungen {#multi-tenant-deployments}
 
-## Heiße Partition des Namensindex
+Im mandantenfähigen Modus (`AddAuthagonalCore()`) werden `TokenCleanupService`, `GrantReconciliationService`, `SigningKeyRotationService` und die Seed-Dienste (Clients, Provider, Scopes und Rollen aus der Konfiguration) nicht registriert: Sie gehören zur Single-Tenant-Komposition `AddAuthagonal()`, und der Host übernimmt diese Aufgaben pro Mandant.
 
-Die Admin-Namenspräfixsuche wird durch die Indextabellen `UserFirstNames` / `UserLastNames` gestützt, die eine **einzige heiße Partition** verwenden. Bei Skalierung begrenzt dies den Index-Schreibdurchsatz auf etwa 2.000 Operationen/Sek., was bei hoher Last zu einem Engpass beim Erstellen/Aktualisieren von Benutzern werden kann. Wenn Sie keine Admin-Namenssuche anbieten, setzen Sie `Storage:NameIndexesEnabled = false`, um diese Schreibvorgänge vollständig zu vermeiden. Siehe [Konfiguration](configuration).
+## Hot Partition des Namensindex {#name-index-hot-partition}
 
-## Vertrauenswürdiger Proxy und interne Endpunkte
+Die Präfixsuche nach Namen in der Administration stützt sich auf die Indextabellen `UserFirstNames` / `UserLastNames`, die eine **einzige Hot Partition** verwenden. Bei großem Umfang begrenzt das den Schreibdurchsatz des Index auf etwa 2.000 Operationen pro Sekunde, was unter hoher Last beim Anlegen und Aktualisieren von Benutzern zum Engpass werden kann. Wenn Sie die Namenssuche in der Administration nicht anbieten, setzen Sie `Storage:NameIndexesEnabled = false`, um diese Schreibvorgänge ganz zu überspringen. Siehe [Konfiguration](configuration).
+
+## Vertrauenswürdige Proxys und interne Endpunkte {#trusted-proxy-and-internal-endpoints}
 
 Beim Betrieb mehrerer Instanzen hinter einem Load Balancer:
 
-- **Weitergeleitete Header**: Ratenbegrenzung und Kontosperre basieren auf der Client-IP, die aus `X-Forwarded-For` aufgelöst wird. Setzen Sie `ForwardedHeaders:KnownNetworks` auf Ihr Ingress- / Pod-CIDR, damit die Client-IP nicht instanzübergreifend gefälscht werden kann. `ForwardedHeaders:ForwardLimit` ist standardmäßig `1`. Siehe [Konfiguration](configuration#forwarded-headers-trusted-proxy).
-- **Interne Endpunkte**: `/_internal/backchannel-logout` erfordert `Cluster:Secret` im Header `X-Cluster-Secret` (Vergleich in konstanter Zeit). Ohne das Geheimnis autorisiert der Endpunkt niemanden und antwortet mit 404 — die Quell-IP wird nicht als Credential behandelt, denn Loopback ist das, was ein Reverse-Proxy auf demselben Host für jede weitergeleitete Anfrage präsentiert, und ein privater Bereich ist in einem gemeinsam genutzten Cluster-Netzwerk jede benachbarte Workload. `Cluster:AllowLoopbackWithoutSecret` ist ein reines Entwicklungs-Opt-in, das einen Loopback-Peer vor der Weiterleitung wieder zulässt. Das ausgelieferte Produkt ruft diese Route nie auf (die Session-Verteilung läuft in-process über `SessionTermination`), sie ist also nur für eine selbst gebaute Verteilung relevant.
+- **Forwarded Headers**: Ratenbegrenzung und Sperrung verwenden die Client-IP als Schlüssel, ermittelt aus `X-Forwarded-For`. Setzen Sie `ForwardedHeaders:KnownNetworks` auf das CIDR Ihres Ingress bzw. Ihrer Pods, damit die Client-IP nicht über Instanzen hinweg gefälscht werden kann. `ForwardedHeaders:ForwardLimit` ist standardmäßig `1`. Siehe [Konfiguration](configuration#forwarded-headers-trusted-proxy).
+- **Interne Endpunkte**: `/_internal/backchannel-logout` erfordert `Cluster:Secret` im Header `X-Cluster-Secret` (in konstanter Zeit verglichen). Ohne das Secret autorisiert der Endpunkt niemanden und antwortet mit 404; die Quell-IP gilt nicht als Berechtigungsnachweis, weil ein Reverse Proxy auf demselben Host für jeden weitergeleiteten Request Loopback vorweist und ein privater Adressbereich jeden benachbarten Workload in einem gemeinsamen Cluster-Netz umfasst. `Cluster:AllowLoopbackWithoutSecret` ist eine nur für die Entwicklung gedachte Option, die einen Loopback-Peer ohne Weiterleitung wieder zulässt. Das ausgelieferte Produkt ruft diese Route nie auf (die Verteilung an Sitzungen erfolgt prozessintern über `SessionTermination`); sie ist also nur für eine Verteilung relevant, die Sie selbst bauen.
 
-## Skalierungsempfehlungen
+## Empfehlungen zur Skalierung {#scaling-recommendations}
 
-**Vertikale Skalierung**: Erhöhen Sie CPU und Arbeitsspeicher einer einzelnen Instanz. Nützlich, um mehr gleichzeitige Anfragen pro Instanz zu verarbeiten.
+**Vertikale Skalierung**: Erhöhen Sie CPU und Arbeitsspeicher einer einzelnen Instanz. Nützlich, um mehr gleichzeitige Requests pro Instanz zu bewältigen.
 
-**Horizontale Skalierung**: Führen Sie mehrere Instanzen hinter einem Load Balancer aus. Keine Sticky Sessions oder gemeinsamen Caches erforderlich. Jede Instanz ist vollständig unabhängig.
+**Horizontale Skalierung**: Betreiben Sie mehrere Instanzen hinter einem Load Balancer. Weder Sticky Sitzungen noch gemeinsame Caches sind erforderlich. Jede Instanz ist vollständig unabhängig.
 
-**Skalierung auf null**: Authagonal unterstützt Scale-to-Zero-Deployments (z. B. Azure Container Apps mit `minReplicas: 0`). Die erste Anfrage nach einer Leerlaufphase hat einen Kaltstart von einigen Sekunden, während die .NET-Laufzeit initialisiert und Signaturschlüssel aus dem Speicher geladen werden.
+**Skalierung auf null**: Authagonal unterstützt Bereitstellungen mit Skalierung auf null (z. B. Azure Container Apps mit `minReplicas: 0`). Der erste Request nach einer Ruhephase hat einen Kaltstart von einigen Sekunden, während die .NET-Runtime initialisiert und die Signaturschlüssel aus dem Speicher geladen werden.

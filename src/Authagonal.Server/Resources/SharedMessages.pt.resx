@@ -86,4 +86,37 @@
   <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>O token &#xE9; inv&#xE1;lido ou expirou</value></data>
   <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>O e-mail j&#xE1; foi confirmado</value></data>
   <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>O Provider e o ProviderKey s&#xE3;o obrigat&#xF3;rios</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>Algo está faltando</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>Este link de confirmação está incompleto. Abra o e-mail de verificação mais recente e use o link que está nele.</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>Este link não parece correto</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>Abra o e-mail de verificação mais recente e use o link que está nele.</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>Este link expirou</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>Entre na sua conta para receber um novo e-mail de verificação.</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>Seu e-mail já foi confirmado</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>Você já pode entrar.</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>Confirme seu e-mail</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>Confirme que este endereço pertence a você.</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>Confirmar meu e-mail</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>Ir para o login</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>Verifique seu e-mail</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>Verifique seu e-mail</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>Clique no link abaixo para verificar seu endereço de e-mail:</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>Verificar e-mail</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>Se você não criou uma conta, pode ignorar este e-mail.</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>Redefina sua senha</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>Redefina sua senha</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>Clique no link abaixo para definir uma nova senha:</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>Redefinir senha</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>Este link expira em 1 hora. Se você não solicitou a redefinição de senha, pode ignorar este e-mail.</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>Você já tem uma conta</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>Você já tem uma conta</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>Alguém tentou se cadastrar com este e-mail, mas já existe uma conta. Entre na sua conta ou redefina sua senha caso a tenha esquecido.</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>Entrar</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>Se não foi você, pode ignorar este e-mail.</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Sessão encerrada</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Sair</value></data>
 </root>

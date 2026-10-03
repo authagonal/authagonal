@@ -768,19 +768,20 @@ public static class AuthEndpoints
     private static async Task<IResult> ConfirmEmailPageAsync(
         HttpContext httpContext,
         IUserStore userStore,
+        IStringLocalizer<SharedMessages> localizer,
         CancellationToken ct)
     {
         var token = httpContext.Request.Query["token"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(token))
-            return ConfirmPage("Something is missing", "This confirmation link is incomplete. Open the most recent verification email and try the link there.", null);
+            return ConfirmPage(localizer, "ConfirmEmail_MissingHeading", "ConfirmEmail_MissingBody", null);
 
         // Read-only inspection, so the page can say something useful before the user clicks. Nothing
         // here writes, so a scanner reaching it changes nothing.
         var (email, expired, stamp) = InspectConfirmToken(token);
         if (email is null)
-            return ConfirmPage("This link doesn't look right", "Open the most recent verification email and use the link there.", null);
+            return ConfirmPage(localizer, "ConfirmEmail_InvalidHeading", "ConfirmEmail_InvalidBody", null);
         if (expired)
-            return ConfirmPage("This link has expired", "Sign in to have a new verification email sent.", null);
+            return ConfirmPage(localizer, "ConfirmEmail_ExpiredHeading", "ConfirmEmail_ExpiredBody", null);
 
         // The security stamp in the token is checked BEFORE anything account-specific is rendered.
         //
@@ -805,14 +806,11 @@ public static class AuthEndpoints
                 Encoding.UTF8.GetBytes(user.SecurityStamp), Encoding.UTF8.GetBytes(stamp ?? ""));
 
         if (stampMatches && user!.EmailConfirmed && string.IsNullOrWhiteSpace(user.PendingPasswordHash))
-            return ConfirmPage("Your email is already confirmed", "You can sign in now.", null);
+            return ConfirmPage(localizer, "ConfirmEmail_AlreadyHeading", "ConfirmEmail_AlreadyBody", null);
 
         // The address is not echoed back: it came from the caller, so repeating it confirms nothing
         // and turns the page into a reflector.
-        return ConfirmPage(
-            "Confirm your email",
-            "Confirm that this address belongs to you.",
-            token);
+        return ConfirmPage(localizer, "ConfirmEmail_PromptHeading", "ConfirmEmail_PromptBody", token);
     }
 
     /// <summary>
@@ -843,19 +841,29 @@ public static class AuthEndpoints
     /// The confirmation page. Deliberately tiny and dependency-free so it renders identically for every
     /// tenant without pulling the SPA in. A form post, never a redirect or a script.
     /// </summary>
-    private static IResult ConfirmPage(string heading, string body, string? token)
+    /// <remarks>
+    /// Text comes from <c>SharedMessages</c> in the culture <c>UseRequestLocalization</c> resolved for the
+    /// request (query string, cookie, then Accept-Language: a link opened from an email is a plain browser
+    /// navigation, so Accept-Language is what normally decides). <c>lang</c>/<c>dir</c> follow that culture.
+    /// The layout is centred and uses no physical left/right properties, so it needs no mirroring beyond
+    /// <c>dir</c>.
+    /// </remarks>
+    private static IResult ConfirmPage(
+        IStringLocalizer<SharedMessages> localizer, string headingKey, string bodyKey, string? token)
     {
+        var heading = localizer[headingKey].Value;
+        var body = localizer[bodyKey].Value;
         var action = token is null
-            ? "<a class=\"btn\" href=\"/login\">Go to sign in</a>"
+            ? $"<a class=\"btn\" href=\"/login\">{HtmlEncoder.Default.Encode(localizer["ConfirmEmail_SignInButton"].Value)}</a>"
             : $"""
                <form method="post" action="/api/auth/confirm-email">
                  <input type="hidden" name="token" value="{HtmlEncoder.Default.Encode(token)}" />
-                 <button class="btn" type="submit">Confirm my email</button>
+                 <button class="btn" type="submit">{HtmlEncoder.Default.Encode(localizer["ConfirmEmail_ConfirmButton"].Value)}</button>
                </form>
                """;
 
         var html = $$"""
-            <!doctype html><html lang="en"><head><meta charset="utf-8">
+            <!doctype html><html {{HtmlDocumentLocale.HtmlAttributes()}}><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <meta name="robots" content="noindex,nofollow">
             <title>{{HtmlEncoder.Default.Encode(heading)}}</title>

@@ -72,12 +72,12 @@
 - **SSO connections can belong to an organisation.** A tenant that serves many customer
   organisations could only hold ONE connection per email domain: `AllowedDomains` drives the
   tenant-wide `SsoDomain` index, whose key is the domain, so two customers could not both bring
-  an IdP for `contoso.com` — and every connection was offered on every login screen the tenant
+  an IdP for `contoso.com`, and every connection was offered on every login screen the tenant
   served, so one customer's "Continue with Contoso Entra" button appeared on another's. Both
   provider configs now carry `OrganizationId` (null = a tenant-level connection, which is what
   every existing connection reads back as, and the only shape this library had until now).
   A connection that names one:
-  - is **offered only when that organisation is selected** — never on the tenant's own login
+  - is **offered only when that organisation is selected**: never on the tenant's own login
     screen, and never to a request that resolved to no organisation, even one whose `login_hint`
     matches its domains exactly;
   - has its domains **matched within that organisation only**. It is deliberately not written to
@@ -87,23 +87,23 @@
     it back (`"organizationId": ""` on the update endpoint) re-registers them;
   - **makes everyone who signs in through it a member.** The SAML ACS and the OIDC callback stamp
     the connection's organisation as `org_id`, overriding the account's own
-    `AuthUser.OrganizationId` — a downstream provisioning artefact, not an assertion about this
-    sign-in — and create an active membership when the user holds none. Without it every user of a
+    `AuthUser.OrganizationId` (a downstream provisioning artefact, not an assertion about this
+    sign-in) and create an active membership when the user holds none. Without it every user of a
     self-service connection would authenticate successfully and then be refused a token by
     `Organization.RequireMembershipForTokens`, with nothing in the product able to create the row
     they were missing. An EXISTING membership is never modified: a `suspended` row stays suspended,
     so signing in again cannot restore access an administrator revoked.
 
-  `/connect/authorize` resolves the organisation BEFORE authentication — the `organization`
-  parameter, then a client restricted to exactly one, then the new `ITenantContext.OrganizationId`
-  — and consults its connections ahead of every tenant-wide home-realm rule, because a customer's
+  `/connect/authorize` resolves the organisation BEFORE authentication (the `organization`
+  parameter, then a client restricted to exactly one, then the new `ITenantContext.OrganizationId`)
+  and consults its connections ahead of every tenant-wide home-realm rule, because a customer's
   own IdP has to win over a tenant-level connection claiming the same domain and because an
   org-scoped connection is invisible to the index. With one resolved: `idp_hint` selects within it
   (SAML included, which the tenant-wide hint path cannot reach); one connection and no
   contradicting `login_hint` goes straight to it; several are told apart by the hinted email
   domain; no match falls through to exactly today's behaviour. The redirect carries the same
   connection interstitial and the same federation-error loop-breaker the `idp_hint` path already
-  had, and can only ever name a registered connection of that organisation — resolution refuses a
+  had, and can only ever name a registered connection of that organisation: resolution refuses a
   disabled organisation, an unknown one, and one the client's `RestrictedToOrganizationIds`
   forbids, each by resolving to no organisation rather than by erroring in front of the login
   screen.
@@ -118,16 +118,16 @@
   authorize endpoint cannot route one address to two different IdPs. With an organisation, its own
   button connections are listed first and `sso-check` matches its domains before the tenant index;
   the providers payload gains **`autoChallenge`**, naming the single connection an organisation has
-  so a login app can skip the card entirely. It is advisory — the authorize endpoint performs the
+  so a login app can skip the card entirely. It is advisory: the authorize endpoint performs the
   same auto-challenge itself. Admin create/update take and return `organizationId`; an organisation
   that does not exist is `400 unknown_organization`. Documented in docs/self-service-sso.md
   ("Organisation-scoped connections"), docs/organizations.md and docs/admin-api.md.
 
-- **`ITenantContext.OrganizationId`** — the organisation a host resolves per request, before
+- **`ITenantContext.OrganizationId`**: the organisation a host resolves per request, before
   authentication (a per-organisation hostname or custom domain). A default interface member
   returning `null`, so it is **not** a breaking change: an existing `ITenantContext` implementation
-  in another host keeps compiling untouched, and `null` — what every single-tenant deployment
-  reports — is the behaviour this library had everywhere before. It is the lowest-precedence
+  in another host keeps compiling untouched, and `null`, what every single-tenant deployment
+  reports, is the behaviour this library had everywhere before. It is the lowest-precedence
   pre-authentication source and never widens access: the organisation it names is still checked for
   existence, for `Enabled`, and against the client's `RestrictedToOrganizationIds`.
 
@@ -136,7 +136,7 @@
 - **`upstream_connection_id` is set on every OIDC federation cookie**, not only when the connection
   opts into `RevalidateOnRefresh`, so a session always records which IdP owns it. Every existing
   consumer is additionally guarded on the upstream refresh token being present, so nothing changes
-  for a connection that does not revalidate — except that the already-degraded revalidation
+  for a connection that does not revalidate, except that the already-degraded revalidation
   diagnostic now performs one connection point read per refresh of such a session (it still warns
   only for a connection that asked to revalidate).
 
@@ -144,8 +144,8 @@
 
 - **A failed federation reached by `login_hint` looped until the browser gave up.** The tenant-wide
   home-realm rule sends a request whose `login_hint` domain is in the `SsoDomain` index straight to
-  that connection. A federation that fails redirects back to the authorize URL with `error` appended
-  — and this rule re-fired on that URL, sending the browser to the same IdP again, round after round,
+  that connection. A federation that fails redirects back to the authorize URL with `error` appended,
+  and this rule re-fired on that URL, sending the browser to the same IdP again, round after round,
   until the user-agent reported "too many redirects" instead of the failure. It now falls through to
   the login card when the request carries an `error`, which is the recoverable outcome for this rule
   specifically: the card is still reachable, it may offer another connection, and a `login_hint` is a
@@ -167,53 +167,53 @@
 ### Added
 
 - **Login app shows the organisation name when a request resolves to an organisation.** The
-  `authagonal-boot` payload's `organization` member (`{ id, slug, name }` or `null` — set by a
+  `authagonal-boot` payload's `organization` member (`{ id, slug, name }` or `null`: set by a
   multi-tenant host that resolves one per request, e.g. by custom domain; this library has no
   pre-authentication organisation resolution of its own) now reaches the SPA's `AuthagonalBoot`
-  type and a new `getOrganization()` export. `AuthLayout` — the shared header behind every route
-  (sign in, register, password reset, MFA, device, consent/agent-consent, grants, account) —
+  type and a new `getOrganization()` export. `AuthLayout` (the shared header behind every route
+  (sign in, register, password reset, MFA, device, consent/agent-consent, grants, account))
   renders "Signing in to {name}" under the heading (`data-testid="login-org-name"`, i18n key
   `login.signingInTo`) whenever `organization.name` is present and differs, case-insensitively and
   trimmed, from `branding.appName`; nothing renders, and header spacing is unchanged, otherwise.
-  `login.signingInTo` ships in `en.json` only for now — see docs/branding.md.
+  `login.signingInTo` ships in `en.json` only for now: see docs/branding.md.
 
 ## [0.28.0], 2026-09-13
 
 ### Fixed
 
 - **`FileSystemBackupTarget`/`-Source` no longer let two table prefixes collide on the same backup
-  directory.** Every backupId-keyed path (data files, the manifest) was built from `backupId` alone —
-  `{root}/{backupId}/...` — and `backupId` is a bare `yyyyMMdd-HHmmss` timestamp, truncated to the
+  directory.** Every backupId-keyed path (data files, the manifest) was built from `backupId` alone,
+  `{root}/{backupId}/...`, and `backupId` is a bare `yyyyMMdd-HHmmss` timestamp, truncated to the
   second, with no `--prefix` in it at all. Two DIFFERENT tenants' full backups landing in the same
-  wall-clock second therefore got the identical directory — tenant B's manifest and data files
+  wall-clock second therefore got the identical directory: tenant B's manifest and data files
   landing on top of tenant A's, in a target whose whole documented purpose (`--prefix`) is running
   more than one tenant into one place. The chain-root FILE that names "the full this incremental
   applies onto" was already scoped per prefix correctly (`.lastfull-{scope}`, via the `scope`
   parameter every watermark/chain-root method already took), so `BackupChainRootTests
   .TheChainRootIsScopedPerPrefix` could still observe a tenant A incremental naming tenant B's full as
   its parent whenever both landed in the same second and happened to share the (also unscoped) bare
-  id — the failure this test flagged intermittently before this fix. Fixed by giving
+  id: the failure this test flagged intermittently before this fix. Fixed by giving
   `FileSystemBackupTarget`/`FileSystemBackupSource` an optional constructor `tablePrefix`, nesting
   every backupId-keyed path one level under it (`{root}/{prefix}/{backupId}/...`) exactly the way
   `BlobBackupTarget` (Authagonal Cloud's target) already nests every path under its
-  constructor-supplied tenant slug — `--prefix` on `tools/Authagonal.Backup` now threads through to
+  constructor-supplied tenant slug: `--prefix` on `tools/Authagonal.Backup` now threads through to
   it. `BackupId` itself is untouched: still the exact historical `yyyyMMdd-HHmmss[-incr]`, so every
   existing archive, every consumer that compares or pattern-matches the id string (unaffected because
   the string never changes), and `docs/backup-restore.md`'s documented id shape all keep working
-  unmodified — only unprefixed (single-tenant) runs keep the flat historical directory layout too;
+  unmodified, only unprefixed (single-tenant) runs keep the flat historical directory layout too;
   prefixed runs gain the extra nesting level, documented alongside the existing example.
 
 ### Added
 
 - **A generic NDJSON user-import source, alongside the existing Duende migration.** Migrating a
   legacy app into Authagonal used to mean either the Duende SQL Server path or hand-rolling
-  something against the store interfaces directly — there was no supported way to bring in users
+  something against the store interfaces directly: there was no supported way to bring in users
   from an arbitrary legacy store (a hand-rolled ASP.NET Identity table, a Rails/Devise export, a
   Node app on scrypt) that isn't Duende. `Authagonal.Migration` now ships a second, independent
   import source that reads a flat NDJSON file (one JSON object per line: `email` required;
   optional `username`, `givenName`, `familyName`, `displayName`, `emailVerified`, `passwordHash`,
   `roles`, `organizationId`, `attributes`, `phoneNumber`, `disabled`, `createdAt`, `externalId`) and
-  writes `AuthUser` rows through the same store abstractions the Duende engine uses — users only, no
+  writes `AuthUser` rows through the same store abstractions the Duende engine uses, users only, no
   clients/roles/scopes/federation. `passwordHash` is stored verbatim in whatever legacy format
   `PasswordHasher` recognises (bcrypt, ASP.NET Identity V3, scrypt `$s2$`); it is not validated
   beyond non-empty, so an imported user logs in with their old password and is transparently
@@ -227,22 +227,22 @@
   default, listing the offending names), and `--ContinueOnError` (exit 0 despite failed lines; does
   not apply to `--OnDuplicate fail`, which always aborts the run). The summary reports total lines,
   imported, skipped, updated and failed counts plus the first 20 failures as line number + reason.
-  See `docs/migration.md` — "NDJSON user import" — for the full schema and CLI reference.
+  See `docs/migration.md`, "NDJSON user import", for the full schema and CLI reference.
 
 ### Added
 
 - **`PasswordHasher` now verifies legacy Scrypt.NET (`$s2$`) password hashes and rehashes them to
-  native PBKDF2 on first login** — the same accept-on-import, upgrade-on-login contract bcrypt and
+  native PBKDF2 on first login**: the same accept-on-import, upgrade-on-login contract bcrypt and
   ASP.NET Identity V3 already have. `$s2$<N>$<r>$<p>$<salt-b64>$<hash-b64>` is the format
   Scrypt.NET's `ScryptEncoder` writes. `System.Security.Cryptography` ships PBKDF2 and HKDF but no
   scrypt on either net9.0 or net10.0, so `Authagonal.Core.Services.Scrypt` is a from-scratch RFC
   7914 implementation (Salsa20/8 core, BlockMix, ROMix, an outer PBKDF2-HMAC-SHA256), checked
   against all four of the RFC's published test vectors. N, r and p are read out of the stored
-  hash — the same kind of attacker-influenced cost parameter every other imported format in this
-  file already bounds — so a crafted `$s2$` blob with an oversized or non-power-of-two N, or r*p at
+  hash (the same kind of attacker-influenced cost parameter every other imported format in this
+  file already bounds) so a crafted `$s2$` blob with an oversized or non-power-of-two N, or r*p at
   or above 2^30, is refused before any derivation runs rather than after.
 - **Organizations: a customer inside a tenant, as a first-class record rather than a string on a user.**
-  `AuthUser.OrganizationId` has always been emitted as the `org_id` claim, but it was a bare label —
+  `AuthUser.OrganizationId` has always been emitted as the `org_id` claim, but it was a bare label:
   written by TCC provisioning or a SCIM token binding, with nowhere to say what the organization was,
   who belonged to it, or whether it could be authenticated as at all. So an ISV serving many customers
   from one tenant had no way to make "which customer is this token for" a question the authorization
@@ -251,7 +251,7 @@
   metadata bag, branding override) and `OrganizationMembership` (the record that actually authorises
   issuing a token for one) are stored through the new `IOrganizationStore` and
   `IOrganizationMembershipStore`. The shipped defaults are empty and read-only, registered by TryAdd,
-  so a deployment that never creates an organization behaves exactly as it did — nothing can be
+  so a deployment that never creates an organization behaves exactly as it did: nothing can be
   selected, no gate engages, and a legacy `OrganizationId` keeps emitting `org_id` from the user
   record. The writes refuse rather than accept into a process-local dictionary, because an
   organization disabled on one node would otherwise keep minting tokens on every other.
@@ -260,20 +260,20 @@
   of them changes an issuer and not its authorize call; `org_slug` and `org_id` are accepted as
   aliases, because both are in the wild and quietly ignoring the one this server did not choose is the
   failure mode every unread parameter on this endpoint has had. Two of them naming DIFFERENT
-  organizations is refused rather than ranked — the request means two things, and whichever was picked
-  the client would have been told the other — and all three joined the single-valued list, so
+  organizations is refused rather than ranked (the request means two things, and whichever was picked
+  the client would have been told the other) and all three joined the single-valued list, so
   repeating one is refused like a repeated `redirect_uri`. Neither PAR nor the login round trip needed
   work: the PAR endpoint stores every field it is given, and the whole authorize URL already rides as
   `returnUrl`. The three claims are gated on `profile` exactly as `org_id` was, and all three are
-  reserved — `org_slug` especially, since it is the stable key a relying party compares against the
+  reserved: `org_slug` especially, since it is the stable key a relying party compares against the
   customer instance it is serving, and a user-chosen custom attribute of that name would have been that
   comparison's answer. Resolution order is the parameter, then a client registered against exactly one
-  organization, then the account's own — and the first two, being explicit, must satisfy membership
+  organization, then the account's own, and the first two, being explicit, must satisfy membership
   while the third need not, so creating an organization cannot retroactively lock out the users already
   tagged with its id.
 - **The selected organization survives refresh rotation, and is re-checked on every one.** Everything
   else on the subject is rebuilt from the user store at refresh, so an organization that lived only on
-  the subject would have reverted to the account default on the FIRST rotation — roughly one
+  the subject would have reverted to the account default on the FIRST rotation: roughly one
   access-token lifetime after login, handing the relying party another customer's `org_id` with no
   error anywhere. It is carried on `OidcSubject.OrganizationExplicitlySelected` rather than inferred by
   comparing the carried value against the account's current one, because after an operator re-tags an
@@ -288,7 +288,7 @@
   field was persisted from the start and read by nothing, so a tenant could record that someone was an
   Auditor at one customer and a Site Manager at another, and every token said the same thing either
   way. They are unioned with the directly-assigned and SCIM-group-granted sets under the same `roles`
-  scope gate, so a resource server does not have to know how a role was granted — but it does have to
+  scope gate, so a resource server does not have to know how a role was granted, but it does have to
   read `org_id` alongside, because the same name now means "in THIS organization". Bounded three ways:
   only an EXPLICITLY selected organization contributes (the same asymmetry the membership gate has, so
   an organization merely inherited from the account grants nothing); only an `active` membership
@@ -296,27 +296,27 @@
   authorise nothing; and the roles are read from the row keyed by the SELECTED organization, so a role
   held in one can never reach a token issued for another. Re-read on every rotation, so changing them
   reaches a live session at its next refresh. A request that selects no organization produces the role
-  set it produced before — the union is over an empty list.
+  set it produced before: the union is over an empty list.
 - **`IAuthHook.OnTokenIssuingAsync` now fires from the three interactive mints, so a host can veto a
   token per (user, client, request).** There was no such gate. `OnTokenIssuedAsync` is documented
-  "Throw to reject the token issuance" but the token endpoint calls it with a NULL subject —
-  deliberately, since it runs before the grant is redeemed — so a host could refuse a client and never
+  "Throw to reject the token issuance" but the token endpoint calls it with a NULL subject
+  (deliberately, since it runs before the grant is redeemed) so a host could refuse a client and never
   a user, and the question an authorization server is asked most often ("may THIS person have a token
   for THIS application right now") had nowhere to live. `OnTokenIssuingAsync` did carry the subject but
   fired from exactly two agentic mints, so it was unreachable for `authorization_code`, `refresh_token`
-  and `device_code` — the three grants that issue tokens to people. No interface change: it is a
+  and `device_code`: the three grants that issue tokens to people. No interface change: it is a
   default interface member, every existing implementor that does not override it stays a no-op, and the
   two agentic call sites keep firing on exactly their own conditions. Throwing yields `access_denied`
   with the exception message as `error_description`; throwing a `ProtocolTokenException` names your own
   error instead. On the refresh path the gate runs BEFORE the rotation, so a refusal leaves the
-  presented token unconsumed and the family intact — a host saying "not now" is not a host ending the
+  presented token unconsumed and the family intact: a host saying "not now" is not a host ending the
   session. The device grant is handled outside `TokenGrantHandlers` and did not inherit its error
   mapping, so it was taught to translate the refusal rather than surface a 500.
 - **Azure Table Storage provider for `IOrganizationStore` and `IOrganizationMembershipStore`.**
   `TableOrganizationStore` writes the organization as a full document to `Organizations` and
   maintains a separate `OrganizationSlugs` lookup table so resolving the `organization` authorize
-  parameter is a point read — the same separate-index-table shape `TableScimGroupStore` uses for its
-  external-id lookup — and rejects an upsert whose slug is already held by a different organization
+  parameter is a point read (the same separate-index-table shape `TableScimGroupStore` uses for its
+  external-id lookup) and rejects an upsert whose slug is already held by a different organization
   id, matching the in-memory reference store. `TableOrganizationMembershipStore` writes each
   membership as a full document to both `OrganizationMembers` (partitioned by organization, for the
   admin "who is a member" listing) and `UserMemberships` (partitioned by user, for the token-issuance
@@ -328,8 +328,8 @@
   `DynamoOrganizationStore` writes the organization as a full document to an `Organizations` table
   (pk = `org`, sk = the organization id) and maintains a separate `OrganizationSlugs` table
   (pk = `orgslug`, sk = the slug, data = the owning organization id) so resolving the `organization`
-  authorize parameter is a `GetItem`, not a query — the same separate-table shape
-  `TableOrganizationStore` uses on Azure — and rejects an upsert whose slug is already held by a
+  authorize parameter is a `GetItem`, not a query (the same separate-table shape
+  `TableOrganizationStore` uses on Azure) and rejects an upsert whose slug is already held by a
   different organization id, matching the in-memory reference store; a slug rename writes the new
   lookup row before dropping the stale one. `DynamoOrganizationMembershipStore` writes each
   membership as a full document to both `OrganizationMembers` (pk = `org|{orgId}`, for the admin
@@ -342,16 +342,16 @@
 - **Self-hosted SQL provider for `IOrganizationStore` and `IOrganizationMembershipStore`.** Same
   generic pk/sk/`attrs` table this provider uses everywhere, no EF Core and no migration files.
   `SqlOrganizationStore` writes the organization as a full document to an `Organizations` table
-  (pk = `org`, sk = the organization id — the same shared-partition shape `SqlRoleStore` and
+  (pk = `org`, sk = the organization id: the same shared-partition shape `SqlRoleStore` and
   `SqlScopeStore` use) and keeps a separate `OrganizationSlugs` table (pk = `orgslug`, sk = the
   slug, attrs = the owning organization id) so resolving the `organization` authorize parameter is
-  a point read, not a scan — matching `TableOrganizationStore` on Azure and `DynamoOrganizationStore`
+  a point read, not a scan, matching `TableOrganizationStore` on Azure and `DynamoOrganizationStore`
   on DynamoDB; it rejects an upsert whose slug is already held by a different organization id, and a
   slug rename writes the new lookup row before dropping the stale one. `SqlOrganizationMembershipStore`
   writes each membership as a full document to both `OrganizationMembers` (pk = `org|{orgId}`, for
   the admin "who is a member" listing) and `UserMemberships` (pk = `user|{userId}`, for the
-  token-issuance path's "which organizations may this person authenticate as") — the same
-  forward/reverse shape `SqlScimTokenStore` uses — and the membership `GetAsync` the token-issuance
+  token-issuance path's "which organizations may this person authenticate as") (the same
+  forward/reverse shape `SqlScimTokenStore` uses) and the membership `GetAsync` the token-issuance
   gate calls is a point read on the organization-partitioned row. Every lookup across both stores is
   exact-key equality, so none of it depends on the byte-ordinal `COLLATE "C"` pin the range-scanning
   SQL stores need; it is still verified against the same ICU-collated PostgreSQL fixture the rest of
@@ -361,12 +361,12 @@
 
 - **`org_id` and `org_slug` are no longer gated on the `profile` scope.** They are authorization
   context, not profile data: they say which customer a token may act for, which is the first thing a
-  multi-customer resource server checks — before it has decided whether it cares about a name, and
+  multi-customer resource server checks, before it has decided whether it cares about a name, and
   often on a token that requested no profile at all. Under the gate an API-only client asking for
   `openid` alone got a token with no organization on it, which reads as "belongs to nobody": the
   resource server either refuses a legitimate caller or, silently and much worse, treats the token as
   unscoped and serves every customer's data from it. The same gate also broke the exchange restriction
-  added last slice — a resource-server token carried no `org_id`, so a client exchanging its OWN token
+  added last slice: a resource-server token carried no `org_id`, so a client exchanging its OWN token
   for its OWN organization was refused as unattributed. `org_name` keeps the gate, because it is
   presentation and nothing should authorize on it. Ungating discloses nothing the client had not
   already established: it chose the organization, or it is restricted to one, and both names are
@@ -374,22 +374,22 @@
   organization still emits none of the three. Applies to the access token, the ID token, both userinfo
   endpoints and introspection.
 - **A mixed-case `organization` parameter resolves by id only.** Slugs are lowercase-only by the store
-  rule, so a value carrying any uppercase character cannot be one — and lowercasing it to ask the slug
+  rule, so a value carrying any uppercase character cannot be one, and lowercasing it to ask the slug
   index anyway asked "is some organization's slug the lowercased form of this id?". Where one was, a
   caller naming an id was handed a different customer. An all-lowercase value still resolves slug-first
   and then by id, which the store's cross-namespace rule keeps unambiguous.
 - **`OAuthClient.RestrictedToOrganizationIds` is normalized and validated at the admin API.** The
   model's `= []` initializer does not survive JSON binding, so a body carrying an explicit
-  `"restrictedToOrganizationIds": null` left the property null and every later `.Count` on it — on the
-  authorize and exchange paths — was a NullReferenceException: one malformed admin call turned every
+  `"restrictedToOrganizationIds": null` left the property null and every later `.Count` on it, on the
+  authorize and exchange paths, was a NullReferenceException: one malformed admin call turned every
   subsequent token request for that client into a 500. Null is now normalized to empty on both the
   create and update paths, entries must match the organization id shape `^[A-Za-z0-9._~-]{1,200}$` or
   the request is `400 invalid_request`, and the token paths carry their own `?? []` guard so neither
   half has to trust the other. An id outside that shape is one no `organization` parameter can send, so
-  a restriction listing it matches nothing — and a restriction that matches nothing refuses every
+  a restriction listing it matches nothing, and a restriction that matches nothing refuses every
   request, which is a lockout written by a typo.
 - **The two agentic mints pass the organization to `IAuthHook.OnTokenIssuingAsync`.** The delegated
-  token exchange is the mint a gate most needs it for — it mints USER authority for an agent, and
+  token exchange is the mint a gate most needs it for: it mints USER authority for an agent, and
   "which customer" is half of that decision. `client_credentials` passes none and cannot: it has no
   subject at all, and its context-binding seam runs after this gate by design, so a host vetoing on a
   machine token's bound context does it inside that transformer.
@@ -406,7 +406,7 @@
   upsert whose slug equals another organization's id, or whose id equals another's slug, is rejected
   rather than written.
 - **The Azure Table client store now persists `OAuthClient.RestrictedToOrganizationIds`.** `ClientEntity`
-  had no column for it, so on the Table-backed host — which is the batteries-included default — an
+  had no column for it, so on the Table-backed host, which is the batteries-included default, an
   operator who restricted a client to an organization saw the restriction vanish on the next read, with
   no error. The SQL and Dynamo stores serialise the whole record and were unaffected, which is how it
   passed review of those two. A row written before the column exists reads back as unrestricted rather
@@ -414,7 +414,7 @@
   organization in configuration.
 - **The storage provider's organization and SCIM group→role stores are reachable from DI again.**
   `AddAuthagonalCore` registers empty in-memory fallbacks and `AddTableStorage` registers the durable
-  stores, in that order, and both use `TryAdd` — which keeps the FIRST registration, not the best one.
+  stores, in that order, and both use `TryAdd`, which keeps the FIRST registration, not the best one.
   So the provider's registration never happened at all, and the batteries-included host resolved a
   store that answered empty forever and refused every write, silently. `IScimGroupRoleMappingStore` had
   the same bug and had had it since it shipped. The fallbacks are now lifted out of the way before the
@@ -422,21 +422,21 @@
   provider, and a host's own deliberate store is never removed.
 - **An organization membership can no longer grant tenant- or platform-scoped authority.** Membership
   roles were unioned into the `roles` claim verbatim, so a row listing `tenant:admin` minted it. A
-  membership is customer-scoped data — written by a customer's own administrator once delegated
+  membership is customer-scoped data (written by a customer's own administrator once delegated
   administration exists, and by whatever provisioning connector a customer points at the tenant before
-  then — so that was an escalation from "may manage my own organization" to "may administer the
+  then) so that was an escalation from "may manage my own organization" to "may administer the
   tenant". Roles matching `ReservedRolePrefixes` (`tenant:`, `platform:`, case-insensitively) are
   dropped at the union and logged at Warning. Directly-assigned roles and SCIM group→role mappings are
   untouched: those come from an operator through an authenticated admin surface.
 - **Token exchange enforces the exchanging client's organization restriction.** `org_id` was copied off
   the subject token without consulting `RestrictedToOrganizationIds`, so a client registered to serve
   one customer could be handed any user's token for another and exchange it into a token that still
-  named that other customer — the restriction never consulted, because no `organization` parameter was
+  named that other customer: the restriction never consulted, because no `organization` parameter was
   involved. A token carrying no organization is refused for a restricted client too: unattributed is
   not permission to act for anyone. Refusals are `invalid_target`, like every other target-policy
   refusal on that path.
 - **The embedded `Authagonal.Protocol` host honours the `organization` parameter.** It shares
-  `AuthorizeRequest.Read`, so it parsed the parameter and refused a malformed one — and then built a
+  `AuthorizeRequest.Read`, so it parsed the parameter and refused a malformed one, and then built a
   three-argument resolution context and dropped the value, issuing a token for whatever organization
   the subject already carried. It was validating a parameter it did not act on.
 - **The `organization` parameter has a charset, and slugs have a shape.** A length cap is not a
@@ -446,14 +446,14 @@
   request is `invalid_request`. The slug attempt is lowercased so `organization=Acme` resolves the slug
   `acme`; the id attempt stays exact, because lowercasing an opaque id names a different organization.
   `Organization.Slug` itself must match `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`, enforced by every
-  store — an uppercase slug would otherwise be a stored value no request could ever resolve.
+  store: an uppercase slug would otherwise be a stored value no request could ever resolve.
 - **A caller-supplied organization value is no longer echoed to the relying party or logged at
   Information.** `error_description` travels to the RP, into its logs and often onto a screen, so
   echoing an attacker-chosen string there made the authorize endpoint a reflection surface for no
   diagnostic gain. The refusal is now a fixed message; the value is logged at Debug, and the
   Information line records the refusal without it.
 - **`TokenIssuanceContext` carries the organization.** A gate answering "may this person have a token
-  for this application" almost always needs the third term — which customer they are acting for — and
+  for this application" almost always needs the third term, which customer they are acting for, and
   without it a host could only decide tenant-wide. `OrganizationId` and `OrganizationSlug` are
   init-only, so existing five-argument construction is unaffected.
 
@@ -467,8 +467,8 @@
   authorization context, which belongs to the grant. The `Authagonal.Protocol` host already answered
   from the token and needed only the two new claim names.
 - **RFC 8693 token exchange keeps the organization; `/connect/introspect` reports it.** The exchange
-  rebuilds its subject from the subject token's claims and skips every reserved name — and all three
-  organization claims are reserved — so a downscoped token came out naming no organization at all while
+  rebuilds its subject from the subject token's claims and skips every reserved name, and all three
+  organization claims are reserved, so a downscoped token came out naming no organization at all while
   the token it was derived from named one. An exchange is a projection of an existing session, and a
   projection that drops the customer it was acting for is not narrower, it is unattributed: a resource
   server gating on `org_id` read it as belonging nowhere. A host's `ITokenExchangeSubjectTransformer`
@@ -477,21 +477,21 @@
   server that introspects instead of validating the JWT itself gets the same answer as one that does.
 - **`TableOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
   validates the slug pattern.** A slug rename used to write the new lookup row and drop the stale one
-  under a plain read-then-write — a relying party hard-codes the slug into the `organization`
+  under a plain read-then-write: a relying party hard-codes the slug into the `organization`
   authorize parameter, so a rename is now refused outright (`InvalidOperationException`) rather than
   supported unsafely. Two concurrent creates racing on the same brand-new slug could both pass the
   read-then-write uniqueness check and both write, so a new organization's slug row is now created
   with the table's own insert-only primitive (`AddEntityAsync`), and the loser's 409 is what rejects
-  it — not a check that ran too early. An id and a slug can also no longer resolve to two different
+  it, not a check that ran too early. An id and a slug can also no longer resolve to two different
   organizations (an incoming slug matching another organization's id, or vice versa, is refused), and
   `UpsertAsync` now validates the slug against `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing
   anything. `TableOrganizationMembershipStore.DeleteAsync` already deleted both rows and wrote both
-  tombstones unconditionally — confirmed with a test for the orphan-repair case (only the reverse row
+  tombstones unconditionally: confirmed with a test for the orphan-repair case (only the reverse row
   present) rather than changed.
 - **`DynamoOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
   validates the slug pattern; both organization stores now log upserts as well as deletes, and
   membership delete no longer skips the reverse row.** A slug rename used to write the new lookup
-  row and drop the stale one under a plain read-then-write — a relying party hard-codes the slug
+  row and drop the stale one under a plain read-then-write: a relying party hard-codes the slug
   into the `organization` authorize parameter, so a rename is now refused outright
   (`InvalidOperationException`) rather than supported unsafely. Two concurrent creates racing on the
   same brand-new slug could both pass the read-then-write uniqueness check and both write, so a new
@@ -502,7 +502,7 @@
   a `GetItem` point read each way), and `UpsertAsync` now validates the slug against
   `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing anything. Both `DynamoOrganizationStore`
   and `DynamoOrganizationMembershipStore` had mirrored `DynamoScimTokenStore`'s tombstone-on-delete-
-  only pattern, which was the wrong sibling to copy — `DynamoUserStore`/`DynamoProvisioningAppStore`/
+  only pattern, which was the wrong sibling to copy: `DynamoUserStore`/`DynamoProvisioningAppStore`/
   `DynamoAgentProfileStore` all log an upsert too, so an incremental backup window that only ever saw
   upserts would have carried nothing for either store. `DynamoOrganizationMembershipStore.DeleteAsync`
   checked the forward row first and returned early when it was missing, so a membership left
@@ -512,12 +512,12 @@
 - **`SqlOrganizationStore`: the slug is now immutable, its uniqueness check is atomic, and it
   validates the slug pattern; `SqlOrganizationMembershipStore.DeleteAsync` no longer skips the
   reverse row.** A slug rename used to write the new lookup row and drop the stale one under a plain
-  read-then-write — a relying party hard-codes the slug into the `organization` authorize parameter,
+  read-then-write: a relying party hard-codes the slug into the `organization` authorize parameter,
   so a rename is now refused outright (`InvalidOperationException`) rather than supported unsafely.
   Two concurrent creates racing on the same brand-new slug could both pass the read-then-write
   uniqueness check and both write, so a new organization's slug row is now claimed with
   `SqlTable.PutIfAbsentAsync` (`INSERT ... ON CONFLICT (pk, sk) DO NOTHING`), and the loser's `false`
-  return is what rejects it — not a check that ran too early. An id and a slug can also no longer
+  return is what rejects it, not a check that ran too early. An id and a slug can also no longer
   resolve to two different organizations (an incoming slug matching another organization's id, or
   vice versa, is refused with a point read each way), and `UpsertAsync` now validates the slug
   against `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` before writing anything, matching
@@ -531,22 +531,22 @@
   organization write, and shares the slug rule with every other store.** Slug-first ordering (see
   above) means a process that died right after `SqlTable.PutIfAbsentAsync` claimed the slug row but
   before the organization document itself was written leaves a slug row owned by an id with no
-  organization row behind it — and a retry of that exact create used to read its own earlier claim
+  organization row behind it, and a retry of that exact create used to read its own earlier claim
   back as "held by another organization," permanently. `UpsertAsync` now checks the pre-existing
   slug row's owner on that path: the same id means self-heal (finish the write), a different id
   means the genuine conflict it always was. The slug pattern is no longer a copy of the regex kept
-  in `Organization.Slug`'s remarks — it now calls `OrganizationSlug.Validate` (`Authagonal.Core`),
+  in `Organization.Slug`'s remarks: it now calls `OrganizationSlug.Validate` (`Authagonal.Core`),
   the one place the rule lives for every store to share.
 - **`DynamoOrganizationStore.UpsertAsync` self-heals a crash between the slug insert and the
   organization write, shares the slug rule with every other store, and
   `DynamoOrganizationMembershipStore.DeleteAsync` now tombstones only the row it actually
   removed.** Slug-first ordering (see above) means a process that died right after
   `DynamoTable.PutIfAbsentAsync` claimed the slug row but before the organization item itself was
-  written leaves a slug row owned by an id with no organization item behind it — and a retry of that
+  written leaves a slug row owned by an id with no organization item behind it, and a retry of that
   exact create used to read its own earlier claim back as "already held by another organization,"
   permanently. `UpsertAsync` now checks the pre-existing slug row's owner on that path: the same id
   means self-heal (finish the write), a different id means the genuine conflict it always was. The
-  slug pattern is no longer a copy of the regex kept in `Organization.Slug`'s remarks — it now calls
+  slug pattern is no longer a copy of the regex kept in `Organization.Slug`'s remarks: it now calls
   `OrganizationSlug.Validate` (`Authagonal.Core`), the one place the rule lives for every store to
   share. Separately, `DeleteAsync` wrote a tombstone for both membership rows unconditionally, even
   when one (or both) never existed, so deleting an already-gone or partially-orphaned membership
@@ -560,18 +560,18 @@
   That existing `IUserStore` registration is what makes `AddAuthagonal()` skip its built-in Azure Table
   wiring, and a provider registered afterwards loses every interface already filled by `TryAdd`.
   `IOrganizationStore`, `IOrganizationMembershipStore` and `IScimGroupRoleMappingStore` are the three
-  special cases — their empty in-memory fallbacks are lifted before the provider registers and restored
-  by `TryAdd` after — and that is now stated on `AddAuthagonal` and in `docs/installation.md`.
+  special cases (their empty in-memory fallbacks are lifted before the provider registers and restored
+  by `TryAdd` after) and that is now stated on `AddAuthagonal` and in `docs/installation.md`.
 - **`Organization.Id` has a documented shape.** It must match `^[A-Za-z0-9._~-]{1,200}$`, the same as
   the `organization` parameter, so every id can always be sent as one. It SHOULD also carry at least
   one character a slug may not (uppercase, `.`, `_`, `~`) so it can never collide with the slug
   namespace; `org_7f3a9c` is the recommended shape, since `_` is not slug-legal. Advisory, not
-  enforced — stores already refuse an actual collision. The values already in the field are arbitrary:
+  enforced: stores already refuse an actual collision. The values already in the field are arbitrary:
   they come from a downstream app's TCC `/try` response or an operator's `ScimToken.OrganizationId`
   binding.
 
 - **`OidcSubjectResolutionContext` has a fourth positional parameter, `RequestedOrganization`.** It is
-  defaulted, so every existing three-argument CONSTRUCTION keeps compiling — but the record's
+  defaulted, so every existing three-argument CONSTRUCTION keeps compiling, but the record's
   positional arity is now four, so a positional pattern match or an explicit `Deconstruct` into three
   variables does not. Nothing in this repository did either; a host that does will see a compile error
   rather than a silent behaviour change.
@@ -579,7 +579,7 @@
   REFUSES each refresh rather than revoking the chain.** `Organization.Enabled`,
   `IOidcSubjectResolver.ResolveRefreshAsync` and `docs/organizations.md` all said the chain was
   revoked. It is not: the presented refresh token is left unconsumed and the grant intact, so the
-  chain stays refusable while the condition holds and resumes when it stops — the same semantics as a
+  chain stays refusable while the condition holds and resumes when it stops; the same semantics as a
   deactivated user. Ending a session is grant revocation, which these gates are not.
 
 ## [0.27.1], 2026-09-11
@@ -588,11 +588,11 @@
 
 - **Dark mode no longer keeps the LIGHT page and card when a tenant brands only its light surfaces.**
   `AuthLayout` injects the per-mode branding colours as a stylesheet appended after the bundled CSS,
-  with the light values at `:root` — and `:root` and `.dark` carry the same specificity, so those light
+  with the light values at `:root`, and `:root` and `.dark` carry the same specificity, so those light
   values beat styles.css's `.dark` defaults on source order alone. A tenant that set `lightBg` /
   `lightCardBg` and left `darkBg` / `darkCardBg` null therefore got a white page and a white card in
   dark mode while `--auth-heading` and every Tailwind `dark:` variant flipped: a white heading and
-  white labels on a white card, above a dark input. Nothing in the config said "light only" — the
+  white labels on a white card, above a dark input. Nothing in the config said "light only": the
   config said nothing about dark at all. The light rule is now scoped `:root:where(:not(.dark))`, so it
   simply does not apply in dark mode and the built-in dark surfaces stand; `:where()` contributes no
   specificity, so the rule still ranks exactly as a bare `:root` and `customCssUrl` keeps overriding it.
@@ -654,9 +654,9 @@
 
 ### Added
 
-- **`ITurnstileKeyProvider` — the Turnstile key pair now follows the requesting HOST.** A sitekey names
+- **`ITurnstileKeyProvider`: the Turnstile key pair now follows the requesting HOST.** A sitekey names
   a widget record at Cloudflare carrying an allowlist of hostnames, and the widget issues no token on
-  any host outside it — a client-side error 110200, so the form's submit never enables and nothing
+  any host outside it: a client-side error 110200, so the form's submit never enables and nothing
   reaches siteverify to explain why. A host serving ONE domain is unaffected and unchanged:
   `OptionsTurnstileKeyProvider` reads both keys from `TurnstileOptions` exactly as before, registered
   with `TryAddScoped` so every existing consumer keeps it without touching anything. A host serving
@@ -665,27 +665,27 @@
   several widgets and the key pair depends on which one the requesting host was allocated to.
   Both keys come from one object deliberately: resolved independently, the browser can render widget A
   while the server verifies against widget B, and Cloudflare reports that mismatch as an ordinary
-  failed verification — indistinguishable from a forged token, and silent.
+  failed verification, indistinguishable from a forged token, and silent.
   `TurnstileVerifier.Enabled` now reflects the request's own secret rather than the configured one.
 
 ## [0.26.0], 2026-09-03
 
 ### Added
 
-- **`IClientCredentialsClaimsTransformer` — a host seam on the `client_credentials` grant.** The
+- **`IClientCredentialsClaimsTransformer`: a host seam on the `client_credentials` grant.** The
   machine-caller counterpart of `ITokenExchangeSubjectTransformer`: non-protocol form parameters on a
   client-credentials request (an `organization_id`, say) are forwarded to the registered transformer,
   which validates the binding against the host's own authority and forces the resulting claims onto
   the token, or rejects the issuance with an OAuth error. A client-credentials token has no `sub`, so
   the exchange seam could never reach it and a first-party service had no way to name the context it
-  was acting in — the one thing a resource server partitioned by organization needs from it. Reserved
+  was acting in: the one thing a resource server partitioned by organization needs from it. Reserved
   protocol claim names are blocked at mint exactly as they are for `OidcSubject.AdditionalClaims`.
   `AddAuthagonalProtocol` registers a no-op default; `IProtocolTokenService.HandleClientCredentialsAsync`
   gains an optional `extraParameters` argument.
 - **BFF: `GET {BasePath}/token` (opt-in, `TokenEndpointEnabled`).** Hands the browser an EXCHANGED access
-  token — the session's token downscoped to an allow-listed `resource` (`TokenEndpointResources`) and
+  token (the session's token downscoped to an allow-listed `resource` (`TokenEndpointResources`) and
   bound to any allow-listed context parameter on the query (`TokenEndpointExchangeParams`, e.g.
-  `project_id`) — for the one case the cookie model cannot cover: a resource server on another origin,
+  `project_id`)) for the one case the cookie model cannot cover: a resource server on another origin,
   such as an iframe app the SPA embeds, that must be called with a bearer. The browser never sees the
   session's primary token; what it gets is short-lived, single-audience and single-context, cached per
   (session, resource, binding) like the proxy's exchanged tokens, and reported with its remaining
@@ -695,11 +695,11 @@
 
 ### Security
 
-- **.NET runtime 10.0.11 / SDK 10.0.111** — the v0.25.9 server image failed its release scan on
+- **.NET runtime 10.0.11 / SDK 10.0.111**: the v0.25.9 server image failed its release scan on
   CVE-2026-62901 (HIGH) in `Microsoft.NETCore.App.Runtime.linux-x64` 10.0.10. The SDK pin,
   both workflows, every `packages.lock.json` (re-evaluated together, as the global.json note
   prescribes) and the `sdk:10.0` / `aspnet:10.0` base-image digests move to the patched builds.
-  No code change; the 0.25.9 packages are unaffected — only the server image never published.
+  No code change; the 0.25.9 packages are unaffected: only the server image never published.
 
 ## [0.25.9], 2026-09-03
 
@@ -708,7 +708,7 @@
 - **A session's claims now follow the refreshed id_token.** The BFF refresh coordinator swapped in
   the new id_token and never read it, so `session.Claims` stayed exactly what the login handshake
   extracted: a role granted after login (a `ca:tier2` seat, a new admin) was invisible for the
-  session's whole life — 30 days on a persistent cookie — unless the user logged out and in. The
+  session's whole life (30 days on a persistent cookie) unless the user logged out and in. The
   refreshed id_token is validated the way the login token is (issuer, audience, signing keys,
   lifetime, asymmetric algorithms only), must name the session's own subject, and its claims replace
   the session's; on any failure the claims already held stand. `IBffIdTokenReader` is the seam.
@@ -719,53 +719,86 @@
 
 - **A login that spans an email verification no longer dead-ends on `invalid_correlation`.** The
   callback treated a missing or unusable correlation cookie as fatal and returned the bare error
-  code as plain text — a broken page, shown to a user who did nothing wrong, at the worst possible
+  code as plain text: a broken page, shown to a user who did nothing wrong, at the worst possible
   moment: immediately after they verified their address. It now restarts the login leg exactly once
   (tracked by a short-lived marker cookie, so a browser that cannot keep cookies fails visibly
   rather than looping). The user is already authenticated at the provider by then, so the restart
   completes silently through SSO and lands them signed in. Restarting mints a fresh state, nonce
   and PKCE verifier, so nothing about the old correlation is trusted.
-- **`AuthagonalBffOptions.CorrelationLifetime`** (default 30 minutes, was a hard-coded 15) — the
+- **`AuthagonalBffOptions.CorrelationLifetime`** (default 30 minutes, was a hard-coded 15): the
   window a login may take between `{BasePath}/login` and the callback. Fifteen minutes cannot span
   sign up → wait for email → click → sign in.
 - The callback now **logs why** a correlation was unusable, with the number of correlation cookies
-  the browser still holds — which is what distinguishes a browser that never ran the login leg
+  the browser still holds, which is what distinguishes a browser that never ran the login leg
   (none) from eviction after repeated attempts (several) from a replayed callback (the expected one
   missing while others remain). Diagnosing this by hypothesis cost a round of wrong theories.
 
+## [0.25.7], 2026-08-22
+
 ### Added
 
-- **`ITenantContext.DynamicClientRegistrationEnabled`** — a per-tenant answer to whether anonymous
-  dynamic client registration is open. `null` (the interface default) defers to the host-wide
-  `Auth:DynamicClientRegistrationEnabled`; multi-tenant hosts override from tenant settings so one
-  tenant opting in — to let MCP connectors and other agentic clients start an OAuth flow — does not
-  open anonymous registration on every other. Honoured by both the `/connect/register` gate and the
-  discovery document's `registration_endpoint` advertisement.
-- **`AuthagonalBffOptions.PersistentCookie`** — opt-in (default false). When true the BFF session
-  cookie is written with a `Max-Age` bounded to `SessionLifetime`, so it survives the browser being
-  closed and reopened instead of being discarded as a session cookie. For hosts whose IdP issues
-  long-lived (sliding) refresh tokens and want "stay signed in" behaviour: a returning user whose
-  refresh token is still valid is silently kept in rather than bounced to login. Still
-  HttpOnly/Secure/SameSite=Lax, and back-channel logout still terminates the session server-side.
+- **`AuthagonalBffOptions.PersistentCookie`.** Opt-in (default `false`). When set, the BFF session cookie is
+  written with a `Max-Age` bounded to `SessionLifetime` instead of being a session cookie discarded when the
+  browser closes, so a returning user whose sliding refresh token is still valid stays signed in. The cookie
+  stays `HttpOnly`, `Secure` and `SameSite=Lax`, back-channel logout still ends the session server-side, and the
+  delete path never sets a `Max-Age` (it would override the epoch `Expires` and stop the cookie clearing).
+
+### Changed
+
+- **The npm indexing wait in `release.yml` is non-fatal.** `npm view` propagation after a successful publish
+  routinely exceeded the 100 second wait, which failed the release and skipped `publish-npm-bff` for a package
+  that was already live. The wait is now 180 seconds and warns instead of failing on timeout.
+
+## [0.25.6], 2026-08-21
 
 ### Fixed
 
-- **Dynamically registered clients may name a `resource` again — every MCP client was locked out.**
-  `AudiencesDeclared` was set unconditionally on registration, so a stock RFC 7591 registrant — which
-  cannot send `audiences`, the field is an Authagonal extension — was treated as having declared "none"
-  and every `resource` parameter it sent died at authorize with `invalid_target`. The MCP authorization
-  spec requires clients to name the MCP server as their resource, so a connector could register, log in,
-  and then fail on the very next redirect. The flag now records whether the registrant actually answered:
-  omitting `audiences` keeps the permissive reading RFC 8707 needs, sending it — even as `[]` — pins the
-  client to its answer. The admin API and seed paths are unchanged (their requests carry the whole
-  record, so their answer always counts). `docs/client-registration.md` and `docs/configuration.md`
-  described the two different behaviours; both now describe this one, and the DCR path is covered
-  end-to-end in `ClientRegistrationEndpointTests` rather than by a store-built stand-in.
+- **`prompt=create` was refused before it could route.** 0.25.5 added the registration redirect, but the
+  prompt-value allowlist in `AuthorizeRequestSupport` still rejected `create` with `invalid_request`
+  ("Unsupported prompt value"). It is now an accepted prompt, and an unauthenticated `prompt=create` request
+  redirects to `/login/register` with the authorize URL as `returnUrl`.
 
-- **`GET /consent/grants` now carries the interactive origin guard.** Its three siblings had it (the
-  DELETE gained it when a live cross-origin revocation was demonstrated); the listing authenticated by
-  reading the cookie subject inline and was missed by the same sweep. Reading is not revoking, but the
-  grants list names every application the user has consented to.
+## [0.25.5], 2026-08-21
+
+### Added
+
+- **`prompt=create` sends an unauthenticated authorize request to registration.** `/connect/authorize` redirects
+  to the login app's register page instead of the login page, carrying the authorize URL as `returnUrl` so
+  finishing sign-up completes the flow. `AuthorizeRequestSupport.WantsRegistration` exposes the prompt. It is
+  honoured only when the user is not signed in (an existing session just proceeds). This lets a BFF offer a "get
+  started" entry without hand-building the authorize URL.
+
+## [0.25.4], 2026-08-21
+
+### Added
+
+- **Dynamic client registration can be opened per tenant.** `ITenantContext.DynamicClientRegistrationEnabled`
+  (default `null`, deferring to the host-wide `Auth:DynamicClientRegistrationEnabled`) is honoured first by both
+  the `/connect/register` gate and the discovery document's `registration_endpoint` advertisement, so a
+  multi-tenant host can override it from tenant settings and open registration for one tenant, the door an MCP
+  connector or other agentic client needs, without opening anonymous registration on every other. It is resolved with `GetService`, so single-tenant hosts that register no
+  tenant context are unaffected.
+
+### Changed
+
+- **The release commit restores lockfiles to their released state.** The first v0.25.4 release commit had
+  absorbed local-SDK `ILLink` drift into the `src` lockfiles, which locked-mode restore on CI rejects.
+
+### Fixed
+
+- **Dynamically registered clients may name a `resource` again.** `AudiencesDeclared` was set unconditionally at
+  `/connect/register`, so a stock RFC 7591 registrant, which cannot send the Authagonal `audiences` extension,
+  read as having declared none and every `resource` it sent failed at authorize with `invalid_target`. The MCP authorization spec requires a client
+  to name the MCP server as its resource, so a connector could register, log in, and then fail on the very next
+  redirect. The flag
+  now records whether the registrant actually answered: omitting `audiences` keeps the permissive RFC 8707
+  reading, and sending the field (even `[]`) pins the client to its answer. `docs/client-registration.md` and
+  `docs/configuration.md` described different behaviours and now agree. The admin API and seed paths are unchanged
+  (their requests carry the whole record, so their answer always counts). Covered end to end in
+  `ClientRegistrationEndpointTests`, not by a store-built stand-in.
+- **`GET /consent/grants` carries the interactive-origin guard.** Its three siblings already had it (the DELETE gained it when a live
+  cross-origin revocation was demonstrated); the listing
+  read the cookie subject inline and was missed, and the list names every application the user has consented to.
 
 ## [0.25.3], 2026-08-12
 
@@ -775,12 +808,12 @@ suite, and both of a kind that reads as user error from the outside.
 ### Fixed
 
 - **The recovery-code field could not hold a recovery code.** `RecoveryCodeService` generates 10
-  alphanumerics and presents them as `$"{code[..5]}-{code[5..]}"` — `XXXXX-XXXXX`, eleven characters. The MFA
+  alphanumerics and presents them as `$"{code[..5]}-{code[5..]}"`: `XXXXX-XXXXX`, eleven characters. The MFA
   challenge input carried `maxLength={9}`, and a placeholder advertising `XXXX-XXXX`, a 4-4 shape the server
   has never produced. So the browser silently truncated every code to nine characters, the server rejected
   the remainder, and the page answered "Invalid code. Please try again."
 
-  A correct code, pasted correctly, failing as though the user had mistyped it — and the one place this
+  A correct code, pasted correctly, failing as though the user had mistyped it, and the one place this
   matters is the path back in after a lost authenticator, where there is no other factor to fall back on and
   no reason to doubt the code you were told to keep. Recovery codes were unusable in the hosted UI.
 
@@ -790,8 +823,8 @@ suite, and both of a kind that reads as user error from the outside.
 
 - **`RecordSuccessfulLoginAsync` now re-reads and retries when the concurrency guard refuses the write.**
   Its default implementation is a read-modify-write through `UpdateAsync`, which refuses a write whose
-  `ConcurrencyToken` has gone stale. That refusal is right in general — the store cannot know which of two
-  conflicting intents should win — but it does not reach this method: everything the stamp writes is
+  `ConcurrencyToken` has gone stale. That refusal is right in general (the store cannot know which of two
+  conflicting intents should win) but it does not reach this method: everything the stamp writes is
   last-writer-wins login state, so re-reading and reapplying is the same answer against a fresher record,
   not a guess.
 
@@ -805,9 +838,33 @@ suite, and both of a kind that reads as user error from the outside.
 
 ## [0.25.2], 2026-08-12
 
+### Security
+
+- **`nanoid` advisory GHSA-2v37-7h3g-55p8 (high) cleared in the two demo apps.** 0.25.1 cleared it in
+  `login-app` only, but the audit matrix covers four directories and the release gates on all of them, so
+  `demos/custom-server/login-app` and `demos/sample-app/frontend` still held the publish. Lockfile-only
+  (`nanoid` 3.3.16 to 3.3.18); all four now report zero.
+
+## [0.25.1], 2026-08-12
+
+### Fixed
+
+- **Release builds no longer fail restore when the runner's .NET SDK drifts.** `packages.lock.json` is committed
+  for every project and CI restores in locked mode, but the workflows asked `setup-dotnet` for `10.0.x`. The SDK
+  injects `Microsoft.NET.ILLink.Tasks` into trimmable projects at a version tied to the SDK patch, so a newer
+  runner SDK failed restore with NU1004 (this broke the v0.25.0 release with no code change). `global.json` now
+  pins the SDK exactly (10.0.110, `rollForward: disable`) and both workflows pass the same version.
+
+### Security
+
+- **`nanoid` advisory GHSA-2v37-7h3g-55p8 (high) cleared in `login-app`.** A lockfile-only update; the advisory
+  was published after the last green run and the audit job has no exception for it.
+
+## [0.25.0], 2026-08-12
+
 ### Added
 
-- **`IBffRefreshLockStore` — a session store may supply the BFF's cross-replica refresh lock itself, and a
+- **`IBffRefreshLockStore`: a session store may supply the BFF's cross-replica refresh lock itself, and a
   deployment that has no lock at all is now reported at startup.** 0.23.0 gave the TypeScript BFF
   `acquireRefreshLock` / `releaseRefreshLock` on its session store and left .NET with the route it already
   had, `ILeaseProvider`. That left the two BFFs in one product disagreeing about where the lock lives, and
@@ -815,7 +872,7 @@ suite, and both of a kind that reads as user error from the outside.
   `IDistributedCache`, which has **no set-if-absent**, so the library cannot build the lock out of the one
   primitive a multi-instance BFF is already required to have. A host on Redis can, in about as many lines
   as `SET NX PX` takes, and now has somewhere to put it. `BffRefreshCoordinator` accepts either route and
-  prefers `ILeaseProvider` when both are present — not because it is better, but so a host that registered
+  prefers `ILeaseProvider` when both are present, not because it is better, but so a host that registered
   one keeps running on the backend it has been running on.
 
   A separate interface rather than optional members on `IBffSessionStore`, because a default interface
@@ -824,13 +881,13 @@ suite, and both of a kind that reads as user error from the outside.
   IBffRefreshLockStore`) and a type test finds it. Not breaking: a store that does not implement it behaves
   exactly as before.
 
-  The diagnostic is the other half, and the more important one. The hazard — two replicas redeeming the
+  The diagnostic is the other half, and the more important one. The hazard (two replicas redeeming the
   same rotating refresh token, the IdP reading the second redemption as replay, the whole grant family
-  revoked, the user signed out everywhere under ordinary concurrent load — was already documented in
+  revoked, the user signed out everywhere under ordinary concurrent load) was already documented in
   detail, in XML remarks on `AddAuthagonalBff` and on the coordinator, and 0.23.0 added it to both READMEs.
   That is the wrong medium: a remark reaches whoever reads the source and the failure belongs to whoever
   ships the deployment, who is following the README's multi-instance advice precisely when they hit it.
-  `BffRefreshGateWarning` says it at boot when the session store looks shared and no lock is supplied —
+  `BffRefreshGateWarning` says it at boot when the session store looks shared and no lock is supplied:
   the same treatment this project has given every other guarantee the code describes and the configuration
   does not provide (the plaintext-signing-key, null-audit-logger, publish-ahead and undeclared-proxy
   warnings). The BFF refresh gate was the one that kept the silent degrade.
@@ -840,17 +897,17 @@ suite, and both of a kind that reads as user error from the outside.
   custom `IBffSessionStore` at all (nobody writes one to run a single process). A false positive is one log
   line on a host that can ignore it; a false negative is silence in front of the failure. The store is
   resolved inside a scope, not through constructor injection, because a hosted service is built from the
-  root provider — the shape that once stopped every tenant-scoped host from starting at all.
+  root provider: the shape that once stopped every tenant-scoped host from starting at all.
 
   The third remedy stays named rather than tested for, since it is configuration on an identity provider
   that need not be this process: a non-zero `Auth:RefreshTokenReuseGraceSeconds`, which serves the
   successor idempotently instead of revoking. Worth restating that it is off in the pairing this repository
-  ships — `AuthOptions.RefreshTokenReuseGraceSeconds` is `0`, strict — so a host that reads the README,
+  ships (`AuthOptions.RefreshTokenReuseGraceSeconds` is `0`, strict) so a host that reads the README,
   registers a shared cache and stops there has neither of the two things standing between it and this.
 
   Nine tests. Non-vacuity checked by reverting: dropping the store lock from the coordinator's gate fails
   two, and bypassing the shared-store detection fails the one that keeps the warning off a single-process
-  host — which is the test that stops it becoming noise.
+  host, which is the test that stops it becoming noise.
 
 ## [0.24.0], 2026-08-07
 
@@ -868,7 +925,7 @@ deployment they run in, and the third handed an error page to someone who had do
 ### Changed
 
 - **Fixed: a restore turned every integer column into a double, and the rows it wrote could not be read
-  back.** `RestoreService` picked the narrowest CLR type for a JSON number with a conditional chain —
+  back.** `RestoreService` picked the narrowest CLR type for a JSON number with a conditional chain:
   `TryGetInt32(out var i32) ? i32 : TryGetInt64(out var i64) ? i64 : element.GetDouble()`. A conditional
   expression takes the best common type of its branches, and the best common type of `int`, `long` and
   `double` is `double`, so the Int32 branch was widened before it was ever boxed. Every integer column in
@@ -878,7 +935,7 @@ deployment they run in, and the third handed an error page to someone who had do
   damage appeared the next time anything read one of those rows into a typed entity, as
   `InvalidCastException: Unable to cast object of type 'System.Double' to type 'System.Int32'` out of the
   Tables binder. On the Users table the int column is `AccessFailedCount`, so a restored user could not be
-  loaded at all — the restore appeared to succeed and had in fact made every account it touched unreadable,
+  loaded at all: the restore appeared to succeed and had in fact made every account it touched unreadable,
   at precisely the moment somebody was depending on a restore working.
 
   Both converters carried the chain: the annotated `@v` format every current backup writes, and the legacy
@@ -886,12 +943,12 @@ deployment they run in, and the third handed an error page to someone who had do
   converts to `object` independently and no unification can reoccur. Restoring an affected archive again
   repairs the rows. A test already covered the column and asserted
   `Assert.Equal(42L, Convert.ToInt64(restored["Count"]))`, with a comment calling the width difference
-  "ambient SDK/service behavior" — it is not, a boxed `int` written straight to a `TableEntity`
+  "ambient SDK/service behavior": it is not, a boxed `int` written straight to a `TableEntity`
   round-trips as Int32, and `Convert.ToInt64` accepts a `Double`. The assertion was tolerating the defect it
   existed to catch; it now asserts the type.
 
 - **An IdP-initiated SAML sign-in is now restarted as SP-initiated instead of refused.** 0.22.0 made
-  `AllowUnsolicitedResponses` default to false, which is correct — an unsolicited assertion carries no
+  `AllowUnsolicitedResponses` default to false, which is correct: an unsolicited assertion carries no
   `InResponseTo`, so nothing ties it to the browser it arrives in, and every §4.1.4.3 rule is satisfied by an
   assertion the attacker obtained legitimately for their own account at the same IdP. But the person who
   meets that refusal is a user who clicked their IdP's app tile, and what they get is an error.
@@ -911,7 +968,7 @@ deployment they run in, and the third handed an error page to someone who had do
 
 ### Added
 
-- **`BackupOptions.KnownTables` / `RestoreOptions.KnownTables` — the host's table universe.** 0.22.0 made
+- **`BackupOptions.KnownTables` / `RestoreOptions.KnownTables`: the host's table universe.** 0.22.0 made
   backup refuse a `--tables` value outside `BackupDefaults.Tables`, and restore refuse an archive naming one,
   so that an archive cannot choose which tables a restore writes. The set was hardcoded to this library's own
   list, which made both unusable by any host that archives its own tables in the same sweep: Authagonal Cloud
@@ -920,23 +977,23 @@ deployment they run in, and the third handed an error page to someone who had do
   heard of. Every backup it took and every archive it had already written were refused. Null still means
   `BackupDefaults.Tables`, so nothing changes for a host that has not declared one; the set must still be
   supplied by the caller and is never derived from the archive, which is the whole of the property. The two
-  halves have to agree — an archive written under a wider declaration restores only through a restore that
+  halves have to agree: an archive written under a wider declaration restores only through a restore that
   declares the same one.
 
-- **`IInteractiveCorsOriginPolicy` — a host may vouch for origins on `/api/auth/*`.** 0.22.0 stopped pooling
+- **`IInteractiveCorsOriginPolicy`: a host may vouch for origins on `/api/auth/*`.** 0.22.0 stopped pooling
   client-registered origins outside the protocol surface and stopped granting `AllowCredentials` on the
   interactive auth API at all, on the reasoning that the surface is driven by the login app on the same origin
   and needs no CORS grant. That is true of this library's own deployment shape and false for a host that lets
   a tenant serve its OWN login screen and post to this server from it, where the cross-origin call IS the
   feature. Implement the interface to answer for origins the host has independently established a
-  relationship with — a verified custom domain, an explicit per-tenant opt-in, a same-site check. The default
+  relationship with: a verified custom domain, an explicit per-tenant opt-in, a same-site check. The default
   (`DenyInteractiveCorsOriginPolicy`) refuses everything, so the closed posture is unchanged for every host
   that does not register one, and a grant covers only the origin that asked rather than widening the pooled
   list.
 
 ## [0.23.0], 2026-08-05
 
-Found by a blind review pass — a different method over the same tree, asking what is MISSING rather than what
+Found by a blind review pass: a different method over the same tree, asking what is MISSING rather than what
 is wrong in a changed line. Six of these are cases where an earlier fix was recorded as closed but was inert,
 unreachable, or applied on one of several sibling paths.
 
@@ -944,14 +1001,14 @@ unreachable, or applied on one of several sibling paths.
 
 - **`IBackupTarget` gains `GetLastFullBackupIdAsync` / `SetLastFullBackupIdAsync`.** Implementors of the
   interface must add them. `BackupManifest.ParentBackupId` was serialized into every manifest, covered by the
-  manifest MAC and read on the recovery path — and written by nothing, so the message that exists to name an
+  manifest MAC and read on the recovery path, and written by nothing, so the message that exists to name an
   incremental's chain root rendered as "Restore the parent full ('')". `FileSystemBackupTarget` records it in a
   `.lastfull[-scope]` file beside the watermark, scoped the same way. No archive format change: the field was
   always there.
 
 - **`@authagonal/login` moves `react`, `react-dom` and `react-router` from `dependencies` to
   `peerDependencies`** (`^19.0.0` / `^19.0.0` / `^8.0.0`). Install them alongside the package. The library build
-  already externalized all three, so this makes the manifest agree with the build — and stops npm nesting a
+  already externalized all three, so this makes the manifest agree with the build, and stops npm nesting a
   second React under the package, which produced "Invalid hook call" and "useNavigate() may be used only in the
   context of a `<Router>` component" from correctly-written host applications.
 
@@ -959,7 +1016,7 @@ unreachable, or applied on one of several sibling paths.
   `useBranding()` still always returns a `BrandingConfig`, so nothing that consumes it changes; only code
   reading `useContext(BrandingContext)` directly sees the new type. The distinction is what lets `AuthLayout`
   tell "nothing provided branding" from "something provided the defaults", so it can load `branding.json`
-  itself — which the published README and `docs/branding.md` both describe — without a second fetch in the app
+  itself, which the published README and `docs/branding.md` both describe, without a second fetch in the app
   that already did it.
 
 - **`AuthLayout`'s `children` prop is now optional**, falling back to `<Outlet />` so the component works as
@@ -972,7 +1029,7 @@ unreachable, or applied on one of several sibling paths.
 
 - **`SamlRedirectBinding.Verify` takes an optional logger** and now enforces the IdP certificate's validity
   window. A retired signing certificate that previously verified a redirect-binding message is refused.
-  Source-compatible; behaviour-breaking only for a connection whose pinned certificate has expired — which is
+  Source-compatible; behaviour-breaking only for a connection whose pinned certificate has expired, which is
   the defect.
 
 - **`IGrantStore` gains `RemoveBySessionAsync`, and `PersistedGrant` gains `SessionId`.** Implementors of
@@ -984,11 +1041,11 @@ unreachable, or applied on one of several sibling paths.
   Source-breaking only for a caller invoking these internals directly.
 
 - **HashiCorp Vault Transit JWT signing was never implemented and is no longer advertised.** Registering
-  `VaultTransitCryptoProvider` never affected token signing — `ProtocolKeyManager` always signs with the key in
+  `VaultTransitCryptoProvider` never affected token signing: `ProtocolKeyManager` always signs with the key in
   `ISigningKeyStore`. The claim is withdrawn from the README and four doc pages, and a host that registered the
   provider now gets an Error at startup saying so. `VaultTransitClient` and the three related types are kept:
   they are the right building block for a Vault-backed `IFieldCipher` or `IIndexTokenizer`, which is what
-  `docs/extensibility.md` now shows. **If you believed your signing key was in Vault, it was not** — it was
+  `docs/extensibility.md` now shows. **If you believed your signing key was in Vault, it was not**: it was
   generated locally and persisted to your primary data store, in the clear unless an `IFieldCipher` was
   registered.
 
@@ -1004,7 +1061,7 @@ unreachable, or applied on one of several sibling paths.
 - **Signing-key publish-ahead was dead code whenever `Auth:KeyRotationEnabled` was on.** Its window was
   measured against the key's expiry (one day) while rotation retires the key at `KeyRotationLeadTimeDays`
   (14 by default), so the key was deactivated thirteen days before the window opened and a brand-new key was
-  minted and made the signer in the same call — the exact outcome publish-ahead exists to prevent, with both
+  minted and made the signer in the same call: the exact outcome publish-ahead exists to prevent, with both
   JWKS endpoints still sending `max-age=3600` on the strength of it. The window is now a margin on top of the
   rotation lead time. `AuthagonalProtocolOptions.KeyRotationLeadTimeDays` is new and the Server host mirrors
   `Auth:KeyRotationLeadTimeDays` into it. A lead time too large for the key lifetime is now refused with an
@@ -1016,8 +1073,8 @@ unreachable, or applied on one of several sibling paths.
 
 - **Logout, deactivation, deletion, SCIM deprovisioning, password reset, admin MFA reset and the cluster's
   own back-channel fan-out deleted grant rows without revoking the access tokens minted under them.** Access
-  tokens are self-contained ES256 JWTs, so for up to `AccessTokenLifetimeSeconds` — 30 minutes on the defaults
-  — a disabled, deleted or signed-out subject's token still passed the JwtBearer scheme, still returned their
+  tokens are self-contained ES256 JWTs, so for up to `AccessTokenLifetimeSeconds` (30 minutes on the defaults),
+  a disabled, deleted or signed-out subject's token still passed the JwtBearer scheme, still returned their
   claims from `/connect/userinfo`, and still reported `active: true` from `/connect/introspect`. Nine call
   sites now route through `GrantRevocation`, which exists precisely to make revocation do both halves.
   `MfaAdminEndpoints` logged and audited "sessions invalidated" while rotating only the cookie security stamp.
@@ -1025,12 +1082,12 @@ unreachable, or applied on one of several sibling paths.
 - **`/connect/userinfo` never checked `IsActive`**, so the OP's own endpoint served a deactivated user's full
   scoped claim set.
 
-- **Both SAML single-logout legs signed out the cookie and nothing else** — no RP notified, no grant revoked.
+- **Both SAML single-logout legs signed out the cookie and nothing else**: no RP notified, no grant revoked.
   An IdP-initiated `LogoutRequest` is an offboarding signal; it reached one cookie.
 
 - **Azure: the environment prefix came back as part of the model's identity on six stores.** Nine entities set
   an identity field from the raw `PartitionKey`; `Strip` was applied at two. Outside the live env a
-  read-modify-write therefore targeted `{env}|{env}|{key}` and reported success while changing nothing —
+  read-modify-write therefore targeted `{env}|{env}|{key}` and reported success while changing nothing,
   so revoking trust in a compromised IdP (replacing its `MetadataXml`, clearing `AllowUninvitedJit`, trimming
   `AllowedDomains`) silently did nothing, group-to-role mapping never applied at all, and SCIM group updates
   forked the row and burned the per-client quota. `ToModel` now requires the partitioner, which turned a
@@ -1051,19 +1108,19 @@ unreachable, or applied on one of several sibling paths.
 
 - **"Log out other devices" ended the OP cookie and nothing else.** The refresh token the relying party on that
   device already held kept rotating for the client's whole absolute refresh lifetime, and no relying party was
-  notified — so a user who lost a laptop was told every other device was signed out while the thief retained RP
+  notified, so a user who lost a laptop was told every other device was signed out while the thief retained RP
   access. Revoking one session's grants was previously inexpressible; see the `RemoveBySessionAsync` note above.
 
 - **SCIM group `externalId` was never validated**, while being the raw PartitionKey of the group external-id
   index. An unstorable value failed *after* the group row was durably written, so each connector retry left an
-  unreachable orphan counting against `Auth:MaxScimGroupsPerClient` — and once the orphans reached the cap, every
+  unreachable orphan counting against `Auth:MaxScimGroupsPerClient`, and once the orphans reached the cap, every
   create was refused and role grants driven by group membership stopped working with no recovery through the SCIM
   API. Validated on create, replace and PATCH now.
 
 - **A SCIM credential's email-domain bound is settable and documented.** `POST /api/v1/scim/tokens` accepts
   `allowedEmailDomains`; it is intersected with `Scim:Clients:{clientId}:AllowedEmailDomains`, so a token can
   narrow an operator's bound but never widen it. Previously the control existed only as that configuration key,
-  which no document mentioned and the token-minting endpoint could not write — so the documented onboarding
+  which no document mentioned and the token-minting endpoint could not write, so the documented onboarding
   produced an unrestricted directory-wide credential, and a SCIM-created user is written email-confirmed.
   Unchanged default: no bound anywhere is still unrestricted, but minting one now logs a warning.
 
@@ -1078,13 +1135,13 @@ unreachable, or applied on one of several sibling paths.
   states rather than listing GDPR self-service as a library feature.
 
 - **`/Groups` is cursor-paginated, and `pagination.index` is now `false`.** That flag had been wrong in both
-  directions: `false` while `/Groups` paged only by `startIndex`, then `true` — which was a lie about `/Users`,
+  directions: `false` while `/Groups` paged only by `startIndex`, then `true`, which was a lie about `/Users`,
   which refuses `startIndex > 1` with a 400, so a client that selected index paging provider-wide aborted its
   user sync after 100 users. It is a provider-level claim (draft-ietf-scim-cursor-pagination §4 has no
   per-endpoint qualifier), so the only honest value is one that holds for every collection. `/Groups` still
   accepts `startIndex`; it is simply no longer advertised. A truncated filtered group scan now returns a
-  `nextCursor` instead of being indistinguishable from an empty result — an empty page WITH a cursor means keep
-  going — and `count=0` / a negative `count` behave as on `/Users` (RFC 7644 §3.4.2.4).
+  `nextCursor` instead of being indistinguishable from an empty result (an empty page WITH a cursor means keep
+  going), and `count=0` / a negative `count` behave as on `/Users` (RFC 7644 §3.4.2.4).
 
 - **A refresh chain outlived the permission it was granted under.** The refresh path re-applied the per-user
   role gate but never re-checked the client's own `AllowedScopes`, so removing a scope from a client refused new
@@ -1096,16 +1153,16 @@ unreachable, or applied on one of several sibling paths.
   flattening determines the declaration, with the count of clients that end up declaring nothing reported.
 
 - **`MfaPolicy.Required` was not enforced on device approval**, so a user with no second factor could approve a
-  device for a client that demands one — and that grant mints tokens for 30 days.
+  device for a client that demands one, and that grant mints tokens for 30 days.
 
-- **Both MFA-enrolment completions minted a bare cookie** — no `mfa_authenticated` marker (so the authorize
+- **Both MFA-enrolment completions minted a bare cookie**: no `mfa_authenticated` marker (so the authorize
   endpoint signed the user straight back out and demanded a second code) and no parked federation state, which
   cost a federated user `saml_name_id`, the IdP session bound and every `federated:*` claim on first enrolment.
 
 - **The OIDC callback's non-MFA sign-in dropped the upstream IdP's session bound.** Both siblings applied it.
 
-- **Three hand-built cookies took `Secure` from `Request.IsHttps`** — including the MFA-enrolment token, which
-  is a full sign-in credential — the posture the session cookie's own configuration rejects. One shared
+- **Three hand-built cookies took `Secure` from `Request.IsHttps`**, including the MFA-enrolment token (which
+  is a full sign-in credential): the posture the session cookie's own configuration rejects. One shared
   decision now.
 
 - **SCIM group `externalId` uniqueness was never enforced**, although the index and `FindByExternalIdAsync`
@@ -1120,14 +1177,14 @@ unreachable, or applied on one of several sibling paths.
   attributes to the provisioning client and token rather than to a person.
 
 - **Admin user creation performed no email validation**, while both sibling creation paths refused the same
-  values — and the address becomes a storage key written after the profile row.
+  values, and the address becomes a storage key written after the profile row.
 
 - **Nothing collected `MfaChallenges`, `UpstreamRefreshTokens` or `RevokedTokens` on Azure Table**, the default
   backend; DynamoDB expires all three natively and `SqlExpiryReaper` covers all three. A parameterised
   `TableExpirySweepService` now does, leaving rows with no stated expiry alone.
 
 - **Server-side session rows persisted the whole authentication ticket in cleartext**, including the upstream
-  IdP's refresh token and all user PII, with no `IFieldCipher` — in the deployment where the operator is told
+  IdP's refresh token and all user PII, with no `IFieldCipher`: in the deployment where the operator is told
   PII is encrypted at rest.
 
 - **The at-rest encryption backfill had no driver.** `ReindexUserAsync`, `EnumerateUserIdsAsync` and
@@ -1139,7 +1196,7 @@ unreachable, or applied on one of several sibling paths.
   `--prefix` run inherited another tenant's and produced an archive covering one interval. Scoped by prefix and
   table set now.
 
-- **A `--tables` value outside the backup set produced an archive that could never be restored** — restore's
+- **A `--tables` value outside the backup set produced an archive that could never be restored**: restore's
   allowlist rejects it, after the backup was written, hashed and signed. Refused up front.
 
 - **The backup KEK and manifest HMAC key were argv-only**, so a Kubernetes CronJob spec contained both in
@@ -1153,7 +1210,7 @@ unreachable, or applied on one of several sibling paths.
 ### Fixed
 
 - **`GET /admin/migration/status` was mapped by nobody.** Documented twice as the way to read the migration
-  report and reachable from nowhere, so the documented dry-run cutover answered 404 — indistinguishable from
+  report and reachable from nowhere, so the documented dry-run cutover answered 404: indistinguishable from
   its own `IdentityAdmin` policy refusing the caller. Call `app.MapAuthagonalDuendeMigration()`;
   `docs/migration.md` now says so, and an enabled migration whose endpoint is unmapped warns at startup. Its
   handler also relied on binding inference, which threw at map time unless `AddAuthagonalDuendeMigration` had
@@ -1162,23 +1219,23 @@ unreachable, or applied on one of several sibling paths.
 - `HandleAuthorizationCode` and `HandleRefreshToken` never mapped `ProtocolTokenException`, so a protocol
   error on either path surfaced as a 500.
 
-- **The login SPA has a test runner.** `@authagonal/login` shipped with none, which left `resolveRedirect` —
-  the third implementation of an open-redirect guard whose other two are table-tested — with no coverage at all,
+- **The login SPA has a test runner.** `@authagonal/login` shipped with none, which left `resolveRedirect`
+  (the third implementation of an open-redirect guard whose other two are table-tested) with no coverage at all,
   and made the GDPR export's content-type guard untestable. vitest + jsdom, 32 tests, and a CI job in
   `audit.yml` alongside the `bff-lib` one. Test files are excluded from the published tarball.
 
-### Fixed — the 22 low findings, in five batches
+### Fixed: the 22 low findings, in five batches
 
 - **`roles` and `groups` rode the access token with no scope gate**, while the id_token gated the same two and
   both userinfo endpoints gate them at read time. `scope=openid profile` released the subject's full role and
   group membership to whatever resource server received the token.
 
 - **The refresh grace-window retry minted from a frozen snapshot.** The normal rotation path re-reads the user
-  store on every refresh — where deactivating an account or revoking a role takes effect. The grace path minted
+  store on every refresh, where deactivating an account or revoking a role takes effect. The grace path minted
   from the snapshot and did neither. It now re-resolves the subject and re-applies the role gate while still
   replaying the same successor grant.
 
-- **`Authagonal.Protocol`'s token endpoint never invoked `IAuthHook.OnTokenIssuedAsync`** — the hook documented
+- **`Authagonal.Protocol`'s token endpoint never invoked `IAuthHook.OnTokenIssuedAsync`**: the hook documented
   as "throw to reject the token issuance", in the package an integrator embeds precisely to keep their own
   policy in the loop. Its `subjectId` is documented as always null there, with the reason.
 
@@ -1192,7 +1249,7 @@ unreachable, or applied on one of several sibling paths.
   never completed and a 10-second poll ran for the process lifetime on a pod with no work left.
 
 - **`Authagonal.Migration` was the only shipped package with no `IsTrimmable`** and the only one serializing
-  through the reflection-based resolver — so a trimming host got an assembly nobody had trim-analyzed, and the
+  through the reflection-based resolver, so a trimming host got an assembly nobody had trim-analyzed, and the
   first casualty was the migration's own report. A source-generated context now covers all four sites; the
   project compiles with zero IL warnings.
 
@@ -1202,7 +1259,7 @@ unreachable, or applied on one of several sibling paths.
   honours the host's `trust proxy` setting); a new `clientIp` option supplies it where a Web `Request` has no
   socket.
 
-- **`welcomeTitle` and `welcomeSubtitle` were read by no component** — typed, defaulted, documented in seven
+- **`welcomeTitle` and `welcomeSubtitle` were read by no component**: typed, defaulted, documented in seven
   locales and translated into ten. They now render in the layout header when a tenant sets one; there is
   deliberately no default greeting, and the unreachable i18n keys are gone.
 
@@ -1210,7 +1267,7 @@ unreachable, or applied on one of several sibling paths.
   inline `window.__AUTHAGONAL_BOOT__`; the SPA reads a `<script type="application/json">` element, and this
   host's own CSP (`default-src 'self'`, no `unsafe-inline`, no nonce) refuses the assignment form.
 
-- **The SCIM `documentationUri` pointed at `{issuer}/docs/scim`** — a route nothing serves, so
+- **The SCIM `documentationUri` pointed at `{issuer}/docs/scim`**: a route nothing serves, so
   `MapFallbackToFile` answered it with 200 text/html: the login page, to an administrator following the link
   their provisioning UI surfaced. It now points at the documentation site.
 
@@ -1229,7 +1286,7 @@ unreachable, or applied on one of several sibling paths.
 - **`SqlGrantStore` recorded its deletes after performing them**, contradicting the F24e ordering the Azure
   store documents as a contract, on all four paths. And `RemoveBySubjectCoreAsync` deleted the
   `GrantsByExpiry` row while recording only two of the three, so a revoked grant's expiry-index row came back
-  from every incremental restore — from the one path that revokes in bulk.
+  from every incremental restore: from the one path that revokes in bulk.
 
 - **Seven documentation pages described behaviour the code was changed away from**, each in seven locales:
   `docs/saml.md` on IdP-initiated SSO (off by default, and the option that enables it was in no document),
@@ -1239,7 +1296,7 @@ unreachable, or applied on one of several sibling paths.
   contradicted; `docs/localization.md` on eleven locales including a Klingon one that ships nowhere; the CORS
   section, which claimed considerably more than the path-scoped provider does; and `/_internal/*` as reachable
   from private source addresses, when the guard authorizes nobody without `Cluster:Secret`.
-  `Cluster:AllowLoopbackWithoutSecret` and `Cluster:RunLeaderElection` are now documented — the first is the
+  `Cluster:AllowLoopbackWithoutSecret` and `Cluster:RunLeaderElection` are now documented: the first is the
   only way to restore the old behaviour and was findable only by reading the source.
 
 Fifty-six tests across the five batches, and each batch was probed by reverting its fixes: 6 of 9, 4 of 7,
@@ -1249,13 +1306,26 @@ declare `IsTrimmable`; every module the login build externalizes must be a peer 
 option must appear in the configuration reference; and no locale's documentation may advertise a locale the
 build does not ship.
 
+## [0.22.1], 2026-08-04
+
+### Changed
+
+- **Release and image-rebuild workflows pin the Trivy version.** The v0.22.0 release published its NuGet and npm
+  packages and then failed in the `docker` job before any scan ran: `setup-trivy` resolved its default to
+  `v0.64.1`, a release that no longer exists upstream, and the download exited 1. `release.yml` and
+  `rebuild-images.yml` now set `version:` explicitly, so the scanner moves only when someone edits that line. No
+  library or runtime change.
+- **The v0.22.0 images are not covered by this fix.** That tag keeps the old workflow, so its server image was
+  not published by the tagged release. `rebuild-images.yml` can rebuild the server image for a `ref`; the
+  migration and demo images are release-only, so a patch tag is the way to publish all five.
+
 ## [0.22.0], 2026-08-04
 
 ### Breaking
 
 - **IdP-initiated SAML sign-in is refused unless a connection opts in.**
   `SamlProviderConfig.AllowUnsolicitedResponses` defaults to **false**, and stored rows written before this
-  release read false — so a connection that relies on the user clicking your app's tile in their Okta / Entra /
+  release read false, so a connection that relies on the user clicking your app's tile in their Okta / Entra /
   ADFS dashboard stops working until it is turned on, per connection, via
   `PUT /api/v1/saml/connections/{id}` or the `SamlProviders:*` seed.
 
@@ -1263,14 +1333,14 @@ build does not ship.
 
   Why it cannot stay on by default: an unsolicited response carries no `InResponseTo`, so there is no pending
   request and no browser to tie it to. Every §4.1.4.3 rule is satisfied by an assertion the attacker obtained
-  legitimately for their OWN account at the same IdP — issuer, destination, recipient, audience, signature,
-  first-sighting of the assertion id all pass — so anyone with an account at that IdP could establish *their*
+  legitimately for their OWN account at the same IdP (issuer, destination, recipient, audience, signature,
+  first-sighting of the assertion id all pass) so anyone with an account at that IdP could establish *their*
   session in *your* user's browser. This release also binds the SP-initiated path to the initiating browser
   with a `saml_request` cookie, and that binding is worth nothing while the same assertion replays with
   `InResponseTo` removed. The two halves only work together.
 
-  Most IdPs can point the tile at the SP's login URL instead of firing an unsolicited assertion — Okta's
-  "Login initiated: App Only" with a login URL, Entra's "sign-on URL" — which keeps the tile working and makes
+  Most IdPs can point the tile at the SP's login URL instead of firing an unsolicited assertion (Okta's
+  "Login initiated: App Only" with a login URL, Entra's "sign-on URL") which keeps the tile working and makes
   the flow SP-initiated. That is the recommended configuration regardless. A refused response logs
   `saml_unsolicited` naming the connection, so an upgrade tells you which connections are affected rather than
   leaving you to find out from a ticket.
@@ -1278,7 +1348,7 @@ build does not ship.
 - **`SamlRedirectBinding.Verify` takes the expected message parameter.**
   `Verify(rawQuery, "SAMLRequest" | "SAMLResponse", certs)`. Source-breaking for a caller outside this
   package. It used to choose for itself with `Find("SAMLRequest") ?? Find("SAMLResponse")`, so a caller that
-  had decoded `SAMLResponse` got a signature verified over an appended, unrelated `SAMLRequest` — an attacker
+  had decoded `SAMLResponse` got a signature verified over an appended, unrelated `SAMLRequest`: an attacker
   kept a captured, correctly-signed request triple intact and simply appended a forged response. It now also
   refuses a query carrying both messages (Bindings §3.4.4.1 permits exactly one) or a duplicate of the
   message, `SigAlg`, `Signature` or `RelayState`.
@@ -1288,7 +1358,7 @@ build does not ship.
   unaffected.
 
   It replaces a grant's `Data` **only while the grant still exists and is un-consumed**, and returns `false` on
-  a lost race. The refresh grace window used `StoreAsync` — an unconditional full-row upsert — to append the
+  a lost race. The refresh grace window used `StoreAsync`, an unconditional full-row upsert, to append the
   access-token jti it had just minted; the instance written carries `ConsumedAt = null`, and on DynamoDB and
   SQL it also dropped the top-level `consumedAt` guard attribute that `TryMarkConsumedAsync` conditions on. A
   consume or delete landing between the read and the write was silently undone: a revoked grant came back and
@@ -1304,7 +1374,7 @@ build does not ship.
 - **A BFF exchange route with an unrecognised constraint fails at startup.**
   `AuthagonalBffOptions.Validate` throws, and the matcher throws as a backstop. Previously an unknown
   constraint made the route never match, and a non-matching exchange route makes `ProxyAsync` attach the
-  session's **primary, un-downscoped** access token — so a typo silently removed the downscoping. Supported
+  session's **primary, un-downscoped** access token, so a typo silently removed the downscoping. Supported
   constraints are `BffExchangeRoute.SupportedConstraints`.
 
 - **`GrantReconciliationService` takes an `EnvPartitioner`.** Source-breaking only for a host constructing it
@@ -1313,11 +1383,11 @@ build does not ship.
   now.
 
 - **Access tokens carry the scope-released OIDC §5.4 claims.** `email`, `email_verified`, `given_name`,
-  `family_name`, `name`, `locale`, `phone_number` and `org_id`, under the same scope gates the id_token uses —
+  `family_name`, `name`, `locale`, `phone_number` and `org_id`, under the same scope gates the id_token uses,
   because `Authagonal.Protocol`'s `/connect/userinfo` answers from the presented access token by design and had
   nothing to answer with, returning `sub` alone while discovery advertised the full set. Nothing is released
   for a scope the client was not granted, and `AlwaysIncludeUserClaimsInIdToken` is deliberately **not**
-  honoured here — it is an id_token opt-out. Access tokens are correspondingly larger, and a resource server
+  honoured here: it is an id_token opt-out. Access tokens are correspondingly larger, and a resource server
   now sees exactly what the user consented to.
 
 
@@ -1326,16 +1396,16 @@ build does not ship.
   those is unaffected.
 
   It rewrites a recovery credential's protected secret **only while that credential is still unconsumed**,
-  and returns `false` — skip the rewrite — when it is gone, already consumed, or was written by someone else
+  and returns `false`, skip the rewrite, when it is gone, already consumed, or was written by someone else
   first. The recovery-verification path upgrades every legacy unsalted-SHA-256 digest it touches, for the
   user's whole set, from a snapshot taken *before* verification. Persisting that snapshot with an
   unconditional upsert put `IsConsumed` back to `false` for any code a concurrent request had spent in the
-  meantime, so a single-use bypass of the entire second factor was usable twice — reopening the race
+  meantime, so a single-use bypass of the entire second factor was usable twice, reopening the race
   `TryConsumeRecoveryCodeAsync` exists to close, from inside the same request handler.
 
   There is deliberately no unconditional "update the secret" on the interface: the guard is the whole point.
   Implement it with your backend's conditional-write primitive (ETag, version compare-and-set, conditional
-  expression) and return `false` on a lost race rather than retrying. It must not stamp `LastUsedAt` — the
+  expression) and return `false` on a lost race rather than retrying. It must not stamp `LastUsedAt`: the
   upgrade sweeps the user's whole recovery set, so stamping marks every code as used because one of them was.
 
 - **`IMfaStore` gains `TryRecordWebAuthnUseAsync` and `TryActivateCredentialAsync`.** Source-breaking for an
@@ -1343,7 +1413,7 @@ build does not ship.
   using one of those is unaffected.
 
   Both are conditional writes that replace a blind `UpdateCredentialAsync` of a snapshot, and both must
-  return `false` rather than inserting when the credential is gone — an unconditional upsert re-creates a
+  return `false` rather than inserting when the credential is gone: an unconditional upsert re-creates a
   row an administrator revoked mid-request, and the handler then completes the sign-in it was revoking.
   `TryRecordWebAuthnUseAsync` raises the sign counter and stamps `LastUsedAt` only while the stored counter
   has not already passed the value; implement the comparison as `<=`, not `<`, because a sign count of zero
@@ -1373,18 +1443,18 @@ build does not ship.
     undeclared proxy's scheme claim is a claim any caller could have made.
 
     A private address is **not** a declaration. The fallback trust set (loopback + RFC1918, see the
-    `/_internal/backchannel-logout` fix below) adjusts the **client IP** only — it is a guess about
+    `/_internal/backchannel-logout` fix below) adjusts the **client IP** only: it is a guess about
     topology, and this library ships on nuget.org and cannot see the network it was deployed onto. On a
     flat LAN, a shared VPC or a shared container bridge, every neighbouring workload holds a private
     address and could assert `https` over a request that arrived in cleartext. A best-effort client IP
     still beats the framework's empty-set behaviour of believing every caller; a best-effort *scheme*
     would be a security gate resting on an inference, so it is not offered.
 
-    If your proxy has no fixed address — a Kubernetes ingress, a rotating load balancer, a platform that
-    will not tell you the hop's CIDR — declare `ForwardedHeaders:KnownNetworks: ["0.0.0.0/0", "::/0"]`.
+    If your proxy has no fixed address (a Kubernetes ingress, a rotating load balancer, a platform that
+    will not tell you the hop's CIDR) declare `ForwardedHeaders:KnownNetworks: ["0.0.0.0/0", "::/0"]`.
     That states the assumption you are already relying on (nothing but the proxy can reach this process)
     somewhere it can be reviewed, instead of leaving the library to infer it from an address range.
-  - **You genuinely serve the protocol surface over plain http** — a laptop, a demo, a test host. Set
+  - **You genuinely serve the protocol surface over plain http**: a laptop, a demo, a test host. Set
     `Auth:AllowInsecureHttp` (env `Auth__AllowInsecureHttp=true`). The server logs a warning at startup
     whenever it is on. Never set it in production. For a host that embeds `Authagonal.Protocol` without
     `Authagonal.Server`, the equivalent is `AuthagonalProtocolOptions.AllowInsecureHttp`; when you use
@@ -1392,8 +1462,8 @@ build does not ship.
 
   `Authagonal.Protocol` embedders are affected even though they compose their own pipeline. In
   `Authagonal.Server` the gate is middleware over the whole `/connect/*` prefix; in `Authagonal.Protocol` it
-  is a filter on the four routes that package owns — `/connect/authorize`, `/connect/token`,
-  `/connect/userinfo`, `/connect/par` — attached where each route is declared, precisely so it cannot be
+  is a filter on the four routes that package owns (`/connect/authorize`, `/connect/token`,
+  `/connect/userinfo`, `/connect/par`) attached where each route is declared, precisely so it cannot be
   lost by a host that never had a middleware slot for it. Mapping an endpoint individually rather than
   through `MapAuthagonalProtocolEndpoints` does not opt out of it.
 
@@ -1413,8 +1483,8 @@ build does not ship.
     network, a provisioning app in the same cluster. List it in `Auth:AllowedInternalTargets`:
     `idp.corp.internal` (that host and whatever it resolves to), `*.corp.internal` (any host under the
     suffix), `10.4.0.0/16` or `10.4.1.7` (that network or address, under any name). It applies to the
-    upstream SAML metadata fetch, upstream OIDC discovery — including the `token`, `userinfo` and `jwks_uri`
-    endpoints that document names — and provisioning callbacks: the paths where the URL came from *your*
+    upstream SAML metadata fetch, upstream OIDC discovery (including the `token`, `userinfo` and `jwks_uri`
+    endpoints that document names) and provisioning callbacks: the paths where the URL came from *your*
     configuration or admin API. It deliberately does **not** reach a client-registered `jwks_uri` or
     back-channel logout URI, where an internal host is never a deployment, so widening a federation target
     cannot also open the cloud metadata service to an anonymous `/connect/token` request. A malformed CIDR
@@ -1422,7 +1492,7 @@ build does not ship.
 
   - **If your egress requires a proxy, those fetches now fail.** The guard is attached to
     `SocketsHttpHandler.ConnectCallback`, and with a proxy in effect .NET invokes that callback with the
-    *proxy's* endpoint and never the target's — so the check would pass on the proxy every time and permit
+    *proxy's* endpoint and never the target's, so the check would pass on the proxy every time and permit
     everything. It would fail open in precisely the networks most likely to have a proxy, so the clients
     that carry the guard set `UseProxy = false`. `Auth:AllowOutboundProxy` sends the operator-configured
     fetches (SAML metadata, OIDC discovery, provisioning callbacks) back through the proxy, accepting that
@@ -1435,11 +1505,11 @@ build does not ship.
   The BFF's two clients (`AuthagonalBff`, `AuthagonalBffProxy`) are **not** guarded and use the proxy as
   before. `BffUpstream.TargetBaseUrl` is host configuration whose own documented example is
   `https://api.internal.acme.com`, the token client talks to the authority that host configured, and
-  `BffProxy` already refuses any composed target that left the configured upstream authority — so a caller
+  `BffProxy` already refuses any composed target that left the configured upstream authority, so a caller
   cannot steer those requests and there is nothing for an address check to add. Email delivery (`Resend`)
   is likewise unguarded and unaffected: its target is a compile-time constant.
 
-### Security — the rest of the diff-scoped pass (27 clusters, 0 refuted)
+### Security: the rest of the diff-scoped pass (27 clusters, 0 refuted)
 
 Every actionable finding the diff-scoped review produced is now closed. Each fix was verified non-vacuous by
 reverting it and watching a specific test fail.
@@ -1452,12 +1522,12 @@ reverting it and watching a specific test fail.
   none. `/saml/{id}/login` now sets a browser-bound `saml_request` cookie (`SameSite=None`, because the
   HTTP-POST binding is a cross-site form POST that Lax withholds cookies from), compared **before** the row is
   consumed so a cross-browser POST cannot burn the victim's pending login.
-- Expired IdP signing certificates validated assertions indefinitely — `NotBefore`/`NotAfter` were never
+- Expired IdP signing certificates validated assertions indefinitely: `NotBefore`/`NotAfter` were never
   consulted at load or at validation. Trust still comes from metadata pinning, not a chain; expiry is now
   honoured with the same 5-minute skew the assertion checks use, so a rollover still works and a frozen
   certificate set does not.
 - `id_token_hint` at `/connect/endsession` accepted **any** JWT this server signed, including access tokens.
-  One issuer, one ES256 key, no `typ` pin, and the client was read from `client_id` — an access-token claim.
+  One issuer, one ES256 key, no `typ` pin, and the client was read from `client_id`: an access-token claim.
   The hint is what skips the confirmation interstitial, and that interstitial is the CSRF boundary because the
   session cookie is `SameSite=Lax`. Now pinned to `typ: JWT`, rejecting payloads carrying `client_id` or
   `events`, with the client taken from a single `aud`.
@@ -1468,23 +1538,23 @@ reverting it and watching a specific test fail.
 **Consent and authority**
 
 - `GET /consent/info` built the consent card entirely from the caller's own `client_id` and `scope`, and
-  `POST /consent` treated the server's offer record as optional — so a crafted link rendered the IdP's own
+  `POST /consent` treated the server's offer record as optional, so a crafted link rendered the IdP's own
   consent card for a real client with an attacker-chosen permission list, and recorded a five-year grant behind
   it. Both halves now require a live `consent_offer`, and granted scopes are intersected with the offered set.
 - `prompt=consent` was validated as supported and then read at exactly one site, inside
-  `if (client.RequireConsent)` — false for every admin-created and config-seeded client. Now honoured
+  `if (client.RequireConsent)`: false for every admin-created and config-seeded client. Now honoured
   independently, satisfied once per request via a single-use marker (an unconditional re-prompt is an infinite
   redirect loop between authorize and consent, which is what a `RequireConsent` client already got).
   `Authagonal.Protocol`, which has no consent surface, answers `consent_required` instead of ignoring it.
 - Agent re-consent replaced the stored floor instead of narrowing it, and the consent screen was never told
-  what had already been granted — so it pre-ticked the whole ceiling and one click silently restored a
+  what had already been granted, so it pre-ticked the whole ceiling and one click silently restored a
   deliberately narrowed grant. `/consent/agents/{id}/info` now returns the floor.
 - `locations` used ordinal set intersection in the meet but prefix containment in enforcement, so narrowing a
-  location to a sub-resource **annihilated** the grant instead of narrowing it — the ordinary way an agent asks
+  location to a sub-resource **annihilated** the grant instead of narrowing it: the ordinary way an agent asks
   for less than its ceiling. The meet uses the same containment relation and keeps the more specific side;
   genuine disjointness still drops the grant.
 - Opaque (uninterpretable) constraints were silently skipped in the only branch a caller can reach, while being
-  emitted into the token verbatim — restrictive to anyone reading it, unrestricted in fact. They deny now, as
+  emitted into the token verbatim: restrictive to anyone reading it, unrestricted in fact. They deny now, as
   the docs already claimed.
 
 **Credentials and secrets**
@@ -1494,26 +1564,26 @@ reverting it and watching a specific test fail.
   upstream `sub`, so two federated users could share one stored TOTP seed and the later enrolment silently
   overwrote the earlier. `SecretNameSanitizer` appends a hash of the original whenever the rewrite loses
   information, and leaves an already-valid name untouched so existing secrets still resolve.
-- The MFA enrolment token — the sole identity the enrolment endpoints accept, and one that yields a full
-  session on completion — travelled in a URL. The federated path put it in a `Location` header and a real
+- The MFA enrolment token (the sole identity the enrolment endpoints accept, and one that yields a full
+  session on completion) travelled in a URL. The federated path put it in a `Location` header and a real
   request line, and therefore in history, `Referer` and access logs. Now an `HttpOnly` cookie for the federated
   path and router state (with a sessionStorage reload fallback) for the password path;
   `GET /api/auth/mfa/status` reports `forced` so the page no longer infers it from the query string.
-- Revoking a `RefreshTokenUsage.ReUse` client's refresh token killed none of its access tokens — the ReUse
+- Revoking a `RefreshTokenUsage.ReUse` client's refresh token killed none of its access tokens: the ReUse
   branch never recorded the jti it minted, and a ReUse token never rotates, so it is precisely the grant that
   accumulates them all.
 - Signing-key rollover published nothing ahead: a `kid` first appeared in JWKS at the instant it started
   signing, while peers cached keys and both JWKS endpoints sent `max-age=3600`. The successor is now minted a
-  day early and stored inactive-but-published, then promoted — which is what the cache headers already claimed.
+  day early and stored inactive-but-published, then promoted, which is what the cache headers already claimed.
 
 **Storage, clustering and operations**
 
 - `Cluster:Enabled=false` made the node a permanent **non**-leader: standalone mode passed
   `Timeout.InfiniteTimeSpan`, a *negative* TimeSpan, so the deadline landed in the past while the log announced
-  permanent leadership. Every leader-gated job — signing-key generation, the expiry reaper, grant
-  reconciliation — silently never ran.
+  permanent leadership. Every leader-gated job (signing-key generation, the expiry reaper, grant
+  reconciliation) silently never ran.
 - The leadership deadline was computed **after** the lease round trip, overshooting the backend's real expiry
-  by the call's latency — the inverse of what the parameter documentation asserted, and worst exactly when the
+  by the call's latency: the inverse of what the parameter documentation asserted, and worst exactly when the
   lease store stalls.
 - `UseAzureStorageBus` / `UseAwsDynamoBus` / `UseSqlBus` are documented for nodes that must never hold
   leadership and left the always-granting in-process lease in place, so such a node became leader on its first
@@ -1521,7 +1591,7 @@ reverting it and watching a specific test fail.
   from configuration.
 - All three cluster event buses keyed rows on the **publisher's** clock, so one fast node pushed every
   consumer's cursor into the future and every event published by a correctly-clocked node for the next Δ sorted
-  below it and reached nobody — silently. Future-dated rows are now delivered but do not advance the cursor,
+  below it and reached nobody: silently. Future-dated rows are now delivered but do not advance the cursor,
   de-duplicated, and logged.
 - `GrantReconciliationService` deleted every subject-bearing grant outside the live env. See Breaking.
 - A compensating revert after a failed email claim was an unconditional full-row write of a stale snapshot: it
@@ -1529,14 +1599,14 @@ reverting it and watching a specific test fail.
   because Upsert inserts, **resurrected** accounts deleted mid-request. Now conditional on the ETag / version
   that call wrote, and update-only.
 - `ProviderSeedService` rebuilt SAML connections from scratch on every boot, writing `SpCertificate`,
-  `SignAuthnRequests`, `NameIdFormat`, `MetadataXml` and `IconUrl` back as null — destroying the SP keypair and
+  `SignAuthnRequests`, `NameIdFormat`, `MetadataXml` and `IconUrl` back as null, destroying the SP keypair and
   reverting admin-set request signing. Both halves are read-merge-write now.
 - The SQL keyset continuation token was `base64($"{pk} {sk}")` split on the first space, so a partition key
   containing one made `GET /api/v1/users` page forever. Length-prefixed now.
 - The hosted Duende migration recorded `Completed` even when passes failed, and that marker permanently blocked
   the retry. `CompletedWithErrors` does not block, and the run logs at Error.
 - A failed provisioning Confirm deprovisioned the user from **every** app they had ever been provisioned into,
-  not just the ones that transaction confirmed — so adding an app and failing removed the user from the apps
+  not just the ones that transaction confirmed, so adding an app and failing removed the user from the apps
   they already had.
 - The provisioning admin API read and wrote a store the orchestrator never consulted, so apps created or edited
   through `/api/v1/provisioning/apps` never took effect. `StoreProvisioningAppProvider` is the default whenever
@@ -1544,7 +1614,7 @@ reverting it and watching a specific test fail.
 
 **Availability and quotas**
 
-- The client-secret throttle was keyed on `client_id` alone and counted every request, correct secret or not —
+- The client-secret throttle was keyed on `client_id` alone and counted every request, correct secret or not,
   so thirty anonymous requests a minute naming a public identifier took a confidential client's entire token
   issuance offline. Keyed per (client, source) now; see the note in `ClientAuthentication` on why no
   client-wide cap replaces it.
@@ -1553,7 +1623,7 @@ reverting it and watching a specific test fail.
 - The PAR `request_uri` expired 90 seconds after the push while the record must survive the entire interactive
   login, so any real PAR flow broke and the error surfaced to the end user mid-login. The push→first-authorize
   hop keeps its 90 s; the record is extended once, to an absolute deadline, on first pickup.
-- `/connect/par` stored every submitted field with no bound — Kestrel's 30 MB body and 1024 form values, all
+- `/connect/par` stored every submitted field with no bound: Kestrel's 30 MB body and 1024 form values, all
   serialised into one row, from a client authenticating on a bare `client_id`. Now 32 KB / 64 fields / 8 KB per
   value, refused with 413.
 - The BFF accumulated per-login correlation cookies without bound (cookie-bomb 431 against the SPA origin) and
@@ -1565,25 +1635,25 @@ reverting it and watching a specific test fail.
   paging, so a client built against the advertisement could never read past the first page of groups. `/Groups`
   accepts `cursor` and returns `nextCursor`, and `index` is advertised truthfully.
 - `Authagonal.Protocol`'s `/connect/userinfo` returned `sub` and nothing else. See Breaking.
-- `PUT /api/v1/agents/{clientId}` reset an omitted `mode` to `delegated` — the field deciding which delegation
-  machinery the agent may use — on an endpoint whose other four fields all preserve on omission.
+- `PUT /api/v1/agents/{clientId}` reset an omitted `mode` to `delegated` (the field deciding which delegation
+  machinery the agent may use) on an endpoint whose other four fields all preserve on omission.
 - Nothing in this repository ever ran `dotnet test`. `build.yml` runs the suite on push, PR and
   `workflow_call`; all three publishing jobs gate on it (`publish-nuget` previously declared no `needs:` at
   all), and `ReleaseGateConventionTests` walks the `needs:` graph so the next publishing job cannot skip it.
 
-### Fixed — test infrastructure that hid real defects
+### Fixed: test infrastructure that hid real defects
 
 - `InMemorySamlProviderStore.Clone` was a hand-written field list four fields behind the model, so
   `ChallengeMfaAfterLogin`, `ProvisioningAttributeParams`, `AllowUninvitedJit` and the new unsolicited flag were
-  dropped on every read — any test configuring one asserted against the default. It is a serialisation
+  dropped on every read: any test configuring one asserted against the default. It is a serialisation
   round-trip now.
 - `AuthagonalTestFactory` registered no `IProvisioningAppStore`, which is why the admin surface needed a bespoke
   host and why the store-backed provisioning provider was never exercised.
 
-### Security — four medium findings from the diff-scoped pass
+### Security: four medium findings from the diff-scoped pass
 
 - **The admin audit trail was a no-op in every default deployment, silently.** Every admin write calls
-  `audit.LogAsync(...)` and a convention test keeps it that way — but `IAuditLogger` binds to `NullAuditLogger`
+  `audit.LogAsync(...)` and a convention test keeps it that way, but `IAuditLogger` binds to `NullAuditLogger`
   by default, no implementation is bundled, and no provider package supplies one. So on a self-hosted install
   none of those rows exist: MFA reset and credential removal, minting a token as another user, set-password,
   deletion, identity linking, SCIM token creation, SSO connection changes, role and scope edits. The comments at
@@ -1594,34 +1664,34 @@ reverting it and watching a specific test fail.
 - **`PATCH /scim/v2/Groups` paid an unbounded quadratic cost before refusing it.** The membership cap was
   enforced on the *result*, so the work was already done. `AddGroupMembers` does Contains-then-Add against a
   `List` per element and `RemoveGroupMembers` does a linear `Remove`, both quadratic in the ids the caller
-  supplies — and nothing bounded the operation count either. One authenticated request could pin a core and the
+  supplies, and nothing bounded the operation count either. One authenticated request could pin a core and the
   refusal at the end cost the caller nothing. Both the operation count and the supplied member count are now
   checked first.
 
 - **Correlation cookies accumulated without limit (cookie-bomb DoS against the SPA origin).** `/bff/login` is an
   unauthenticated GET that appends a cookie with a fresh per-login name, and the callback deletes only the one
   whose state it presented. The rest lived out their 15-minute expiry at ~400 bytes each; Kestrel's 32 KB header
-  limit means on the order of 80 outstanding cookies make every subsequent request to the origin fail with 431 —
+  limit means on the order of 80 outstanding cookies make every subsequent request to the origin fail with 431:
   self-inflicted by hitting a public endpoint repeatedly, and not clearable without manually deleting cookies.
   Capped at 8 in flight, oldest evicted first, which still leaves room for the concurrent logins these
   per-login cookies exist for.
 
 - **`POST /api/auth/confirm-email` was an unthrottled account-existence oracle (partially closed).** The token is
-  `base64(stamp || email || exp)` with no MAC, so the address is attacker-chosen and the stamp can be garbage —
+  `base64(stamp || email || exp)` with no MAC, so the address is attacker-chosen and the stamp can be garbage,
   and the handler branched three ways on real account state, two of them differing only in wording. Those two are
   now byte-identical, and the endpoint is throttled per source.
 
-  **Not fully closed, deliberately.** The third outcome — "this address exists and is already confirmed" — still
+  **Not fully closed, deliberately.** The third outcome ("this address exists and is already confirmed") still
   answers 200, because that is the double-click / back-button / second-device case and the useful answer; an
   earlier round closed the same oracle on the GET page and left this one. It cannot be fixed by rewording, since
   the 200 *is* the information. The root enabler is the missing MAC: sign the token and only a recipient of the
   email can pose the question at all, after which answering honestly is safe. That is a token-format migration
   with in-flight links to carry, so it is not bundled here.
 
-### Security — MFA after a federated login threw away every federation binding
+### Security: MFA after a federated login threw away every federation binding
 
 - **Enabling MFA on a federated tenant quietly disabled single logout for its enrolled users (high).**
-  When a federated user has MFA enrolled, `FederatedMfaFlow.MaybeChallengeAsync` returns a redirect — so the
+  When a federated user has MFA enrolled, `FederatedMfaFlow.MaybeChallengeAsync` returns a redirect, so the
   SAML/OIDC callback returns **before** it builds its sign-in principal. Every federation binding was added only
   on the fall-through path below that point: `saml_connection`, `saml_name_id`, `saml_name_id_format`,
   `saml_session_index`, `session_max_exp` (from SAML `SessionNotOnOrAfter` or the OIDC session claim), the
@@ -1629,13 +1699,13 @@ reverting it and watching a specific test fail.
   the `federated:*` claim passthrough.
 
   The session was then established instead by `/api/auth/mfa/verify`, which signs in through
-  `CookieSignInHelper.SignInAsync` — a helper that mints only `sub`, `email`, `name`, `security_stamp`, a
+  `CookieSignInHelper.SignInAsync`: a helper that mints only `sub`, `email`, `name`, `security_stamp`, a
   **fresh** `sid`, `auth_time`, `org_id` and `mfa_authenticated`. So for exactly the federated users who had a
   second factor:
 
   - **Single logout stopped working.** SLO matches a session by `saml_name_id`, which was gone, so an
     IdP-initiated logout could not find the session to end. Turning on MFA turned off SLO.
-  - **The IdP's session bound was discarded**, so the local session outlived the authentication behind it —
+  - **The IdP's session bound was discarded**, so the local session outlived the authentication behind it:
     the opposite of what federating to an IdP means.
   - **The upstream refresh token was stranded**, seeded under the callback's `sid` while the cookie carried a new
     one, so nothing would ever look it up again.
@@ -1653,24 +1723,24 @@ reverting it and watching a specific test fail.
 
   Nothing in the suite exercised the federated-MFA path, which is why this shipped.
 
-### Security — the two sign-out paths disagreed about what "logged out" means
+### Security: the two sign-out paths disagreed about what "logged out" means
 
 - **`POST /api/auth/logout` notified no relying party and revoked no grant (high).** Its entire body was an
   upstream-session cleanup and a cookie `SignOutAsync`. It built no Logout Token, rendered no front-channel URI,
   and never called `RemoveBySubjectAsync(subjectId, PersistedGrantTypes.SessionBound, …)`.
   `/connect/endsession` did all three.
 
-  This is the path that matters most, because it is the one the OP's own login app's Sign out button invokes —
+  This is the path that matters most, because it is the one the OP's own login app's Sign out button invokes,
   so for most users, signing out left every relying party believing they were still present, and left the
   refresh tokens, authorization codes, device codes and pushed-authorization requests minted for that session
   in the store and usable. Meanwhile discovery advertises `backchannel_logout_supported`,
   `frontchannel_logout_supported` and both `*_session_supported` flags unconditionally, and
-  `docs/configuration.md` promises "a signed logout token (JWT) to each client's registered URI" — describing
+  `docs/configuration.md` promises "a signed logout token (JWT) to each client's registered URI", describing
   the path that did it and not the one users take.
 
   The collect-notify-revoke block is now `SessionTermination`, called by both. Extracted rather than duplicated
   for the reason this review keeps rediscovering: a rule implemented twice is a rule about to be fixed once.
-  Every hardening already in that block now applies to both paths by construction — the outbound-URL check on
+  Every hardening already in that block now applies to both paths by construction: the outbound-URL check on
   both URI kinds (loopback permitted for the browser-side iframe fetch, refused for the server-side POST), the
   two-minute token lifetime, the explicit `TokenType` so a logout token cannot be presented as a subject token,
   and session-bound-only revocation so signing out does not silently discard the user's stored consents.
@@ -1678,96 +1748,96 @@ reverting it and watching a specific test fail.
   `POST /api/auth/logout` now returns `frontchannel_logout_uris` for the caller to load, because a front-channel
   logout is by definition performed by the user's browser and a JSON endpoint has no page to render them into.
 
-### Security — an agent could switch off its own approval gate
+### Security: an agent could switch off its own approval gate
 
 - **A client-supplied `action_policies` entry counted as an administrator's decision (high).**
   `AuthoritySet.MergeSameType` records a policy for an action when the meet is not `Auto` **or** when either
-  operand carried an explicit entry — deliberately, because `ApplyHighRiskDefaultsAsync` reads *absence* as
+  operand carried an explicit entry: deliberately, because `ApplyHighRiskDefaultsAsync` reads *absence* as
   "apply the profile default", so an administrator who marks a high-risk action `auto` must not have that
   decision erased.
 
   But in a delegated exchange the operands include the client's own `authorization_details` request, and nothing
   filtered `action_policies` out of it: `AuthorityJson.TryParse` treats the member as first-class, which is
-  exactly why `FindUngrantedConstraint` — the guard that stops a client contributing members the ceiling never
-  defined — never inspected it. So an agent put `"action_policies": {"transfer": "auto"}` in its own request,
+  exactly why `FindUngrantedConstraint` (the guard that stops a client contributing members the ceiling never
+  defined) never inspected it. So an agent put `"action_policies": {"transfer": "auto"}` in its own request,
   that was recorded as an explicit decision, and the high-risk default skipped the action: the human-approval
   gate on the riskiest actions, switched off by the party it exists to gate.
 
-  `Intersect` now takes policy provenance. A non-authoritative operand — the request, or a subject token's own
-  claim — may still **raise** a policy (`Auto` → `Ask` → `Deny`), because that only narrows; it cannot create
+  `Intersect` now takes policy provenance. A non-authoritative operand (the request, or a subject token's own
+  claim) may still **raise** a policy (`Auto` → `Ask` → `Deny`), because that only narrows; it cannot create
   the explicit-entry marker that suppresses the default.
 
-### Security — four more highs: an MFA bypass, an unauthenticated logout endpoint, a spendable challenge, a resettable throttle
+### Security: four more highs: an MFA bypass, an unauthenticated logout endpoint, a spendable challenge, a resettable throttle
 
-- **`/_internal/backchannel-logout` treated loopback as a credential (high).** With `Cluster:Secret` unset — the
-  shipped default — the guard authorised on a loopback source address, and loopback is exactly what this
+- **`/_internal/backchannel-logout` treated loopback as a credential (high).** With `Cluster:Secret` unset (the
+  shipped default), the guard authorised on a loopback source address, and loopback is exactly what this
   project's own **mandatory** deployment shape produces: the installation and configuration docs require a
   TLS-terminating reverse proxy in front of Authagonal, and a proxy on the same host (`proxy_pass
   http://127.0.0.1:8080`, IIS/ANCM, `network_mode: host`) connects to Kestrel *from* 127.0.0.1. The raw-peer
   capture faithfully records that real peer, so the guard saw 127.0.0.1 for every request the proxy forwarded,
   internet-originated ones included. The route is anonymous, antiforgery-disabled, and revokes every grant for
-  an arbitrary subject — so unauthenticated mass session revocation for any user, plus a probe for whether a
+  an arbitrary subject, so unauthenticated mass session revocation for any user, plus a probe for whether a
   subject had sessions at all. The earlier fix stopped trusting forwarded headers and stopped accepting RFC1918
   on the reasoning that "a source address is not a credential", then kept one source address as a credential.
 
   It now fails closed: no `Cluster:Secret` means 404 for everyone, with `Cluster:AllowLoopbackWithoutSecret` as
   an explicit development opt-in and a startup diagnostic naming whichever state applies. Nothing in the product
-  calls these endpoints, so the closed default breaks no shipped flow — pod-to-pod callers are on different
+  calls these endpoints, so the closed default breaks no shipped flow: pod-to-pod callers are on different
   addresses and already needed the secret.
 
 - **`MfaPolicy.Required` was never enforced at `/connect/authorize` (high).** It was evaluated in exactly two
-  places, the password-login handler and the federated MFA flow, and both derived the client — and therefore
-  the policy — from the `returnUrl` **query parameter**. Absent or naming another client, the policy fell back
+  places, the password-login handler and the federated MFA flow, and both derived the client, and therefore
+  the policy, from the `returnUrl` **query parameter**. Absent or naming another client, the policy fell back
   to Disabled and a full session cookie was signed with no second factor. The authorize endpoint had a step-up
   guard, but it keyed only on `MfaEnabled: true` and never read `client.MfaPolicy`. So the enrolled case was
-  covered regardless of `returnUrl`, and the enrolment-forcing case — the documented "force enrollment for
-  users without MFA" — rested entirely on an attacker-controllable value: an unenrolled user reached a Required
+  covered regardless of `returnUrl`, and the enrolment-forcing case (the documented "force enrollment for
+  users without MFA") rested entirely on an attacker-controllable value: an unenrolled user reached a Required
   client with a password-only session by arriving without the parameter. Now enforced at the authorize endpoint,
   where the client comes from the validated request rather than a query string, with `interaction_required`
   under `prompt=none`.
 
 - **An MFA challenge could be spent six times over (high).** `TableMfaStore.ConsumeChallengeAsync` read the
   entity then issued an unconditional delete, and the Azure SDK documents that overload as "should not fail
-  because the entity does not exist" — so every concurrent caller that got past its own read also got a
+  because the entity does not exist", so every concurrent caller that got past its own read also got a
   successful delete and the challenge back. Eight concurrent consumes returned **six** non-null. That is the
   anti-replay guard on the second factor. SQL and DynamoDB were already atomic.
 
   Worth recording precisely, because the obvious fix is wrong: a *conditional* delete does not close it either.
   Azurite answers a conditional delete of an already-deleted row with success, so the delete's status cannot be
-  the arbiter — while a stale-ETag delete against a row that still exists **is** refused with 412, so the
+  the arbiter, while a stale-ETag delete against a row that still exists **is** refused with 412, so the
   precondition itself works. The claim is now a compare-and-set `UpdateEntityAsync` marking the challenge
   consumed, which every loser fails with 412 because the row is still there to compare against; the delete
   follows as best-effort cleanup. Eight concurrent consumes now return one.
 
 - **Every security throttle on a node could be reset remotely (high).** `InProcessRateLimiter` is one
   process-wide dictionary with a hard entry cap, and at the cap it evicted the oldest tenth **ordered by window
-  Start** — while eviction hands the evicted key a fresh budget. Window lengths differ by call site, so a
+  Start**, while eviction hands the evicted key a fresh budget. Window lengths differ by call site, so a
   one-hour password-reset-per-IP window that began five minutes ago sorted older than a one-minute SAML-ACS
   window created a second ago, with 55 minutes still to run: a flood of short-lived keys evicted the long
   security windows and kept itself. The flood was reachable unauthenticated, because `POST
   /saml/{connectionId}/acs` built its limiter key from the raw route segment *before* looking the connection up.
   Eviction now prefers windows closest to lapsing naturally, so an actively-held limit is the last thing
-  dropped, and the ACS handler resolves the connection first — bounding the key space to connections that exist.
+  dropped, and the ACS handler resolves the connection first, bounding the key space to connections that exist.
 
-### Security — two more places a write reverted someone else's decision
+### Security: two more places a write reverted someone else's decision
 
 - **`PUT /api/v1/clients/{id}` reset every omitted field to the model default (high).** The handler bound a
   whole `OAuthClient` and wrote it, so any JSON property the body left out arrived at its declared default and
   was persisted: `Enabled` back to **true**, `MfaPolicy` to Disabled, `RequireConsent` and
   `RequirePushedAuthorizationRequests` to false, `JwksJson`/`JwksUri` to null (killing private_key_jwt), and
-  every URI, scope and origin list to empty. Exactly two fields were special-cased — `ClientSecretHashes` and
-  `AudiencesDeclared`, the latter with a comment explaining this very hazard — and about forty were not.
+  every URI, scope and origin list to empty. Exactly two fields were special-cased (`ClientSecretHashes` and
+  `AudiencesDeclared`, the latter with a comment explaining this very hazard) and about forty were not.
 
   No attacker required: an operator disables a compromised client to cut it off, and the next rename, logo-URL
   change, admin-console save that posts only the fields it renders, or scripted bulk update turns it back on and
   removes the MFA requirement from its users. Nothing in the response or the audit row said anything had changed.
 
   Absent and explicitly-default are indistinguishable once JSON is bound to a non-nullable record, so the merge
-  happens at the node level, before binding — which also means no per-property list to fall out of date, that
+  happens at the node level, before binding, which also means no per-property list to fall out of date, that
   being the failure mode it replaces. PUT is now a merge rather than a replace, the same choice
   `ClientSeedService` makes and for the same reason. The format validators are each gated on their own input
   having been supplied, so a client whose STORED hash or redirect URI predates the validator that now rejects it
-  is still editable — otherwise the fix would have made those clients unmaintainable, with an error naming a
+  is still editable: otherwise the fix would have made those clients unmaintainable, with an error naming a
   field the operator never sent.
 
 - **The Azure store left the security stamp in cleartext (high).** `TableUserStore` encrypts a hard-coded
@@ -1776,30 +1846,30 @@ reverting it and watching a specific test fail.
   it, and the existing PII coverage asserted only the Tier-1 fields.
 
   The stamp is not ordinary PII. The email-confirmation / passwordless-claim token is
-  `base64("{stamp}||{email}||{exp}[||pc=…]")` and carries **no MAC** — the confirm-email handler's own comment
+  `base64("{stamp}||{email}||{exp}[||pc=…]")` and carries **no MAC**: the confirm-email handler's own comment
   says the stamp is the only thing authorising the state change. So the adversary `IFieldCipher` exists to stop
   (read access to the store, no Vault key: a leaked read-only role, a copied backup, a snapshot, a support
-  export) could mint one: set `EmailConfirmed` on any account without ever holding the mailbox — the gate JIT
-  federation and `email_verified` rely on — and complete a staged self-service claim on a passwordless
+  export) could mint one: set `EmailConfirmed` on any account without ever holding the mailbox (the gate JIT
+  federation and `email_verified` rely on) and complete a staged self-service claim on a passwordless
   SSO/SCIM-provisioned account. `RolesJson` is authorization state, useful for choosing whom to target.
 
   `ExternalId`, `OrganizationId` and `Locale` stay in cleartext deliberately: the first two are query and index
   keys, which would need blind indexes as `Email` has, and the third is a language tag. Legacy plaintext rows
   keep reading and are re-written encrypted on their owner's next profile write.
 
-### Security — a deleted account's identity and credentials did not die with it
+### Security: a deleted account's identity and credentials did not die with it
 
 - **A deleted account's second factors authenticated the next account at that id (high).**
-  `IMfaStore.DeleteAllCredentialsAsync` had exactly one caller in the whole product — the admin MFA-reset
+  `IMfaStore.DeleteAllCredentialsAsync` had exactly one caller in the whole product: the admin MFA-reset
   endpoint. Neither `DELETE /api/v1/profile/{userId}` nor SCIM `DELETE /scim/v2/Users/{id}` touched the MFA
   store, so a deleted account's TOTP secret, recovery-code hashes, WebAuthn public keys and WebAuthn
   credential-id index rows all survived, keyed on the user id.
 
   The id comes back two ways: the admin create endpoint accepts a caller-supplied `UserId`, and the SCIM create
   path reclaimed a tombstoned row. The reclaim asserted in a comment that "nothing the deleted account held
-  survives" — false for the second factor, and `POST /api/auth/mfa/passwordless/complete` never consults
+  survives": false for the second factor, and `POST /api/auth/mfa/passwordless/complete` never consults
   `MfaEnabled`: it resolves the account from the credential. So an attacker who had enrolled a passkey kept a
-  way in across the exact remedy an incident responder reaches for — delete the account, re-create it — with no
+  way in across the exact remedy an incident responder reaches for (delete the account, re-create it) with no
   password, no email and no session. `AccountArtefactPurge` now removes credentials and group memberships on
   every delete path, and again on reclaim for rows tombstoned by an earlier version.
 
@@ -1807,23 +1877,23 @@ reverting it and watching a specific test fail.
   removed the departing user from any group, and `RetainOwnedMembersAsync` deliberately *keeps* tombstoned
   members because they still carry the owning client id. An offboarded address re-issued months later to a
   different person therefore inherited every group the departed employee still occupied, including role-mapped
-  ones — so the new user silently received roles no administrator granted, with no record of the assignment.
+  ones, so the new user silently received roles no administrator granted, with no record of the assignment.
 
 - **A re-provisioned address inherited the departed user's OIDC `sub` (high).** The reclaim kept the tombstoned
   row's `id`, which RFC 7643 §3.1 requires to be "a stable, non-reassignable identifier" and which this server
-  uses as the subject. At every relying party the new person *was* the old one — their documents, their
-  permissions, their audit identity — with nothing in the IdP recording that the human had changed. A reclaim
+  uses as the subject. At every relying party the new person *was* the old one (their documents, their
+  permissions, their audit identity) with nothing in the IdP recording that the human had changed. A reclaim
   now deletes the tombstone (which releases the email-index entry it owned) and creates a fresh resource with a
   new id. Nothing asserted the reuse, which is why it survived: the existing re-creation test checked only that
   the create succeeded.
 
 - **One wrong password permanently destroyed a DynamoDB account's password hash (high).** `ReadUserAsync`
   treated the presence of the single `failedCount` marker as proof that the entire promoted login-state group
-  was authoritative, including `pwd` — and both login stamps CREATE `failedCount` on a row that lacks it while
+  was authoritative, including `pwd`, and both login stamps CREATE `failedCount` on a row that lacks it while
   writing no `pwd`: the failed-login stamp materialises the group deliberately, and the success stamp carries
   `pwd` only on a rehash. So one login attempt published `PasswordHash = null`, and the login path forces a
   failed verify whenever the stored hash is empty. The account could never log in again, and forgot-password
-  issues no reset for an account with no local password, so self-service recovery was closed as well —
+  issues no reset for an account with no local password, so self-service recovery was closed as well:
   unauthenticated, one request per victim, permanent. The user's own *correct* password was equally sufficient
   to trigger it.
 
@@ -1833,7 +1903,7 @@ reverting it and watching a specific test fail.
   also **repairs** rows already damaged rather than only preventing new damage, and the failed-login stamp
   completes the group instead of half-writing it.
 
-### Breaking — `IClientStore` gains `TryUpgradeSecretHashAsync`
+### Breaking: `IClientStore` gains `TryUpgradeSecretHashAsync`
 
 Not source-breaking: the default returns `false`, so an external implementer keeps compiling and simply leaves
 legacy client-secret hashes on their legacy format (which `LegacySecretHashWarning` already reports).
@@ -1841,35 +1911,35 @@ legacy client-secret hashes on their legacy format (which `LegacySecretHashWarni
 It rewrites ONE entry of `ClientSecretHashes` to a stronger format, and only while the stored entry is still the
 one that was verified and nothing else about the record has changed. The upgrade previously re-read the client,
 mutated the hash list, and wrote the WHOLE record back with an unconditional upsert, comparing only the entry at
-`index` as it stood at the re-read — so any administrative write landing between that read and the write was
+`index` as it stood at the re-read, so any administrative write landing between that read and the write was
 reverted wholesale: the hash list (undoing a secret rotation, so a rotated-out secret kept working), `Enabled`
 (re-enabling a client an admin had just disabled), scopes, redirect URIs. The losing write was always the
 administrator's, and the attacker did not need to observe the rotation: the throttle permits 30 authentications
 a minute per client, which is enough to hold the window open.
 
-Implement it with your backend's conditional primitive and return `false` on a lost race rather than retrying —
+Implement it with your backend's conditional primitive and return `false` on a lost race rather than retrying:
 authentication has already succeeded, so a skipped upgrade costs nothing but a repeat attempt next call. Azure
 Table implements it with ETag CAS over the whole row. The SQL and DynamoDB client stores do **not**: their rows
 carry no version attribute, so they stay on the default and leave legacy hashes in place. That is strictly safer
 than the unconditional write they did before, but it is not parity.
 
-### Security — the client-secret verification path
+### Security: the client-secret verification path
 
 - **A correct credential answered HTTP 500 on any tenant-scoped host (high).**
   `PasswordHasherClientSecretVerifier` is registered `TryAddSingleton`, so the provider it holds is the ROOT
-  provider — and `GetService<IClientStore>()` against the root throws for a store registered `AddScoped`, which
+  provider, and `GetService<IClientStore>()` against the root throws for a store registered `AddScoped`, which
   is how every multi-tenant host registers it. The resolution sat *outside* the `try`, so the exception escaped
   `VerifyAsync` after the presented secret had already verified: correct `client_credentials` answered 500
   instead of a token, on `/connect/token`, `/par`, `/introspect`, `/revocation` and `/deviceauthorization`. It
   was permanent (the upgrade could never complete, so every retry repeated it) and triggered by the legitimate
-  credential rather than by an attacker. This is the defect `LegacySecretHashWarning` had — it stopped
-  tenant-scoped hosts from starting until it resolved inside a scope — reintroduced one file over. Nothing in
+  credential rather than by an attacker. This is the defect `LegacySecretHashWarning` had (it stopped
+  tenant-scoped hosts from starting until it resolved inside a scope) reintroduced one file over. Nothing in
   the suite registered the store as scoped, which is why it shipped; now something does.
 
 - **An unbounded bcrypt cost factor was an anonymous, uncancellable CPU burn (high).** Every other
   imported-cost lever was bounded and bcrypt had none: recognition was a four-character prefix test, so
   `$2a$31$…` passed the admin API's hash validator and reached `BCrypt.Verify`. Cost is a base-2 exponent and
-  the library accepts up to 31 — 2^31 key expansions, pinning one thread-pool thread per request for days. Any
+  the library accepts up to 31: 2^31 key expansions, pinning one thread-pool thread per request for days. Any
   unauthenticated caller who knows the `client_id` triggers it; a few dozen requests take the provider down for
   every tenant. Bounded at cost 15 now, checked at the write *and* at verification, so a hash stored before the
   bound existed fails closed instead of burning the CPU.
@@ -1877,7 +1947,7 @@ than the unconditional write they did before, but it is not parity.
 - **A malformed bcrypt hash was a permanent 500 for that principal (medium).** Both verifiers caught only
   `SaltParseException`, and against the pinned library `$2a$1` and `$2b$` throw `IndexOutOfRangeException`,
   `$2a$xy$…` throws `FormatException`, and `$2a$11$short` throws `ArgumentOutOfRangeException`. None was caught,
-  so every authentication for that client — including its own legitimate one — returned 500 forever, with a
+  so every authentication for that client, including its own legitimate one, returned 500 forever, with a
   stack trace to an anonymous caller wherever developer exception pages are on. The validator's own doc comment
   described fixing exactly this for the empty-string case while the bcrypt-shaped variants passed. Now
   structurally validated, and the catch is broad because a stored hash that cannot be parsed must never fault a
@@ -1891,34 +1961,34 @@ than the unconditional write they did before, but it is not parity.
   was not, while the verifier derives every entry on each failed authentication with no early exit. Work per
   request is `count × per-hash cost` with `count` caller-chosen: 1,000 entries at the permitted 1,000,000
   PBKDF2 iterations is minutes of thread-pinning CPU per anonymous token request, 30 of which are allowed per
-  minute per client. Capped at 8 — well past what rotation needs.
+  minute per client. Capped at 8: well past what rotation needs.
 
 - **`Auth:Pbkdf2Iterations` above 1,000,000 silently wrote unverifiable hashes (high).** The write path was
   uncapped and the verify path capped, at different values: `VerifyPbkdf2V2` refuses a recorded count above
   1,000,000, correctly, since that value drives an uncancellable derivation reachable from an anonymous
-  request — but the bound applied to this server's own fresh hashes too. Only a floor was validated at startup,
+  request, but the bound applied to this server's own fresh hashes too. Only a floor was validated at startup,
   so `Auth__Pbkdf2Iterations=2000000` (or a fat-fingered `6000000` for the documented 600,000) came up healthy
   and then wrote hashes it rejects on read: those users could never log in and each attempt incremented the
   lockout counter, and every DCR-issued and seeded client secret became permanently `invalid_client`. Fixing
-  the configuration afterwards does not repair it — the cost lives in each stored blob. A validated ceiling now
+  the configuration afterwards does not repair it: the cost lives in each stored blob. A validated ceiling now
   makes it a refusal to start, naming the value.
 
-### Security — the retention path: what a rollup may read, what it must sign, what a scoped restore may delete
+### Security: the retention path: what a rollup may read, what it must sign, what a scoped restore may delete
 
-Three defects with one shape — a check that existed on one path and not on its sibling.
+Three defects with one shape: a check that existed on one path and not on its sibling.
 
 - **A scoped restore executed other envs' deletes (high).** `RestoreService` learned to scope the data apply
   to `CleanEnvPrefix`; `ApplyTombstonesAsync` was left unscoped. `BackupTombstonesAsync` filters the change log
-  on `Timestamp` alone — `BackupOptions` has no env filter — so on a shared sandbox table set the
+  on `Timestamp` alone (`BackupOptions` has no env filter) so on a shared sandbox table set the
   `_tombstones` file holds every env's deletes, with the `{env}|` prefix intact in the `OrigPK` column it
   writes as `PartitionKey`. An operator restoring `sandbox-1` by the documented procedure therefore deleted
   rows from `sandbox-2..N`, and unlike `MergeService.IsDeleted` this path has no recreate or timestamp guard,
-  so rows a sibling created *after* the backup went too — unrecoverable, because they are not in the archive
+  so rows a sibling created *after* the backup went too: unrecoverable, because they are not in the archive
   being restored. Deleting a revocation record also resurrects a revoked token. Now scoped, with the declined
   deletes reported as `RestoreResult.TombstonesSkippedOtherEnv` rather than silently executed.
 
 - **The rollup wrote an unsigned manifest (high).** `MergeToTargetAsync` had no manifest key and never called
-  `ManifestAuthentication.Sign`, so the retained copy was the one that could not be authenticated — while
+  `ManifestAuthentication.Sign`, so the retained copy was the one that could not be authenticated, while
   `RollupAndCleanAsync` deletes the signed full and incrementals. The operator's only route back was
   `AllowUnauthenticatedManifest`, which downgrades the archive to hashes sitting in a plain JSON file beside
   the data on the same target: exactly the circularity `ManifestMac` exists to remove. Every rollup test in the
@@ -1928,35 +1998,35 @@ Three defects with one shape — a check that existed on one path and not on its
   its output fresh, so the new manifest vouched for whatever the merge happened to find. Archives are plaintext
   JSONL by default: an attacker with write access edits `Users.jsonl` in yesterday's full, leaves the manifest
   alone, and the next scheduled rollup writes the tampered bytes into a new snapshot with correct hashes over
-  them — then deletes the original. Verification is now unconditional wherever the input's own manifest records
+  them, then deletes the original. Verification is now unconditional wherever the input's own manifest records
   a hash, and needs no key, so the cloud host (which signs `_manifest.sig` with Vault Transit and recomputes
   the hashes from whatever is on the target before signing **those**) is covered with no caller change. A file
   the manifest lists but the store no longer holds is an error rather than an empty read. `VerifiedRead` is now
   shared by both readers, because a check only one of them performs is the defect this class keeps producing.
 
 - **Three tables were missing from the backup set (high).** `BackupDefaults.Tables` describes itself as "all
-  Authagonal data tables" and omitted `AgentProfiles`, `UserRoles` and `UpstreamRefreshTokens` — the last
+  Authagonal data tables" and omitted `AgentProfiles`, `UserRoles` and `UpstreamRefreshTokens`: the last
   already named in `SecretBearingTables` as though it were in the archive, which is how the omission hid.
   None of the absences was fail-safe. `AgentProfiles` holds the agent's authority ceiling, mode, delegation
   depth and high-risk default, and every gate that enforces them lives inside `if (agentProfile is not null)`;
   so after any rebuild-from-backup the agent client authenticated with its restored secret and its exchange
-  took the unprofiled path — no consent requirement, no ceiling intersection, no approval parking, no depth
+  took the unprofiled path: no consent requirement, no ceiling intersection, no approval parking, no depth
   budget, no `act` chain for audit to see. Closed as a class: a convention test compares the set against the
   tables the provider actually creates, and every exclusion is named with its reason.
 
-### Security — federated account squatting, closed at the step that actually mattered
+### Security: federated account squatting, closed at the step that actually mattered
 
 - **Adoption inherited the squatter's login binding (high).** Both hosts gated JIT and adoption on whether the
   connection owns the email's domain. That is a real check and it never fires during the attack:
 
   1. The attacker configures a connection they operate, `AllowedDomains` left empty so nothing restricts the
      address it may assert, JIT on.
-  2. They federate once asserting `ceo@acme.com` with `email_verified: true` — a claim chosen by whoever runs
+  2. They federate once asserting `ceo@acme.com` with `email_verified: true`: a claim chosen by whoever runs
      the upstream, which here is them. The unverified-email gate passes. The domain-routing gate passes too,
      because Acme has not onboarded and the domain has no row. An account is minted bearing that address with
      `EmailConfirmed = true` and the attacker's `(provider, subject)` binding attached.
   3. Acme onboards. Their connection genuinely *is* the authority for `acme.com`, so on the real user's first
-     login every gate agrees and the account is adopted — carrying the squatter's binding with it. The
+     login every gate agrees and the account is adopted, carrying the squatter's binding with it. The
      attacker signs in through their own connection and is the CEO.
 
   The unasked question was never "does this connection own the domain" but "who else can already sign in to
@@ -1965,7 +2035,7 @@ Three defects with one shape — a check that existed on one path and not on its
   connection bindings instead of inheriting them; a connection that is not the authority is refused rather
   than allowed to evict a rival's binding.
 
-  Eviction rather than refusal, deliberately — refusing would hand an attacker a permanent denial of service
+  Eviction rather than refusal, deliberately: refusing would hand an attacker a permanent denial of service
   over any address they squatted first. Social logins (`google`, `github`, …) are never evicted: they are not
   connection-scoped, nobody can make Google assert an address they do not control, and removing a user's own
   social login because their employer later onboarded SSO would be a self-inflicted lockout.
@@ -1973,7 +2043,7 @@ Three defects with one shape — a check that existed on one path and not on its
   Comments on both hosts asserted this was already closed. They have been corrected, since a comment claiming
   a gate closes an attack it cannot see is how this survived two rounds of review.
 
-### Security — an authority that permitted nothing minted a token that permitted everything
+### Security: an authority that permitted nothing minted a token that permitted everything
 
 - **`authorization_details: []` evaluated as UNRESTRICTED at every resource server (critical).** Five links,
   each defensible alone:
@@ -1982,58 +2052,58 @@ Three defects with one shape — a check that existed on one path and not on its
      mismatch to `Nothing`.
   2. `AuthoritySet.MergeSameType` stored that met value and left `Actions` populated, so `Intersect` kept the
      grant. It already dropped a grant with disjoint `locations`; the constraint case was missed.
-  3. Every emptiness guard on the mint path counted `Grants`, which still held that grant — and
+  3. Every emptiness guard on the mint path counted `Grants`, which still held that grant, and
      `PolicyFor` reported its actions grantable, because it does not consult constraints at all.
   4. `AuthorityJson.ToNode` then dropped the grant, correctly: emitting a positive grant carrying a
      non-standard denial marker reads as *permitted* to any spec-conforming resource server. Dropping the last
      grant leaves `[]`, and `!string.IsNullOrEmpty("[]")` is true, so the claim was written.
   5. A JWT-to-ClaimsPrincipal conversion flattens an array claim into one claim per element, so an empty array
-     yields **zero** claims — and `AuthorityEvaluator.FromPrincipal` reads zero claims as `Unrestricted`,
+     yields **zero** claims, and `AuthorityEvaluator.FromPrincipal` reads zero claims as `Unrestricted`,
      deliberately, so that coarse scope-based tokens keep working.
 
   So the narrowest possible grant produced the broadest possible token. Link 5 is not a bug and has not
   changed; it is why `[]` must never be minted, and why omitting the claim instead would be no safer.
 
-  Reachable with one request — an agent naming `"max_amount": "unlimited"` against a ceiling that caps it
+  Reachable with one request: an agent naming `"max_amount": "unlimited"` against a ceiling that caps it
   numerically was enough. The sharpest path needs no attacker input at all: in unattended
-  `client_credentials` mode `ask` degrades to deny, so an agent whose ceiling is *entirely* approval-gated —
-  the most careful configuration an admin can write — had every grant dropped and received an unrestricted
+  `client_credentials` mode `ask` degrades to deny, so an agent whose ceiling is *entirely* approval-gated
+  (the most careful configuration an admin can write) had every grant dropped and received an unrestricted
   token from its own valid credentials. That path had no emptiness guard of any kind.
 
   Fixed in three layers, each independently sufficient for the paths it covers: a constraint that meets to
   nothing now drops the grant in `Intersect` exactly as disjoint locations do (restoring the never-widen
-  invariant for in-process consumers too); both mint paths ask `AuthorityJson.SerializesToNothing` — the
-  question put to the **wire form**, since serialization is where the authority is lost — and refuse with
+  invariant for in-process consumers too); both mint paths ask `AuthorityJson.SerializesToNothing` (the
+  question put to the **wire form**, since serialization is where the authority is lost) and refuse with
   `invalid_authorization_details` / `unauthorized_client`; and the single mint choke point throws rather than
   sign an empty array, for the next caller that forgets.
 
-### Fixed — the admin API was unreachable, and admin-secret rotation was a silent no-op
+### Fixed: the admin API was unreachable, and admin-secret rotation was a silent no-op
 
 - **Configuration may seed the administrative scope again.** Reserving `authagonal-admin` against *every*
-  write path — including the two config seeders — locked deployments out of their own admin API.
+  write path (including the two config seeders) locked deployments out of their own admin API.
   `docs/admin-api.md` ("Bootstrapping the first admin token") documents a config-seeded
   `client_credentials` client carrying that scope as the only way to mint an admin token, and the
   `IdentityAdmin` policy admits nothing else; with the seeders refusing that descriptor, a fresh install
   could never reach `/api/v1/*` at all.
 
   The second consequence was worse than the first, because it looked like success. The seeders log at
-  `Error` and **skip** the descriptor, so an operator rotating a suspected-compromised admin secret — "a
-  config change + restart", per that same page — wrote no new hash, and the credential they believed they
+  `Error` and **skip** the descriptor, so an operator rotating a suspected-compromised admin secret ("a
+  config change + restart", per that same page) wrote no new hash, and the credential they believed they
   had revoked went on authenticating indefinitely. Every signal they could check agreed the rotation had
   worked, including the admin API still answering, because it was still answering to the old secret.
 
   The reservation is real and unchanged on every path a *caller* can reach: the admin API, dynamic client
   registration and `POST /api/v1/token` all still answer `403 forbidden_scope`. Configuration is the trust
-  root rather than a caller — whoever writes the `Clients:` section can already set `AdminApi:Scope`,
+  root rather than a caller: whoever writes the `Clients:` section can already set `AdminApi:Scope`,
   replace the signing keys or repoint the store, so refusing it there bought nothing. A scope entry
   containing whitespace is still refused everywhere, on its own merit: one stored entry that becomes two
   scopes on the wire means the client does not say what it appears to say.
 
-  Two tests asserted the lockout as intended behaviour, which is why it shipped — and the only coverage of
+  Two tests asserted the lockout as intended behaviour, which is why it shipped, and the only coverage of
   the admin surface writes its client straight into `IClientStore`, bypassing the seeder, so the documented
   bootstrap was never exercised end to end. It is now, through a real host.
 
-### Security — audit remainder
+### Security: audit remainder
 
 An independent audit of the info-severity fixes found ten of twenty-eight only partially closed. Two
 (`azp` multi-audience, the login timing oracle) were closed immediately; these are the rest, plus one
@@ -2042,11 +2112,11 @@ adjacent defect the audit found while checking a finding it had already passed.
 - **SAML Single Logout was a forced-logout gadget.** The NameID binding only compared when a NameID was
   present, so a `LogoutRequest` carrying none skipped the comparison entirely and signed the browser out.
   Unsigned requests are accepted when the session belongs to the connection, `/saml/{id}/slo` is an
-  anonymous GET, and every request carries a fresh ID so the replay cache never fires — which made
+  anonymous GET, and every request carries a fresh ID so the replay cache never fires, which made
   `<img src="…/slo?SAMLRequest=…">` on any page a repeatable logout of every visitor on that connection.
   An absent or encrypted identifier is now a refusal (Core §3.7.1 makes it mandatory), the subject
-  comparison is unconditional, and a session the connection did not establish — including any local
-  password session, which has no `saml_name_id` — is no longer that IdP's to end. `NotOnOrAfter` is now
+  comparison is unconditional, and a session the connection did not establish (including any local
+  password session, which has no `saml_name_id`) is no longer that IdP's to end. `NotOnOrAfter` is now
   honoured when the IdP states one, and SP-initiated logout state no longer shares a key namespace with
   pending AuthnRequest IDs.
 
@@ -2054,13 +2124,13 @@ adjacent defect the audit found while checking a finding it had already passed.
   `SignAuthnRequests` alone, while the login path signs when there is an SP key AND (the connection forces
   it OR the IdP's own metadata declares `WantAuthnRequestsSigned`). A connection with `SignAuthnRequests`
   unset, talking to an IdP that wants signed requests, signed every AuthnRequest while publishing
-  `AuthnRequestsSigned="false"` — to the administrator configuring against that document. Both logout legs
+  `AuthnRequestsSigned="false"`, to the administrator configuring against that document. Both logout legs
   also silently sent unsigned when the SP private key would not load; they now refuse, as the login path
   already did.
 
 - **`bff-lib` pinned no signature algorithms.** The .NET BFF pinned its inbound `id_token` and logout-token
   algorithms; the TypeScript package did not, on either call. jose refuses to resolve a key for `HS*` or
-  `none`, so this was a guarantee borrowed from a dependency rather than held by this code — the same
+  `none`, so this was a guarantee borrowed from a dependency rather than held by this code: the same
   reasoning the .NET pin was added under. Both now pin the identical asymmetric set. The .NET logout
   consumer also now sets `RequireSignedTokens` and `ValidateIssuerSigningKey` explicitly, which the
   callback set and it inherited weaker defaults for.
@@ -2072,7 +2142,7 @@ adjacent defect the audit found while checking a finding it had already passed.
   other correctness-critical read in that provider. The compensating delete is audit-logged.
 
 - **`RestoreMode.Clean` scoped the wipe but not the import.** `CleanEnvPrefix` bounded which rows were
-  deleted and then applied the data file wholesale — and `BackupOptions` has no env filter, so a backup
+  deleted and then applied the data file wholesale, and `BackupOptions` has no env filter, so a backup
   from a shared sandbox table set contains every env's rows and restoring one env wrote all its siblings
   back in. The apply is now scoped to the same prefix and reports what it skipped. Clean with no prefix
   refuses rather than printing a warning to `Console.Error` that no host process surfaces;
@@ -2080,7 +2150,7 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **The repeated-parameter check never saw the query string on the PAR leg.** Once a `request_uri` is
   present the parameter source becomes the pushed payload, so `?request_uri=A&request_uri=B` resolved
-  first-wins, unrefused and unlogged — while the proxy, WAF or log pipeline in front of the server parsed
+  first-wins, unrefused and unlogged, while the proxy, WAF or log pipeline in front of the server parsed
   the same query its own way. The query is now scanned on both legs, in both hosts.
 
 - **The security stamp was compared with an ordinal compare on a third path.**
@@ -2089,7 +2159,7 @@ adjacent defect the audit found while checking a finding it had already passed.
   post-dated that sweep. A convention test now covers the class rather than the instance, since no
   behavioural test can distinguish a constant-time compare from a short-circuiting one.
 
-- **The Server host's userinfo never required the `openid` scope** — the defect its Protocol-host twin was
+- **The Server host's userinfo never required the `openid` scope**: the defect its Protocol-host twin was
   fixed for. The comment above the validation parameters asserted the requirement; nothing enforced it, so
   a pure-OAuth access token read the endpoint and got `sub` back. Per-claim scope gates kept the residue to
   subject disclosure rather than PII.
@@ -2098,8 +2168,8 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **Every outbound SSRF guard was a text check, and a hostname is not text the attacker has to be honest
   about.** `logout.attacker.test` passes every literal-address and internal-suffix rule and then answers
-  with `169.254.169.254`. The guards ran where a URL was accepted — an admin write, a dynamic client
-  registration — and the name was resolved later, by something else, on behalf of whoever owns it.
+  with `169.254.169.254`. The guards ran where a URL was accepted (an admin write, a dynamic client
+  registration) and the name was resolved later, by something else, on behalf of whoever owns it.
 
   Resolving at the write would not have fixed it, in two directions at once: an attacker can answer
   truthfully at registration and differently at delivery, and pinning what was resolved then goes stale for
@@ -2107,8 +2177,8 @@ adjacent defect the audit found while checking a finding it had already passed.
   would be POSTing logout tokens carrying `sub` and `sid` to whoever inherited the address.
 
   So the check now runs at the socket, per connection: resolve, refuse **every** returned address that is
-  internal — not merely the first, because a name answering with one public and one private address is the
-  rebinding attack compressed into a single response — and then connect to an address that was actually
+  internal (not merely the first, because a name answering with one public and one private address is the
+  rebinding attack compressed into a single response) and then connect to an address that was actually
   checked rather than handing the name back to the socket, which would reopen the window between the two
   lookups. Because a redirect is a new connection, it re-runs on every hop for free.
 
@@ -2118,42 +2188,42 @@ adjacent defect the audit found while checking a finding it had already passed.
   by tests: it belongs on a target a *registrant* chose and needs an operator escape hatch on a target the
   *operator* chose.
 
-- **The origin guard covered four routes, not the whole interactive surface — and this file said otherwise.**
+- **The origin guard covered four routes, not the whole interactive surface, and this file said otherwise.**
   The device-grant entry above originally asserted the device endpoints were the only interactive POSTs
   missing `InteractiveOriginGuard`. A diff-scoped review pass found that was false. Also unguarded, and all
-  cookie-authenticated with antiforgery disabled: **`POST /consent`** — the primary OAuth consent grant, which
-  writes the grant *and* the offered-scope set that suppresses future prompts — `DELETE /consent/grants/{id}`,
+  cookie-authenticated with antiforgery disabled: **`POST /consent`** (the primary OAuth consent grant, which
+  writes the grant *and* the offered-scope set that suppresses future prompts), `DELETE /consent/grants/{id}`,
   `DELETE /consent/agents/{id}`, `POST /api/auth/logout`, `PATCH /api/auth/profile`, both session-revocation
   routes, and the entire `/api/auth/mfa/*` setup group.
 
   The sharpest is `POST /api/auth/mfa/recovery/generate`. It binds **no request body**, so a
   `fetch(url, {method:'POST', credentials:'include'})` sends no `Content-Type` and is a *CORS-simple* request:
-  the browser issues no preflight and the request **executes whatever the CORS policy says** — only the
+  the browser issues no preflight and the request **executes whatever the CORS policy says**: only the
   response is withheld. It deletes the victim's recovery codes and issues ten new ones. Destroying the
   recovery path is the damage even unread; with a credentialed CORS grant the attacker reads the codes, and
   each satisfies `/api/auth/mfa/verify`.
 
   The guard is now an endpoint filter (`RequireOwnOrigin`) applied to groups rather than a call to remember,
-  and a convention test fails the build on any cookie-authenticated state-changing route without it — with
+  and a convention test fails the build on any cookie-authenticated state-changing route without it, with
   anonymous and client-authenticated routes listed explicitly, and reasons. `DELETE /consent/grants/{id}` was
   confirmed live before the fix: the cross-origin DELETE returned `204 No Content`.
 
 - **`AllowedCorsOrigins` granted a credentialed cross-origin policy on every path, and the shipped image
   seeded it.** Client-registered origins were correctly scoped to `/connect/` and `/.well-known/`; the
-  operator's list was returned verbatim for every path, with `AllowCredentials` — so the exact sink that
+  operator's list was returned verbatim for every path, with `AllowCredentials`, so the exact sink that
   scoping exists to protect, `POST /api/auth/mfa/recovery/generate` returning plaintext recovery codes, stayed
   readable by any listed origin. And `src/Authagonal.Server/appsettings.json` shipped
   `"AllowedCorsOrigins": ["http://localhost:3000"]`, which `.dockerignore` re-admits into the published
-  image — so a deployment that never set the key granted a credentialed origin to anything the victim's
+  image, so a deployment that never set the key granted a credentialed origin to anything the victim's
   browser reached on port 3000.
 
   `AllowCredentials` is now granted per path and never on `/api/auth/`, `/api/v1/`, `/scim/`, `/consent` or
   `/approvals`; those surfaces are first-party and need no CORS grant. The shipped default is empty, with the
   localhost origin moved to `appsettings.Development.json`, which is excluded from the image.
 
-- **#205 — the highest-impact admin writes left no audit record.** Four groups produced no row at all: MFA
+- **#205: the highest-impact admin writes left no audit record.** Four groups produced no row at all: MFA
   reset and credential removal (stripping a second factor is the first thing an attacker with an admin
-  credential does), `POST /api/v1/token` (which mints a token AS another user — the strongest impersonation
+  credential does), `POST /api/v1/token` (which mints a token AS another user; the strongest impersonation
   primitive in the product, on a subject who never agreed to it), nine writes on the user admin endpoints
   including set-password, unlock, delete, confirm-email and identity linking, and the provisioning "test this
   app" probe (which makes the server send a request carrying that app's API key and returns the response body
@@ -2161,20 +2231,20 @@ adjacent defect the audit found while checking a finding it had already passed.
   it survives, nothing indexes it by subject, and there is nowhere to query. All now record an attributable
   row, and a convention test fails the build on the next admin write that does not.
 
-- **#192 — a `workflow_dispatch` free-text input was interpolated into a shell script.**
+- **#192: a `workflow_dispatch` free-text input was interpolated into a shell script.**
   `rebuild-images.yml` did `ref="${{ inputs.ref }}"`, which substitutes before bash parses, so a value like
   `v1.0.0"; curl … | sh; "` would run on a runner holding the registry credentials. It now travels through the
   environment. The sibling workflows had been fixed; this one was missed. Every workflow was swept for the
   same shape.
 
-- **#288 — the load-test harness defaulted to a literal client secret and a live host.** `tests/load/helpers.js`
+- **#288: the load-test harness defaulted to a literal client secret and a live host.** `tests/load/helpers.js`
   fell back to `"load-test-secret"` and to the public demo deployment's URL, so an unparameterised run pointed
   a load generator at a real service and authenticated to it with a credential published in a public
   repository. The secret is now required with no default, and the base URL defaults to localhost.
 
 - **The Server host's `Clients:*:Audiences` seed setting is new, and both seeders now apply one policy.**
   There are two seeder classes because `ProtocolSeedService` ships in `Authagonal.Protocol`, which is embedded
-  without `Authagonal.Server` — so the classes stay two and the rule became one (`ClientSeedPolicy`). Both now
+  without `Authagonal.Server`, so the classes stay two and the rule became one (`ClientSeedPolicy`). Both now
   refuse the administrative scope, a scope entry that is not a single token, and an audience list that is not
   within the documented caps and absolute; both mark a client as having declared its audiences when it names
   any. Previously the audience half existed in one seeder and not the other, and the Server host's had no
@@ -2182,12 +2252,12 @@ adjacent defect the audit found while checking a finding it had already passed.
   non-absolute value into a signed token's `aud`.
 
   A malformed audiences list is now logged at `Error` and that client is SKIPPED, rather than throwing and
-  taking the host down — matching what both seeders already did for the two scope rules.
+  taking the host down, matching what both seeders already did for the two scope rules.
 
 - **`/connect/userinfo` answered the same request two different ways depending on which host served it.** A
   valid access token without the `openid` scope got `403 insufficient_scope` from `Authagonal.Protocol` and
   `401 invalid_token` from `Authagonal.Server`, because the Server host resolved the subject and looked up the
-  user BEFORE checking the scope — and a `client_credentials` token has no subject at all. `invalid_token`
+  user BEFORE checking the scope, and a `client_credentials` token has no subject at all. `invalid_token`
   tells a client its token is bad, so a conforming client refreshes, receives a token with the same scopes,
   and loops. The scope check now runs first on both, which also stops a user-store read for a token that was
   never entitled to the endpoint.
@@ -2201,24 +2271,24 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **`LegacySecretHashWarning` prevented any multi-tenant host from starting.** It took `IClientStore` as a
   constructor dependency, and a hosted service is constructed from the ROOT provider during
-  `Host.StartAsync` — so on a host whose stores are resolved per tenant-scoped request the construction threw
+  `Host.StartAsync`, so on a host whose stores are resolved per tenant-scoped request the construction threw
   and the process never came up. Its own try/catch could not help, because the failure happened before
   `StartAsync` was entered. It now resolves the store inside a scope, the shape `PlaintextSigningKeyWarning`
   and `UseAuthagonal`'s email-sender diagnostic already used, so an unavailable store costs the diagnostic
   and nothing else.
 
 - **The cluster rate-limit sweep could not keep up with what it was cleaning, and gave up at the first
-  throttle.** Only 404 and 412 were handled per row, so any other `RequestFailedException` — including the 429
-  the very flood being swept produces on that table — escaped and abandoned the whole pass until the next
+  throttle.** Only 404 and 412 were handled per row, so any other `RequestFailedException`, including the 429
+  the very flood being swept produces on that table, escaped and abandoned the whole pass until the next
   tick: the one condition under which retention matters stopped the sweep. Deletes were also issued one round
   trip at a time against a table an anonymous endpoint fills at request rate. Now the expiry predicate is
   applied server-side, deletes run 16 at a time, a failing row is counted and skipped, and the interval is a
-  minute rather than five. A row carrying no `ExpiresAt` is no longer collected — the store writes that
+  minute rather than five. A row carrying no `ExpiresAt` is no longer collected: the store writes that
   property on every path, so no writer produces one.
 
 - **A rate-limit bucket key built from caller input could fail forever, and the fail-open needed no outage
   to reach.** Keys reached the backend verbatim as a partition key, and Azure Table forbids `/ \ # ?` and
-  control characters there — so `POST /saml/a%23b/acs` produced a key the store rejected with 400 on every
+  control characters there, so `POST /saml/a%23b/acs` produced a key the store rejected with 400 on every
   attempt, permanently, each one logged at Error and allowed through. Keys are now sanitised, with a hash of
   the original appended whenever the rewrite changed anything so two sources cannot be folded into one budget.
 
@@ -2230,18 +2300,18 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **A rate-limit budget could silently reset itself.** Bucket retention was two windows, which for the
   five-second poll limiters is five seconds of tolerance for clock skew between the sweeping leader and the
-  incrementing node — ordinary drift for pods without tight NTP. The leader collected live buckets and the
+  incrementing node: ordinary drift for pods without tight NTP. The leader collected live buckets and the
   budget restarted from zero with no error and no log line. Retention now has a ten-minute floor whatever the
   window, and the Azure store logs a warning if it ever has to recreate a swept-away bucket anyway.
 
 - **Seeded clients could not declare their audiences, and the Server host's seeder had no audiences field at
   all.** `ResourceAudiencePolicy` reads a client that has declared none as the legacy "may name any absolute
-  URI" case, and configuration was the one write path that could neither set the flag nor run the validator —
+  URI" case, and configuration was the one write path that could neither set the flag nor run the validator,
   so a config-seeded client kept the permissive reading with no way to tighten it, and operator config was the
   only route left for putting an unbounded or non-absolute value into a signed token's `aud`. Both seeders now
   validate the list and mark it declared, and `Clients:*:Audiences` exists. The protocol seeder also no longer
   overwrites a stored list with an empty one, which used to revert an admin PUT on every restart while the
-  monotonic declared-flag survived — leaving a client that declares audiences and has none, able to name no
+  monotonic declared-flag survived, leaving a client that declares audiences and has none, able to name no
   resource at all.
 
 - **A cancelled outbound connect was reported as a connection failure**, retried against every remaining
@@ -2256,14 +2326,14 @@ adjacent defect the audit found while checking a finding it had already passed.
   fixed literal today; the escaping now covers both cases, so the next one can rely on it.
 
 - **A failed device denial left the device polling until expiry.** The `user_code` is consumed before the
-  denial is recorded — deliberately, so a late deny cannot erase a consumed marker — but a failure between the
+  denial is recorded (deliberately, so a late deny cannot erase a consumed marker) but a failure between the
   two destroyed the code without recording anything, and nobody could retry either the deny or the approve.
   The device then polled `authorization_pending` for its full remaining lifetime, which is the outcome the
   endpoint exists to prevent. A failed denial now consumes the device code instead, so the device gets a
   terminal error.
 
 - **Two more sites in the confirm-email rebase.** The provisioning-rejection path still resolved its row
-  through `FindByEmailAsync` — the attacker-supplied half of the token, through the mutable email index — so
+  through `FindByEmailAsync` (the attacker-supplied half of the token, through the mutable email index) so
   if the address moved during the round-trip and another account came to own it, that OTHER user had their
   staged credential dropped and their security stamp rotated, signing out all their sessions. And
   `EmailConfirmed = true` was stamped onto whatever address the re-read row held, though the token proved only
@@ -2271,15 +2341,15 @@ adjacent defect the audit found while checking a finding it had already passed.
   `email_verified=true` for it. Both now use the stable key and refuse a mismatch.
 
 - **The socket SSRF guard omitted 100.64.0.0/10, 198.18.0.0/15 and IPv6 `fec0::/10`.** The resolved-address
-  check is the last line of defence — no URL check runs against a resolved address — so whatever it omits is
+  check is the last line of defence (no URL check runs against a resolved address) so whatever it omits is
   the bypass list. RFC 6598 shared address space is not exotic: `100.100.100.200` is the Alibaba Cloud
   metadata service, `100.64.0.0/10` is the pod/service CIDR on EKS clusters using secondary CIDRs, and it is
   the whole of Tailscale's range. A registrant-supplied `jwks_uri` or back-channel logout URI on a hostname
   resolving into any of those reached internal services. All three ranges are now refused.
 
 - **Every outbound call failed permanently on a host with IPv6 disabled.** The socket was constructed
-  *outside* the try block in the connect callback, so `socket(AF_INET6)` returning `EAFNOSUPPORT` — a host or
-  container booted with `ipv6.disable=1` — escaped the candidate loop instead of falling through to the next
+  *outside* the try block in the connect callback, so `socket(AF_INET6)` returning `EAFNOSUPPORT`, a host or
+  container booted with `ipv6.disable=1`, escaped the candidate loop instead of falling through to the next
   validated address. DNS still returns the AAAA record on such a host and RFC 6724 ordering puts it first, so
   every request to every dual-stack host died on the first candidate while a reachable A record sat next in
   the list. .NET's own connect path, which this callback replaces, falls through; this was a regression
@@ -2287,7 +2357,7 @@ adjacent defect the audit found while checking a finding it had already passed.
   retried against every remaining address.
 
 - **`TurnstileVerifier` ran on the framework default handler.** 100-second timeout and up to 50 automatic
-  redirects, on a client reached from anonymous `POST /login` and `/register` that fails closed — so a stalled
+  redirects, on a client reached from anonymous `POST /login` and `/register` that fails closed, so a stalled
   connection to Cloudflare held a request slot for 100 seconds *and* rejected the login, which is exactly the
   amplifier the 10-second timeouts elsewhere were added to remove. It is a *typed* client, registered through
   a different overload, which is how it escaped a hardening test that enumerated only the named ones. Now
@@ -2295,53 +2365,53 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **Token exchange kept its own copy of the resource rule, and the copy was the defective one.** Two in-code
   comments asserted all three sites read `ResourceAudiencePolicy`; grep found two. The exchange path still
-  used the bare `Uri.TryCreate(…, UriKind.Absolute)` check that the shared policy exists to replace — and on
+  used the bare `Uri.TryCreate(…, UriKind.Absolute)` check that the shared policy exists to replace, and on
   Unix that *succeeds* for a bare path, because the runtime infers a `file:` scheme. A client whose stored
   `Audiences` held a bare path (a row predating the policy, or one a config seeder wrote without it) could
   exchange with `resource=/admin` and receive a tenant-signed token whose `aud` was `/admin`. The RFC 8693
   `audience` list got no shape check at all, only membership. Both now go through the policy.
 
   Fixing that surfaced a second, pre-existing defect: `TokenGrantHandlers` derived the OAuth error *code* by
-  string-matching the exception message (`"Resource '"`), and the shared policy's message begins lowercase —
+  string-matching the exception message (`"Resource '"`), and the shared policy's message begins lowercase,
   so the `client_credentials` path had already been silently answering `invalid_grant` where RFC 8707
   requires `invalid_target`, with no test noticing. Both paths now throw a typed `ProtocolTokenException`, so
   the code no longer depends on prose.
 
-- **A slow rate-limit counter store took logins down.** `DurableRateLimiter`'s documented posture — a store
-  failure must not take authentication with it — only ever covered a store that *throws*. There was no
+- **A slow rate-limit counter store took logins down.** `DurableRateLimiter`'s documented posture (a store
+  failure must not take authentication with it) only ever covered a store that *throws*. There was no
   timeout, and the login handler makes two of these checks on the hot path, so multi-second store latency
   blocked every login for twice that while the fail-open never fired, because nothing had failed. The store
   call is now bounded at two seconds, and exceeding it takes the same fail-open path as an unreachable store.
 
 - **A deleted account could be resurrected by a confirmation in flight.** `ConfirmEmailAsync` re-reads the
-  row after its provisioning round-trip and previously fell back to `?? user` — the pre-round-trip instance —
+  row after its provisioning round-trip and previously fell back to `?? user`, the pre-round-trip instance,
   and `GetAsync` returns null only when the row is *gone*. So a delete landing during that round-trip (SCIM
   deprovision, admin delete, GDPR erasure) made the handler write the stale instance, and `UpdateAsync`
   CREATES the row when absent on all three persistent providers: the erased account came back with
-  `EmailConfirmed = true` and, on the claim path, the claimant's promoted password — no concurrency guard
+  `EmailConfirmed = true` and, on the claim path, the claimant's promoted password; no concurrency guard
   consulted, nothing logged. Erasing an account while its owner had a verification link open un-erased it.
   The handler now writes nothing and reports the link as no longer valid.
 
 - **A passwordless claim's staged profile was destroyed rather than applied.** The same rebase applied the
   claimed first/last name and custom attributes to the in-memory user before the round-trip, then carried
-  only the credential fields onto the re-read row while nulling `PendingClaimJson` in the same breath — so
+  only the credential fields onto the re-read row while nulling `PendingClaimJson` in the same breath, so
   the claimed profile was unrecoverable afterwards. The failure path already reloaded a clean copy "so none
   of the staged profile persists", which is only meaningful if the success path persists it. It now does.
 
 - **The device grant's approve and deny endpoints had no cross-origin protection.** Both are
   cookie-authenticated with antiforgery disabled, and `SameSite=Lax` withholds the session cookie from a
-  cross-*site* request but not from a same-site cross-*origin* one — so on the ordinary `idp.acme.com` beside
+  cross-*site* request but not from a same-site cross-*origin* one, so on the ordinary `idp.acme.com` beside
   `app.acme.com` deployment, any XSS or hostile script on a sibling origin could `fetch()` these endpoints
   with `credentials:'include'` and a `user_code` of its choosing. Approve grants the attacker's device in the
   victim's name and records a consent grant; deny cancels the victim's own device authorizations. They are
-  the third consent-granting interactive POST in the server and were — as first claimed here, wrongly —
-  "the only ones missing" `InteractiveOriginGuard` — the approvals and agent-consent endpoints have carried it since it was written,
+  the third consent-granting interactive POST in the server and were (as first claimed here, wrongly)
+  "the only ones missing" `InteractiveOriginGuard`: the approvals and agent-consent endpoints have carried it since it was written,
   for exactly this threat. Both now check it, ahead of their rate limiter so a cross-origin script cannot
   spend the victim's approval budget on its way to being refused.
 
 - **The cluster-wide rate limiter failed open under the load it exists to bound, on Azure.** With
   `Auth:DurableRateLimiting` on and the Azure backend, the increment is an ETag compare-and-set retried
-  against a single row — the most contended row in the system by design, since every request against one
+  against a single row: the most contended row in the system by design, since every request against one
   budget targets it. Exhausting the retry budget threw an ordinary store exception, and `DurableRateLimiter`
   treats a store it cannot reach as an outage and allows the request. So contention read as unavailability:
   raising concurrency *lifted* the bound instead of tripping it, and an attacker grinding a device
@@ -2352,8 +2422,8 @@ adjacent defect the audit found while checking a finding it had already passed.
   Three changes. Retries are now spaced with full-jitter backoff, so losers stop colliding on the same tick;
   429/503 and the transient server-side classes are retried rather than propagated; and exhausting the budget
   raises a distinct `RateLimitContentionException` that the limiter fails **closed** on. The fail-open posture
-  for a genuinely unreachable store is unchanged and deliberate — refusing every request would turn a storage
-  blip into a total authentication outage — which is precisely why the two cases had to be told apart. Note
+  for a genuinely unreachable store is unchanged and deliberate (refusing every request would turn a storage
+  blip into a total authentication outage) which is precisely why the two cases had to be told apart. Note
   that hundreds of simultaneous callers on one budget still cannot all settle (a single-row CAS admits one
   winner per round trip, whatever the backoff); they are now refused, which is the limiter working. DynamoDB
   (`ADD`) and SQL (single-statement upsert) settle in one statement and never had this path. The Azure
@@ -2363,11 +2433,11 @@ adjacent defect the audit found while checking a finding it had already passed.
   finished by writing a whole credential row back from a snapshot read earlier in the handler:
   TOTP enrolment confirm, WebAuthn during MFA verification, and passwordless passkey sign-in.
   `UpdateCredentialAsync` is an unconditional upsert on every provider, so if an administrator called
-  `DeleteAllCredentialsAsync` in between, the write re-created the deleted credential — and each handler
+  `DeleteAllCredentialsAsync` in between, the write re-created the deleted credential, and each handler
   then went on to set `MfaEnabled` and issue a session cookie. The TOTP path had a second defect in the
   same line: it persisted the snapshot's `LastTotpStep`, which is the value from *before* the conditional
   step claim above it, so it could move the step back past a concurrent verification and return a spent
-  code to play for the rest of its window. The WebAuthn paths had the analogous one — the sign counter is
+  code to play for the rest of its window. The WebAuthn paths had the analogous one: the sign counter is
   clone detection and must only rise, and a captured value could move it down past a concurrent
   assertion's. All three now go through conditional store operations that refuse rather than insert.
 
@@ -2377,31 +2447,31 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **On the Azure provider, no non-live environment enforced the MFA attempt cap or challenge anti-replay.**
   `MfaChallengeEntity.ToModel` set `ChallengeId` from `PartitionKey`, and the stored partition key is
-  `EnvPartitioner.PK(challengeId)` — so a challenge read back on an environment named anything other than
+  `EnvPartitioner.PK(challengeId)`, so a challenge read back on an environment named anything other than
   live carried `env|challengeId`. Both things the verify handler does with that value re-apply the prefix:
   the failed-attempt increment landed at `env|env|challengeId`, a row nothing reads, so the five-attempt
   ceiling on a 10^6 TOTP space never fired; and `ConsumeChallengeAsync` deleted that same phantom and left
   the real challenge in place, so a challenge stayed redeemable for its full lifetime after a successful
-  verification. `MfaCredentialEntity.ToModel` had the same shape, one consequence milder — a lost write
+  verification. `MfaCredentialEntity.ToModel` had the same shape, one consequence milder: a lost write
   rather than a lost guarantee. Invisible on the live environment, where the prefix is empty and
   `PK(x) == x`, which is why every test passed over it. The store now strips the prefix on the way out, the
   way `TableUserStore` already did.
 
 - **Every per-source quota was shared by the whole deployment on three of five endpoints.** Login and the
   SAML ACS keyed their rate limiter on the raw TCP peer address, which behind a reverse proxy is that proxy
-  for every request — so the login cap (30 attempts per 5 minutes by default) was a single budget for every
+  for every request, so the login cap (30 attempts per 5 minutes by default) was a single budget for every
   user of the server, and any anonymous caller could spend it and hold everyone at `429`, repeatably. This
   was true whether or not the proxy was declared, i.e. on a correctly configured deployment. Forgot-password
   had the opposite defect: it keyed on `Connection.RemoteIpAddress`, which is whatever `X-Forwarded-For` said
-  whenever the immediate peer sits in the default-trusted private ranges, so its cap — the only bound on a
-  caller walking an address list and having this server mail each one from your verified sending domain —
+  whenever the immediate peer sits in the default-trusted private ranges, so its cap (the only bound on a
+  caller walking an address list and having this server mail each one from your verified sending domain)
   could be minted afresh per request by varying one header. Registration and dynamic client registration
   already did the right thing; these three were sibling call sites of that fix.
 
   All five now key through `InternalEndpointGuard.SourceQuotaKey`, which decides on one rule: the forwarded
   client IP when the operator declared the proxy that supplies it, and the raw peer otherwise. A convention
   test fails the build on the next site that derives a quota source any other way, because no behavioural
-  test can catch it — the correct and the broken key are indistinguishable in a host with no
+  test can catch it: the correct and the broken key are indistinguishable in a host with no
   forwarded-headers pipeline.
 
   **If you have not declared your proxy, those quotas are still shared, and that is not fixable in code.**
@@ -2411,7 +2481,7 @@ adjacent defect the audit found while checking a finding it had already passed.
   undeclared proxy now names this consequence explicitly instead of talking only about `X-Forwarded-Proto`.
 
 - **The https requirement on an OIDC connection stopped at the discovery URL.** The document is the trust
-  anchor, so it was required to be https and bound to its own `issuer` — and then the endpoints it *named*
+  anchor, so it was required to be https and bound to its own `issuer`, and then the endpoints it *named*
   were re-validated for SSRF only. The SSRF guard permits `http` by design, because scheme policy belongs to
   the caller, so the document got to name a plaintext `jwks_uri` (the keys every upstream `id_token` is
   validated against), `token_endpoint` (this connection's client secret and the authorization code),
@@ -2422,15 +2492,15 @@ adjacent defect the audit found while checking a finding it had already passed.
   https document will now fail to connect; that document was describing an insecure exchange.
 
 - **Resolving redirects by hand had silently dropped .NET's refusal of an https→http downgrade.**
-  `SafeOutboundHttp` follows hops itself so it can re-run the SSRF guard on each one — the whole point — but
+  `SafeOutboundHttp` follows hops itself so it can re-run the SSRF guard on each one, the whole point, but
   it re-imposed only that guard, and the guard permits `http`. So an https metadata or JWKS URL answering
   `302 Location: http://…` was followed onto the network in cleartext, on precisely the fetches whose
   responses are trust anchors. A scheme downgrade mid-redirect is now refused outright.
 
 - **Any authenticated user could reach the full admin API by changing the case of a scope name.** Three
   components disagreed about scope-name comparison: the client allow-list matched case-INsensitively so
-  `Admin` passed, `IScopeStore` point-reads the exact name so a case variant looked *unregistered* — and
-  `ScopeRoleGate` deliberately leaves unregistered scopes alone — while the `IdentityAdmin` policy then
+  `Admin` passed, `IScopeStore` point-reads the exact name so a case variant looked *unregistered*, and
+  `ScopeRoleGate` deliberately leaves unregistered scopes alone, while the `IdentityAdmin` policy then
   matched the minted claim case-insensitively and honoured it. Scope tokens are case-sensitive (RFC 6749
   §3.3), so a variant is simply an unknown scope and is now refused at the authorize endpoint; the
   entitlement gate additionally resolves against the whole registered set so it fails closed on its own.
@@ -2447,7 +2517,7 @@ adjacent defect the audit found while checking a finding it had already passed.
   issuer, one key and the default `typ: JWT`, so an id_token or a back-channel logout token was exchanged
   for a live access token carrying the victim's `sub` and roles. Worse, neither carries a `jti`, so the
   0.20.0 revocation check silently degraded to a no-op and `RevocationEndpoint` (which requires `client_id`
-  and `jti`) could not revoke them at all — there was no operator remedy short of rotating signing keys.
+  and `jti`) could not revoke them at all: there was no operator remedy short of rotating signing keys.
   Access tokens now carry RFC 9068 `at+jwt` and the exchange pins `ValidTypes`, with claim-shape checks on
   top so tokens minted before the header existed keep working through their remaining lifetime. The same
   pin closes cross-JWT confusion at userinfo and introspection. Logout tokens are typed `logout+jwt` and
@@ -2456,44 +2526,44 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **`/_internal/backchannel-logout` was remote unauthenticated mass session destruction.** With
   `Cluster:Secret` unset the guard fell back to "the source address looks private", reading
-  `Connection.RemoteIpAddress` — which `UseForwardedHeaders` has already overwritten from the
+  `Connection.RemoteIpAddress`, which `UseForwardedHeaders` has already overwritten from the
   client-supplied `X-Forwarded-For`. The forwarded trust set defaulted to EMPTY, which means *every* caller
   is a trusted proxy, so any internet client could claim `10.0.0.1` and revoke every grant for an arbitrary
   subject. The guard now reads the raw peer captured before forwarded headers are applied, accepts loopback
   only (a private-range address is not a credential), and the trust set defaults to the loopback/RFC1918
-  ranges with a startup warning to pin the real CIDR. That default governs `X-Forwarded-For` alone —
+  ranges with a startup warning to pin the real CIDR. That default governs `X-Forwarded-For` alone:
   `X-Forwarded-Proto` is honoured only from a proxy the operator declared, because the scheme decides
   whether `/connect/*` answers at all and "the peer looks private" is a guess a library cannot verify.
 
 - **The SAML EncryptedAssertion path was a decryption oracle against the SP private key.** RSA-PKCS#1 v1.5
   was accepted, `Pkcs1` sat in a catch-all fallback that tried paddings in turn rather than honouring the
-  declared algorithm, CBC used default PKCS7 padding — and the exact `CryptographicException` message was
+  declared algorithm, CBC used default PKCS7 padding, and the exact `CryptographicException` message was
   returned to an anonymous, unauthenticated, unthrottled caller. That is Bleichenbacher/ROBOT plus a CBC
   padding oracle, and the SP keypair is minted for *every* connection whether or not the IdP encrypts, so
   it was armed by default everywhere. v1.5 is refused, the declared OAEP digest is honoured, every
   decryption failure returns one constant message, and the ACS is rate-limited. Also removed the
   pre-signature "quick parse" that used a second, unhardened reader (`XmlDocument.LoadXml`, DTD processing
-  enabled) — a ~1 KB document of nested internal entities expanded to gigabytes before any signature check.
+  enabled): a ~1 KB document of nested internal entities expanded to gigabytes before any signature check.
   Both parses now share one hardened loader, with a size cap.
   *Found while fixing:* .NET's `EncryptedXml.Encrypt(element, cert)` uses v1.5, so the project's own test
   fixture had only ever exercised the vulnerable algorithm.
 
 - **A token-exchange client with no agent profile dictated the `authorization_details` the AS signed.**
-  `ReadAuthorityClaim` returns `Unrestricted` when the subject token has no authority claim — the universal
-  case — and `Unrestricted.Intersect(x)` returns `x` verbatim, so the client's request *became* the signed
+  `ReadAuthorityClaim` returns `Unrestricted` when the subject token has no authority claim, the universal
+  case, and `Unrestricted.Intersect(x)` returns `x` verbatim, so the client's request *became* the signed
   claim. Any client holding the exchange grant could mint issuer-signed fine-grained authority that no
   admin ceiling, consent record or user interaction ever produced. A client with nothing to attenuate now
   gets `invalid_authorization_details`.
 
 - **The credentialed CORS policy applied to every endpoint.** The provider ignores `policyName` and
   `UseCors()` supplies none, so any origin a client registered could read authenticated responses from the
-  cookie-authenticated interactive-auth API — including `POST /api/auth/mfa/recovery/generate`, which
+  cookie-authenticated interactive-auth API, including `POST /api/auth/mfa/recovery/generate`, which
   returns plaintext recovery codes. Client-registered origins are now honoured only on the OAuth protocol
   surface; everything else uses operator configuration. Dynamic registration no longer accepts an arbitrary
   origin list either: origins are derived from the registrant's own validated https redirect URIs.
 
 - **A nested-parenthesis SCIM filter killed the worker process.** The filter parser's mutual recursion had
-  no depth bound, and a `StackOverflowException` cannot be caught in .NET — it terminates the process,
+  no depth bound, and a `StackOverflowException` cannot be caught in .NET: it terminates the process,
   taking down every tenant on that pod from one request. Depth (~20) and total length (1024) are now bounded
   and surface as `400 invalidFilter`.
 
@@ -2517,8 +2587,8 @@ adjacent defect the audit found while checking a finding it had already passed.
   Acme's real connection was added, the genuine user's first login adopted that account along with the
   attacker's still-valid `(issuer, subject)` binding. JIT now refuses an unverified email and refuses a
   domain that `ISsoDomainStore` routes to a different connection. Separately, SCIM could mint a
-  **pre-verified** account for any address, and `/auth/forgot-password` would then issue a reset for it —
-  `ResetPasswordAsync` sets `PasswordHash` unconditionally — so repointing a bound account's email
+  **pre-verified** account for any address, and `/auth/forgot-password` would then issue a reset for it
+  (`ResetPasswordAsync` sets `PasswordHash` unconditionally) so repointing a bound account's email
   converted into authenticating as the real user's `sub` at every relying party, bypassing the upstream IdP.
   SCIM now validates the address and honours an optional per-client domain allow-list, and no reset is
   issued for an account with no local password.
@@ -2531,22 +2601,22 @@ adjacent defect the audit found while checking a finding it had already passed.
 - **MFA verification had no per-account failure counter, and the per-challenge one could be raced.**
   `FailAttemptAsync` read `Attempts` from a snapshot and wrote it back with a blind full-row upsert in every
   provider (no ETag, no version column, no atomic increment on `IMfaStore`), so concurrent guesses shared one
-  value — and an attacker could mint a fresh challenge whenever the budget ran out, making "5 guesses per
+  value, and an attacker could mint a fresh challenge whenever the budget ran out, making "5 guesses per
   challenge" no bound at all. Verification now goes through the same durable, atomically-incremented,
   cluster-wide lockout counter as the password step, plus a per-subject rate limit; success resets it.
   **Breaking:** the 5th wrong MFA code now locks the account (HTTP 423) rather than only burning the
   challenge.
 
 - **The device-flow approval screen showed nothing about what was being approved.** With
-  `verification_uri_complete` pre-filling the code, approval was one click on an opaque prompt — RFC 8628
+  `verification_uri_complete` pre-filling the code, approval was one click on an opaque prompt: RFC 8628
   §5.4's remote-phishing shape, where an attacker starts a device flow, sends the victim the complete URI,
   and the victim authorises the attacker's device against their own account. A new authenticated,
   rate-limited `GET /api/auth/device/info` returns the requesting client and the scopes that would actually
   be granted (post-entitlement-gate), and the login app now requires an explicit confirmation showing both.
 
 - **An MFA challenge was accepted as an MFA enrolment token, so the password alone was enough to take
-  over an enrolled account.** Login returns an `MfaChallenge` id in two very different situations — "you
-  have a second factor, prove it" and "you have none, enrol one" — and the record carried nothing to tell
+  over an enrolled account.** Login returns an `MfaChallenge` id in two very different situations ("you
+  have a second factor, prove it" and "you have none, enrol one") and the record carried nothing to tell
   them apart. `MfaSetupEndpoints.ResolveUserIdAsync` accepted any live challenge in `X-MFA-Setup-Token`
   and returned its `UserId` as an authenticated identity, with no session and no check of which kind it
   held. Four sinks made that exploitable, all reachable with a correct password and no second factor:
@@ -2555,12 +2625,12 @@ adjacent defect the audit found while checking a finding it had already passed.
     one code then satisfied `/verify` and signed a cookie carrying `mfa_authenticated`.
   - `POST /webauthn/setup` + `/webauthn/confirm` enrolled an attacker-controlled passkey, which survived
     a victim password reset (reset rotates the security stamp and clears grants but touches no MFA
-    credential) — persistent takeover, not a one-shot bypass.
+    credential): persistent takeover, not a one-shot bypass.
   - `POST /totp/confirm` was a second TOTP acceptance path with **no attempt counter at all** and no
     replay-ledger write: wrong codes were free guesses against a 10⁶ space, a code already burned at
     `/verify` was still accepted here, and success issued a session.
   - `/verify` accepted *unconfirmed* `TOTP (pending)` / `WebAuthn (pending)` rows as live factors, and
-    those rows had no expiry — an abandoned enrolment left a permanent, self-service-invisible factor.
+    those rows had no expiry: an abandoned enrolment left a permanent, self-service-invisible factor.
 
   `MfaChallenge` now carries an `MfaChallengePurpose` (`Verify` / `Enrol` / `PasswordlessDiscovery`) set
   at every mint site and enforced at every consumer. `Verify = 0` so a row written by a previous
@@ -2586,7 +2656,7 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **A concurrent login silently reverted administrative writes (Azure provider).**
   `RecordSuccessfulLoginAsync` read the user entity and wrote it back with an unconditional full-entity
-  `Replace`, so anything an admin changed between the read and the write was discarded — not just the
+  `Replace`, so anything an admin changed between the read and the write was discarded, not just the
   login columns but `IsActive` (undoing a SCIM deprovision), `MfaEnabled` (undoing an enrolment, which
   login gates on), `RolesJson` (undoing a role revocation), `PasswordHash` and `SecurityStamp`. An
   attacker who keeps authenticating controls one side of that race. Now ETag-conditional with retry,
@@ -2619,23 +2689,23 @@ adjacent defect the audit found while checking a finding it had already passed.
   the floor, which a one-time warning now tells you about.
 - **WebAuthn §7.2 step 6 (user-handle ownership) was stubbed out, never performed.** The ownership
   callback handed to Fido2NetLib was a hardcoded `true`, so the library asked the question on every
-  assertion and the answer was always yes — and the passwordless endpoint never read
+  assertion and the answer was always yes, and the passwordless endpoint never read
   `response.userHandle` at all, resolving the account solely from the credential-id index. Not a way in
   on its own: the index is authoritative and the signature is checked against that owner's key. But the
   handle is precisely the tiebreaker the spec puts there for the case where the index is ambiguous or
   has been repointed, and it was absent. The callback now compares the handle against the account the
-  caller established — the challenged user for second-factor verification, the credential's indexed
-  owner for discoverable login — and `/api/auth/mfa/passwordless/complete`, where the spec makes the
+  caller established (the challenged user for second-factor verification, the credential's indexed
+  owner for discoverable login) and `/api/auth/mfa/passwordless/complete`, where the spec makes the
   handle mandatory, refuses an assertion without one (`401 user_handle_required`) or with one naming
   another account.
 - **WebAuthn §7.1 step 22 (credential-id uniqueness) was disabled, and the compensating check was
   TOCTOU.** The uniqueness callback was likewise hardcoded `true`. The cross-user half was
   re-implemented in the enrolment endpoint, but as a read followed by an unconditional write, so two
-  registrations of the same credential id could both pass it and the second repointed the index —
+  registrations of the same credential id could both pass it and the second repointed the index,
   redirecting passwordless login for that credential at whoever wrote last. Nothing at all rejected the
   *same* user re-registering an identical credential id: that produced a second credential row sharing
   one credential id, with its signature counter reset to the attestation's, and verification then picked
-  whichever row enumerated first — possibly the stale, lower-counter one, silently weakening clone
+  whichever row enumerated first, possibly the stale, lower-counter one, silently weakening clone
   detection. Deleting either row removed the index entry both depended on. The callback now consults the
   store, and the index row is claimed with an insert-if-absent write (Azure `Add`/409, DynamoDB
   conditional put, SQL `ON CONFLICT DO NOTHING`) before the credential is created, so exactly one
@@ -2646,7 +2716,7 @@ adjacent defect the audit found while checking a finding it had already passed.
 
 - **Breaking (custom `IMfaStore` implementations):** `StoreWebAuthnCredentialIdMappingAsync` is replaced
   by `TryStoreWebAuthnCredentialIdMappingAsync`, which returns `false` when the credential-id index row
-  is already claimed. There is deliberately no unconditional write left on the interface — that row is
+  is already claimed. There is deliberately no unconditional write left on the interface: that row is
   what makes a credential id resolve to exactly one account, and a read followed by a write cannot
   establish that. Every bundled backend already had the underlying primitive.
 
@@ -2674,7 +2744,7 @@ adjacent defect the audit found while checking a finding it had already passed.
 - **`Authagonal.SqlProvider`: self-hosted storage on PostgreSQL or SQLite.** The full
   `Authagonal.Core.Stores` surface, clustering (`ILeaseProvider`, `IClusterEventBus`) and the
   DataProtection key ring, with no cloud account, emulator or managed service. Reference the package and
-  call `AddAuthagonalPostgres(…)` / `AddAuthagonalSqlite(…)` before `AddAuthagonal()` — the same
+  call `AddAuthagonalPostgres(…)` / `AddAuthagonalSqlite(…)` before `AddAuthagonal()`: the same
   contract as `Authagonal.AwsProvider`. Nothing else changes: `Authagonal.Server` does not reference it,
   so an Azure- or AWS-only application never pulls in Npgsql or the SQLite native binaries.
 
@@ -2688,7 +2758,7 @@ adjacent defect the audit found while checking a finding it had already passed.
   conditional upsert for the leader-election lease. One test suite runs over both dialects.
 
   On PostgreSQL the key columns are pinned to `COLLATE "C"`. The key scheme is byte-ordinal throughout
-  — prefix bounds, env-partition ranges, the grant expiry sweep, keyset paging — and a database created
+  (prefix bounds, env-partition ranges, the grant expiry sweep, keyset paging) and a database created
   with a linguistic collation (`en_US.UTF-8` and ICU locales are the common defaults) orders
   punctuation and case differently, which would have made those scans silently return the wrong rows:
   expired grants never reaped, prefix search missing matches. The suite runs against an ICU-collated
@@ -2710,23 +2780,23 @@ test that fails against the previous release.
 
 - **A revoked access token could be exchanged for a fresh, unrevoked one (RFC 8693).** Revocation was
   enforced at the resource server, at userinfo and at introspection, but the token-exchange path never
-  consulted the revoked-token list. A revoked token still verifies and is still inside its `exp` —
-  cutting a token short before expiry is the entire point of revoking one — so it was dead at every API
+  consulted the revoked-token list. A revoked token still verifies and is still inside its `exp`
+  (cutting a token short before expiry is the entire point of revoking one) so it was dead at every API
   and alive at `/connect/token`: hand it over as `subject_token`, receive a live successor. Revoking in
   response to a compromise ended the token's use against resources while leaving it able to mint
   replacements. Any client holding the exchange grant could do it.
 - **PKCE accepted `plain` for clients not marked `RequirePkce` (RFC 7636).** The S256 requirement sat
-  inside that check, so a client opting into PKCE *voluntarily* got no method validation — and RFC 7636
+  inside that check, so a client opting into PKCE *voluntarily* got no method validation, and RFC 7636
   §4.3 makes a missing method mean `plain` as well. `plain` offers nothing against the attack PKCE
   exists for: the challenge IS the verifier. **Breaking:** `plain` is refused everywhere now, and the
   token endpoint no longer defaults a missing method. Discovery has only ever advertised S256.
 - **SAML signature verification: two structural gaps.** Only the first `Reference` was checked against
-  the signed element's ID, and a document with duplicate IDs left `#id` ambiguous — the URI string check
+  the signed element's ID, and a document with duplicate IDs left `#id` ambiguous: the URI string check
   and `CheckSignature`'s own resolution could select different elements, which is the precondition for
   every classic wrapping attack. Both refused now.
 - **Device flow (RFC 8628).** `user_code` was drawn with `byte % 31`, which is biased; generation is
   unbiased now. Code entry is rate-limited per §5.1 (ten attempts per minute per subject).
-- **Algorithm pinning** across every inbound-token path — SAML signature and digest methods, client
+- **Algorithm pinning** across every inbound-token path: SAML signature and digest methods, client
   assertions (RFC 7523), upstream `id_token`s, BFF back-channel logout tokens, and token exchange.
   Measured honestly: .NET already refused the specific hostile inputs we could construct, so these are
   policy made explicit rather than holes closed. They keep the guarantee a property of this code.
@@ -2736,7 +2806,7 @@ test that fails against the previous release.
 
 ### Added
 
-- **RFC 9207 — the authorization response names its issuer.** A client configured against several
+- **RFC 9207: the authorization response names its issuer.** A client configured against several
   authorization servers could not tell which one a code came back from, and that ambiguity is the
   mix-up attack. `iss` is now returned and `authorization_response_iss_parameter_supported` advertised.
   Additive; clients that ignore it are unaffected.
@@ -2748,8 +2818,8 @@ test that fails against the previous release.
   (`emails[type eq "work"].value`), sub-attributes (`name.givenName`) and URN-prefixed attribute paths.
   Previously one `attribute eq|co "value"` term was understood, against three attributes.
   - **Why it mattered beyond the missing features:** SCIM's ServiceProviderConfig has no way to
-    advertise a *partial* filter capability, so `filter.supported = true` — which this provider has
-    always returned — is a claim to the whole grammar. Anyone evaluating the integration could read the
+    advertise a *partial* filter capability, so `filter.supported = true`, which this provider has
+    always returned, is a claim to the whole grammar. Anyone evaluating the integration could read the
     discovery document, try `userName sw "a"`, and find the claim did not hold.
   - Filters are evaluated against the resource as it is serialized to the client, so sub-attributes and
     multi-valued attributes work without a bespoke field map and a filter can only ever match on
@@ -2766,7 +2836,7 @@ test that fails against the previous release.
   answering a different question.** `ScimFilterParser` supported one `attribute eq|co "value"` term, but
   its value check only looked at the first and last character, so a compound filter
   (`userName eq "a@x.com" and active eq "true"`) parsed as `userName eq` with the rest of the
-  expression embedded in the value. That matched nobody and returned an **empty list** — which a
+  expression embedded in the value. That matched nobody and returned an **empty list**, which a
   provisioning agent asking "does this user exist?" reads as "no", and answers by creating a duplicate.
   A filter naming an attribute we do not index (`active eq "true"`) failed the same way.
   - The value must now be exactly one quoted string with no unescaped interior quote, and the attribute
@@ -2779,13 +2849,35 @@ test that fails against the previous release.
 ### Verified, unchanged
 
 Recorded so they are not re-audited: comment truncation (CVE-2017-11427/11428) does not apply because
-text is read with `InnerText`, which concatenates exactly what canonicalization signs — now pinned by a
+text is read with `InnerText`, which concatenates exactly what canonicalization signs, now pinned by a
 test building that payload. Parser-differential (CVE-2025-25291/25292) and DigestValue-hoisting
-(CVE-2024-45409) do not apply — one parser throughout, and signature material comes only from the
+(CVE-2024-45409) do not apply: one parser throughout, and signature material comes only from the
 direct-child signature element. Certificates are pinned from metadata and never taken from `KeyInfo`.
 Authorization codes are atomically single-use and bound to client and redirect URI. `redirect_uri`
 matching is component-wise exact. TOTP rejects replay within a step. WebAuthn pins origin and RP ID and
 rejects signature-counter regression.
+
+## [0.19.0], 2026-07-27
+
+### Changed
+
+- **Breaking: `GET /api/auth/confirm-email` no longer confirms anything.** It now renders a small one-click page
+  (no script, since the auth-host CSP forbids inline script) and the button posts a form to
+  `POST /api/auth/confirm-email`, which does the confirmation. Mail scanners (Defender for Office Safe Links,
+  Proofpoint, Mimecast), link prefetchers and chat unfurlers fetch every URL in inbound mail, so the old GET
+  consumed the single-use token and the real user arrived to "this link has already been used". Scanners do not
+  submit forms. Callers that drove the GET programmatically must `POST` instead; the JSON contract of the POST
+  is unchanged.
+- **Confirmation is idempotent.** A replayed token on an already-confirmed account reports success rather than
+  an error, because the link's assertion is still true. A pending passwordless claim is excluded: promoting a
+  staged credential needs the live security stamp, so that case still fails.
+
+### Fixed
+
+- **Verification emails sent by the admin API pointed at a route that could never work.** The link targeted
+  `/api/v1/profile/confirm-email`, which is `POST`-only and behind `RequireAuthorization("IdentityAdmin")`,
+  while a clicked link is an anonymous `GET`. Those emails now link to the public `/api/auth/confirm-email`,
+  which accepts the identical token format.
 
 ## [0.18.0], 2026-07-27
 
@@ -2794,24 +2886,244 @@ rejects signature-counter regression.
 - **`@authagonal/login` depends on `react-router` v8 instead of `react-router-dom` v7.** BREAKING for
   consumers: `react-router-dom` leaves the dependency tree entirely (v8 removes the package and ships
   one), so an application importing from `react-router-dom` must move its own imports to
-  `react-router`. Every symbol this UI uses — `BrowserRouter`, `Routes`, `Route`, `Link`, `Navigate`,
-  `useNavigate`, `useSearchParams` — is on the main `react-router` entry; only `RouterProvider` and
+  `react-router`. Every symbol this UI uses (`BrowserRouter`, `Routes`, `Route`, `Link`, `Navigate`,
+  `useNavigate`, `useSearchParams`) is on the main `react-router` entry; only `RouterProvider` and
   `HydratedRouter` moved to `react-router/dom`, and this declarative-mode UI uses neither. The React
   floor rises to 19.2.8 (v8 requires 19.2.5+); Vite was already 8.
   - **Why now:** react-router 7.12.0 through 8.2.0 is covered by GHSA-qwww-vcr4-c8h2 (an RSC-mode CSRF
     bypass), fixed only in 8.3.0. Nothing here runs RSC mode, so the advisory is a version gate rather
-    than an exposure — but while this package depended on `react-router-dom ^7.13.2` it held every
+    than an exposure, but while this package depended on `react-router-dom ^7.13.2` it held every
     consumer inside the range, and no consumer could clear its own `npm audit` from its own side.
+
+## [0.17.5], 2026-07-27
+
+### Added
+
+- **`GET /api/v1/profile/{userId}` reports what a support console needs to diagnose a login.** The response now
+  includes `accessFailedCount`, `isActive`, `roles` and `hasPassword`. `hasPassword` is presence only (the hash
+  never leaves the store) and distinguishes "has forgotten the password" from "has never had one and signs in
+  with SSO", which call for opposite advice.
+
+## [0.17.4], 2026-07-27
+
+### Added
+
+- **The admin API exposes the user directory.** New routes on the existing `/api/v1/profile` group:
+  `GET /api/v1/profile/search?q=&maxResults=` (prefix search over the email and name indexes),
+  `GET /api/v1/profile/by-email?email=` (exact lookup, `404` if absent),
+  `GET /api/v1/profile?organizationId=&count=&continuationToken=` (cursor-paged listing), and
+  `POST /api/v1/profile/exists` (the subset of up to 500 supplied `userIds` that exist, with `truncated: true`
+  if the request was trimmed). Each is a thin call onto a store method that already existed.
+- **Two support actions that had no route.** `POST /api/v1/profile/{userId}/set-password` sets a password
+  subject to the password policy and revokes every refresh token and rotates the security stamp.
+  `POST /api/v1/profile/{userId}/unlock` clears the lockout and the failed-attempt count.
+
+### Fixed
+
+- **`PUT /api/v1/profile` no longer silently discards `isActive` and `emailVerified`.** The request model named
+  neither, so a blocked user stayed enabled and a force-verified address stayed unverified, with a `200` each
+  time. Both are honoured now (`emailConfirmed` is accepted under the alias `emailVerified`), and deactivating
+  an account revokes its refresh tokens and rotates the security stamp so the block does not wait for the next
+  login.
+
+## [0.17.3], 2026-07-27
+
+### Added
+
+- **"Who holds this role" is now a query.** `GET /api/v1/roles/{roleName}/users?maxResults=200` returns
+  `{ roleName, members }`, each member carrying `userId`, `email`, `firstName`, `lastName` and their full
+  `roles`. Roles were only a list on the user, which answers "what does this person hold" but not "who holds
+  this" without reading every account. It is backed by a new `UserRoles` reverse index in the Azure Table
+  provider (`UserRoleEntity`, one row per membership, partitioned by role name in the clear since a role name is
+  an operator-chosen identifier, not personal data), maintained on every user write path with
+  write-before-delete and diffed on update.
+- **`IUserStore.ListUsersInRoleAsync` and an honest failure mode.** A store with no such index throws
+  `NotSupportedException` rather than returning an empty list, and the route answers `501 not_supported`,
+  because an empty answer would read as "nobody administers this". An unknown role is `404 role_not_found`.
+  Accounts written before the index existed are not listed until `IUserStore.ReindexUserAsync` runs for them; it
+  now upserts a user's role memberships without removing any.
+
+## [0.17.2], 2026-07-27
+
+### Added
+
+- **Roles, and their members, can be seeded from configuration.** A `Roles` array (`Name`, `Description`,
+  `Members` as email addresses) is applied at startup by `RoleSeedService`, alongside clients, scopes and
+  providers. This matters once a scope is gated with `AllowedRoles`: a scope gated on a role that nothing
+  creates is gated against everybody, including the operator who configured it, and it fails silently because
+  the scope is simply never granted. Seeding is additive and idempotent and never removes a role or revokes a
+  membership, so a role granted through the admin API survives the next restart. A member with no account yet is
+  skipped with a warning and retried on the next boot. Documented in `docs/configuration.md`.
+
+## [0.17.1], 2026-07-27
+
+### Added
+
+- **The admin register route can create an identity without provisioning it.** `POST /api/v1/profile/` (register
+  user) accepts `skipProvisioning: true` (admin-only, default `false`). It is for a first-party app that is
+  itself a provisioning target and is part-way through setting a user up: provisioning there would send the app
+  its own `Try` for a half-built user, carrying only the attributes that survived the round trip, and it would
+  either reject it or provision the user twice. Callers that do not send the flag see no change.
+
+## [0.17.0], 2026-07-26
+
+### Added
+
+- **A scope can name the roles entitled to it.** `Scope.AllowedRoles` (also on the admin scope API,
+  `ScopeEntity` and `ScopeSeedConfig`) lists the roles a user must hold to be granted the scope. `AllowedScopes`
+  on a client says what an application may ask for, which is settled before anyone logs in; `AllowedRoles` says
+  who may have it, which is only decidable once the subject is known. A user holding none of the listed roles
+  has the scope dropped from the grant rather than refused, so one application can serve staff and everyone
+  else, and the token response echoes the reduced `scope`. A request in which every scope is dropped fails with
+  `access_denied`.
+- **The gate runs on every path that mints a token for a human.** It applies at `/connect/authorize` (before
+  consent, so the screen never offers a scope that cannot be granted), at the device flow's approval step, and
+  on every refresh, which is the only place revoking a role can take effect. Token exchange needs no gate of its
+  own because it can only downscope within the subject token, and client-credentials grants have no subject and
+  are untouched. The gate is `IScopeRoleGate` / `ScopeRoleGate`.
+- **Existing scopes are unchanged.** An empty `AllowedRoles` (every existing scope) is ungated. Seeding from
+  configuration can add or change `AllowedRoles` but cannot clear it; `PUT` the scope with an explicit empty
+  array to remove a gate. Documented in `docs/scopes.md`.
+
+## [0.16.5], 2026-07-26
+
+### Fixed
+
+- **Collapsible consent groups look collapsible.** The group header expanded on click with no visible cue and an
+  arrow cursor. It now shows a chevron that rotates when open, the chevron and the item count sit inside the
+  button so the whole row right of the checkbox is the click target, and the cursor is a pointer.
+
+## [0.16.4], 2026-07-26
+
+### Fixed
+
+- **`Scope.Group` is now persisted by the Azure Table store.** 0.16.3 carried `Group` through the model, both
+  seeders and `/consent/info`, but `ScopeEntity` enumerates its columns and dropped the value on write and never
+  read it back, so every scope returned `group: null`. Nothing logged and nothing failed, and the feature was
+  inert for anyone on 0.16.3. The DynamoDB store serialises the whole model and was never affected.
+- **The admin scope API can set a group.** Create and update on the scope endpoints now carry `group`; they had
+  the same omission.
+
+## [0.16.3], 2026-07-26
+
+### Added
+
+- **Scopes can be filed under headings on the consent screen.** `Scope.Group` (also `OidcScopeDescriptor.Group`
+  and `ScopeSeedConfig.Group`) names a heading. Scopes that share one appear under it with a single checkbox
+  that grants or declines the lot, and the box goes indeterminate when only some are ticked. The heading lists
+  its contents even while collapsed, and expanding is for granting part of a group. A scope with no group stands
+  alone as before, and grouping is presentation only: it never affects what is requested or granted. `Group` is
+  returned in `scopeDetails` from `/consent/info`, and `ScopeSeedService` preserves a stored value when the seed
+  omits it.
+
+## [0.16.2], 2026-07-25
+
+### Fixed
+
+- **`Scopes__N__Emphasize` and `Scopes__N__Required` now take effect from configuration.** 0.16.1 carried these
+  fields through `ProtocolSeedService`, but the `Scopes` configuration section is read by `ScopeSeedService`,
+  whose `ScopeSeedConfig` had neither, so the two settings bound to nothing and were dropped silently while
+  display names still arrived. Both are nullable, so an omitted flag preserves the stored value rather than
+  resetting it.
+
+## [0.16.1], 2026-07-25
+
+### Added
+
+- **The consent screen shows the wording scopes were registered with.** `OidcScopeDescriptor` gains
+  `Description`, `Emphasize` and `Required`, and `ProtocolSeedService` now copies them into the scope store (the
+  descriptor had none of these fields, so nothing a product configured could reach the consent UI).
+  `/consent/info` resolves each requested scope through `IScopeStore` and returns a new `scopeDetails` array
+  (`name`, `displayName`, `description`, `emphasize`, `required`) alongside the existing `scopes` names, so a
+  login app built against an earlier host keeps working.
+
+### Changed
+
+- **The invented-label fallback is gone.** The consent screen used to build labels from the shape of the scope
+  string, which produced "View your search" for a scope registered as "Search drawings and documents" and buried
+  the read/write distinction. It now shows the registered display name, then built-in translations for the
+  standard OIDC scopes (so a product need not register `openid`), then the raw name as a last resort. Emphasised
+  scopes are weighted, descriptions appear beneath, and a scope registered as `Required` is locked like
+  `openid`.
+
+## [0.16.0], 2026-07-25
+
+### Added
+
+- **Users can approve a subset of the requested scopes on the consent screen.** Each scope is a checkbox, ticked
+  by default, and only the ticked scopes are posted. `openid` is locked, because without it no `id_token` is
+  issued. API scopes with no translation render as readable text ("View and change your tracked records")
+  instead of the raw scope string. New strings are translated in all ten login-app locales.
+- **The grant is narrowed to the user's answer instead of looping.** `ConsentData` gains `OfferedScopes`,
+  recording what was offered next to what was granted, derived server-side from the authorize URL rather than
+  trusted from the request body. `/connect/authorize` previously required every requested scope to be consented
+  and re-prompted otherwise, which would have sent a client that always asks for its full set back to consent
+  forever. It now prompts again only for a scope the user has never been shown, and the token response echoes
+  the narrowed `scope` (RFC 6749 section 3.3). Grants written before this release have no `OfferedScopes` and
+  fall back to the granted set, which reproduces the old behaviour.
+
+## [0.15.3], 2026-07-25
+
+### Changed
+
+- **Dynamically registered clients now require consent.** `POST /connect/register` creates clients with
+  `RequireConsent = true`. Previously they defaulted to `false`, so a user signing in to a self-registered
+  client silently granted whatever scopes it had chosen (observed with an MCP client that registered with 13
+  scopes including write access and never prompted the user). A self-registered client is the least vetted
+  client in the system, so the consent screen is the only human check on it.
+- **Existing dynamic clients are not changed.** The flag is set at registration, so a client that enrolled
+  before this release keeps `RequireConsent = false` until it re-registers.
+
+## [0.15.2], 2026-07-25
+
+### Fixed
+
+- **An empty audience list now means "unset", not "deny every resource".** `/connect/authorize` rejected
+  `resource=` (RFC 8707) with `invalid_target` for any client whose `Audiences` list was empty. A dynamically
+  registered client has no way to declare audiences (RFC 7591 has no such field), so none of them, and therefore
+  no MCP client, could name the MCP server as the resource. A client with no declared audiences may now name any
+  resource; a client that does declare them is still held to its allowlist at all three checks (authorize,
+  code-grant token, token exchange). The `resource` value only narrows `aud`, and the resource server still
+  validates that `aud` addresses itself.
+
+## [0.15.1], 2026-07-25
+
+### Added
+
+- **Authorization-server metadata is also served at the RFC 8414 path.**
+  `GET /.well-known/oauth-authorization-server` now returns the same document as
+  `/.well-known/openid-configuration` (OIDC discovery is a superset of RFC 8414 metadata, so nothing diverges).
+  OAuth-only clients, including MCP clients, which are told to try the RFC 8414 path first and are not obliged
+  to fall back to OIDC discovery, could not discover a host that answered only the OIDC path.
+
+## [0.15.0], 2026-07-25
+
+### Added
+
+- **The token-exchange transformer is told which client the subject token was issued to.**
+  `ITokenExchangeSubjectTransformer.TransformAsync` receives a new `TokenExchangeContext` whose
+  `SubjectClientId` is the `client_id` of the token being exchanged. The existing `client` argument is the
+  client performing the exchange, which is a broker whenever a service exchanges a token it was handed, so a
+  host could not previously attribute the action to the application the user actually authorised. The value
+  comes from the subject token's validated claims (every Authagonal-issued token carries `client_id`), so it is
+  not caller-asserted.
+
+### Changed
+
+- **Breaking: `ITokenExchangeSubjectTransformer.TransformAsync` gains a `TokenExchangeContext context`
+  parameter** before the `CancellationToken`. Implementors must add it. The context is a separate record rather
+  than a property on `OidcSubject`, because `OidcSubject` is persisted in auth codes and refresh tokens and is
+  also built by hosts, where "the client that obtained the subject token" has no meaning.
 
 ## [0.14.0], 2026-07-24
 
 ### Added
 
-- **Agentic auth — the building blocks for delegating a user's authority to AI agents** (docs:
+- **Agentic auth: the building blocks for delegating a user's authority to AI agents** (docs:
   `docs/agentic-auth.md`; design: `docs/agentic-auth-plan.md`). Every delegated token obeys
   `effective = admin ceiling ∩ user consent ∩ task request ∩ subject-token authority`, and authority
   only ever narrows per hop.
-  - **Authority algebra** (`Authagonal.Core.Authority`): `AuthoritySet`/`AuthorityGrant` — a typed,
+  - **Authority algebra** (`Authagonal.Core.Authority`): `AuthoritySet`/`AuthorityGrant`, a typed,
     RFC 9396-shaped (`authorization_details`) model with per-action `auto`/`ask`/`deny` policies and
     shape-typed constraints (allowlists ∩, numeric caps min, boolean gates AND; unknown members are
     preserved verbatim and fail closed). One `Intersect` implements the invariant everywhere;
@@ -2825,7 +3137,7 @@ rejects signature-counter regression.
     `sub` = user, `act` = agent (nested per hop, `actor_token` now accepted as corroboration), and an
     `authorization_details` claim carrying the intersection; introspection emits both; lifetime is
     additionally clamped by the profile. Sub-delegation requires depth budget from every actor already
-    in the chain and attenuates by construction. Clients without a profile are untouched — though
+    in the chain and attenuates by construction. Clients without a profile are untouched, though
     `authorization_details` now narrows plain exchanges too.
   - **Agent consent (the floor)** at `/consent/agents` (`agent_consent` grants): per (user, agent),
     stored pre-intersected with the ceiling and re-intersected at every mint, so admin narrowing takes
@@ -2836,13 +3148,13 @@ rejects signature-counter regression.
     `GET /approvals` / `POST /approvals/{id}`; approvals are atomically single-use and bound to the
     request shape *and current policy state* (a ceiling edit invalidates instead of minting stale
     authority).
-  - **Capability tickets** (`ICapabilityTicketService`): the ws-ticket generalized — opaque,
+  - **Capability tickets** (`ICapabilityTicketService`): the ws-ticket generalized, opaque,
     short-TTL, atomically single-use handles over the grant store's conditional delete (closes the
     cache get-then-remove replay window). The BFF ws-ticket keeps its shared-cache contract.
   - **BFF authority chokepoint**: `BffUpstream.RequiredAuthority` ("type:action" pairs) makes the
     proxy evaluate the outgoing bearer's `authorization_details` before forwarding (403 on failure;
     never anonymous). `Authagonal.Bff` now references `Authagonal.Core`.
-  - **Delegation-aware audit**: new default-interface `IAuthHook` members —
+  - **Delegation-aware audit**: new default-interface `IAuthHook` members:
     `OnTokenIssuingAsync` (rich pre-mint gate), `OnDelegationMintedAsync` (full actor chain),
     `OnApprovalRequested/ResolvedAsync`, `OnAgentConsentChangedAsync`,
     `OnCapabilityTicketRedeemedAsync`. Existing hooks compile unchanged.
@@ -2868,14 +3180,14 @@ rejects signature-counter regression.
 
 ### Added
 
-- **`Authagonal.Migration` — one-time Duende IdentityServer → Authagonal migration.** A new packable
+- **`Authagonal.Migration`: one-time Duende IdentityServer → Authagonal migration.** A new packable
   library carrying the migration engine, a leader-gated hosted runner, and CLI support (SqlClient stays
   in this package, out of every runtime consumer). `DuendeMigrationEngine` copies users (with claim
   folding: given_name/family_name/company/org_id onto first-class fields, email claims dropped, the rest
   to custom attributes), external logins, roles, scopes (ApiScopes + IdentityResources), clients
   (secrets tagged `SHA256$`/`SHA512$` by digest length, expired skipped), API-resource flattening,
   SAML/OIDC providers, SSO domains, MFA credentials (AuthenticatorKey + recovery codes), and optional
-  refresh tokens — each pass idempotent and report-and-skip. `AddAuthagonalDuendeMigration(configuration)`
+  refresh tokens; each pass idempotent and report-and-skip. `AddAuthagonalDuendeMigration(configuration)`
   wires a `BackgroundService` that runs the engine exactly once per configured `Version` (a
   `MigrationState` marker enforces run-once), gated on cluster leadership so a RollingUpdate's transient
   two-pod overlap can't double-run it; `DryRun` produces the full validation report without writing.
@@ -2892,7 +3204,7 @@ rejects signature-counter regression.
 
 - **Mid-journey registrations/claims resume their journey after the verification click.** The
   flow's `returnUrl` now rides the verification token (optional 5th segment, security-stamp
-  integrity like the rest) and is re-emitted on the `email_confirmed` login landing — so a
+  integrity like the rest) and is re-emitted on the `email_confirmed` login landing, so a
   registration or passwordless claim that began from an invite-accept continuation returns to
   the accept link after sign-in (including through the MFA "Not now" skip), instead of losing
   the returnUrl across the email hop and stranding on the account card with the invite never
@@ -2905,7 +3217,7 @@ rejects signature-counter regression.
 
 - **`{param:guid}` constraint on BFF `ExchangeRoutes` patterns.** Version-prefixed APIs whose
   binding segment is positional (`/{apiver}/{project_id:guid}`) need the capture gated on GUID
-  shape — without it a broad pattern captures literal-segment routes ("/v1/user/profile") and
+  shape; without it a broad pattern captures literal-segment routes ("/v1/user/profile") and
   wrongly demands an exchange for them (403). Unknown constraints never match. The LAST
   placeholder names the exchange parameter; earlier ones act as positional wildcards.
 
@@ -2913,17 +3225,17 @@ rejects signature-counter regression.
 
 ### Added
 
-- **`ITokenExchangeSubjectTransformer`** — host seam on the RFC 8693 exchange path for
+- **`ITokenExchangeSubjectTransformer`**: host seam on the RFC 8693 exchange path for
   context-bound tokens (e.g. project/workspace tokens). Invoked after the subject is rebuilt from
   the validated subject token and scopes are narrowed, before the mint: the host validates any
   non-standard request parameters (now forwarded down from the token endpoint) against its own
   authority, forces binding claims via `AdditionalClaims`, and may SHORTEN the token lifetime
-  (never lengthen — the service re-clamps to the subject token's expiry). Rejection surfaces as
+  (never lengthen; the service re-clamps to the subject token's expiry). Rejection surfaces as
   `invalid_target`. No-op default; register your own ahead of `AddAuthagonal`.
 - **BFF context-token machinery**: `ITokenClient.ExchangeTokenAsync` (RFC 8693 with extension
-  params); `AuthagonalBffOptions.TicketExchangeParams` — allowlisted `/ws-ticket` query params
+  params); `AuthagonalBffOptions.TicketExchangeParams`, allowlisted `/ws-ticket` query params
   that bind the ticket to an EXCHANGED downscoped token instead of the session's primary access
-  token (denied exchange → 403, no ticket); `AuthagonalBffOptions.ExchangeRoutes` — proxy routes
+  token (denied exchange → 403, no ticket); `AuthagonalBffOptions.ExchangeRoutes`, proxy routes
   (`/projects/{project_id}` style, one placeholder, prefix-matched) whose upstream calls ride a
   context-bound exchanged token, cached per (session, binding) for the token's lifetime.
 
@@ -2958,7 +3270,7 @@ this a minor bump.
 
 ### Security
 
-- **BFF open redirect via backslash closed.** `SanitizeReturnUrl` accepted `/\evil.com` — browsers
+- **BFF open redirect via backslash closed.** `SanitizeReturnUrl` accepted `/\evil.com`: browsers
   normalize `\`→`/`, turning it into a protocol-relative off-site redirect. It now mirrors ASP.NET
   `Url.IsLocalUrl` (a `/`-prefixed path is local only if the second char is neither `/` nor `\`),
   closing the `/login`, `/logout`, and `/logout-callback` return-URL sinks.
@@ -2978,19 +3290,19 @@ this a minor bump.
 - **Connection trust tier.** An OIDC connection can be marked external (`IsExternalConnection`); the
   first-party-only flags (`UseUpstreamSubjectAsUserId`, `AutoLinkExistingByEmail`) are then neutralised
   even if set, so a misconfiguration can't hand an external IdP an account-takeover lever. Defaults to
-  first-party — existing connections are unchanged.
+  first-party; existing connections are unchanged.
 - **`auth_time` is now minted on every sign-in** (password, OIDC, SAML). It was advertised in discovery
   and the token passthrough allowlists but never set, so id_tokens never carried it.
 
 ### Added
 
-- **`IUpstreamRefreshTokenStore`** — a durable per-`(user, connection, session)` store for the upstream
+- **`IUpstreamRefreshTokenStore`**: a durable per-`(user, connection, session)` store for the upstream
   federated refresh token, so every RP grant in a session reads and rotates one shared token instead of
   pinning a login-time cookie copy that dies after the upstream one-time-rotates it. Azure Table +
   DynamoDB implementations, token encrypted at rest. Only active when `RevalidateOnRefresh` is on.
-- **`AllowUninvitedJit` on OIDC connections** (default off), matching the existing SAML flag —
+- **`AllowUninvitedJit` on OIDC connections** (default off), matching the existing SAML flag:
   self-service auto-provisioning of an uninvited allowed-domain user, tagged with `federated_connection`.
-- **`AuthOptions.ClaimAllowedAttributeKeys`** — whitelist for the custom-attribute keys a passwordless
+- **`AuthOptions.ClaimAllowedAttributeKeys`**: whitelist for the custom-attribute keys a passwordless
   claim may carry onto the account.
 - **BFF ws-ticket redemption:** `WsTicketKey` is now public and `TryRedeemWsTicketAsync` ships the
   single-use get-then-delete (documenting the residual replay window).
@@ -3026,7 +3338,7 @@ this a minor bump.
 ### Security
 
 - **Passwordless-account claims re-prove inbox ownership (breaking).** Registering the email of an
-  existing federated (credential-less) account no longer sets a usable password immediately — the
+  existing federated (credential-less) account no longer sets a usable password immediately: the
   credential is staged and only activated once the account's own email-verification link is clicked.
   Knowing a federated user's email can no longer be turned into an immediate sign-in as that user.
 
@@ -3041,7 +3353,7 @@ this a minor bump.
 
 ### Fixed
 
-- `TestProvisioningOrchestrator` implements `ReprovisionAsync` — a test-double gap (missed in
+- `TestProvisioningOrchestrator` implements `ReprovisionAsync`: a test-double gap (missed in
   0.10.24) that left the test project non-compiling for 0.10.24–0.10.27.
 
 ## [0.10.27], 2026-07-23
@@ -3084,7 +3396,7 @@ this a minor bump.
 
 ### Fixed
 
-- **MFA credential deletion clears its WebAuthn index row** — no stale credential-id → user pointers.
+- **MFA credential deletion clears its WebAuthn index row**: no stale credential-id → user pointers.
 
 ## [0.10.21], 2026-07-22
 
@@ -3110,7 +3422,7 @@ this a minor bump.
 ### Fixed
 
 - **Per-login BFF correlation cookie.** Concurrent logins no longer clobber each other's correlation
-  state — the cookie is keyed per login `state`.
+  state: the cookie is keyed per login `state`.
 
 ## [0.10.17], 2026-07-22
 
@@ -3149,7 +3461,7 @@ this a minor bump.
 ### Added
 
 - **`prompt=login` at the authorize endpoint.** Honor the OIDC `prompt=login` request to force
-  re-authentication. (Enforcement and the PAR-loop fix landed later — see [Unreleased].)
+  re-authentication. (Enforcement and the PAR-loop fix landed later: see [Unreleased].)
 
 ## [0.10.11], 2026-07-21
 
@@ -3170,8 +3482,8 @@ this a minor bump.
 ### Added
 
 - **BFF `/logout` accepts an allowlisted `returnUrl`** (same allowlist as `/login`). It is carried
-  through the RP-initiated `end_session` round trip via `state` — so it survives the auth host
-  clearing its SSO cookie — and echoed back onto a new registered `{BasePath}/logout-callback`
+  through the RP-initiated `end_session` round trip via `state`, so it survives the auth host
+  clearing its SSO cookie, and echoed back onto a new registered `{BasePath}/logout-callback`
   endpoint, which re-validates and redirects. Enables "abandon the current session, then land back
   here" flows (e.g. a signed-in user opening a guest share link that must be claimed as a different
   identity). The callback URL must be registered as a `post_logout_redirect_uri` for the BFF client.
@@ -3198,7 +3510,7 @@ this a minor bump.
 
 - **Protocol: `AdditionalClaims` now ride the id_token as well as the access token.** For an
   embedded provider federating into a full Authagonal host, the id_token is what the downstream
-  host reads claims from (`federated:*` capture) — access-token-only claims like a share-link
+  host reads claims from (`federated:*` capture): access-token-only claims like a share-link
   token vanished at the federation boundary.
 
 ## [0.10.7], 2026-07-21
@@ -3208,7 +3520,7 @@ this a minor bump.
 - **Protocol: authorize now runs the configured `AuthenticationScheme` explicitly.** It previously
   only inspected the default-scheme-populated `HttpContext.User`, so a host whose registered scheme
   is not its default (e.g. an API host with a bearer-stack default registering a purpose-built
-  scheme for the embedded provider, like a share-link handler) could never authenticate — every
+  scheme for the embedded provider, like a share-link handler) could never authenticate: every
   authorize went straight to the scheme's challenge. The resolved principal is also what the
   subject resolver now receives.
 
@@ -3218,7 +3530,7 @@ this a minor bump.
 
 - **Bff: `AllowAnonymousProxyRequests`** (default off): the token-injecting proxy forwards
   session-less (or dead-session) requests to the upstream WITHOUT an Authorization header instead of
-  rejecting them with 401 — classic SPA semantics where the API's own auth decides, so
+  rejecting them with 401, classic SPA semantics where the API's own auth decides, so
   `[AllowAnonymous]` endpoints (share-link fetch/peek) work signed-out while protected endpoints
   still return their own 401. The anti-forgery header remains required.
 
@@ -3226,7 +3538,7 @@ this a minor bump.
 
 ### Fixed
 
-- **Bff: array claims survive `/bff/user`** — repeated id_token claim types (`roles`, `groups`)
+- **Bff: array claims survive `/bff/user`**: repeated id_token claim types (`roles`, `groups`)
   are now space-joined into the session claim map; previously only the first value survived, so a
   multi-role user lost everything after their first role.
 
@@ -3235,9 +3547,9 @@ this a minor bump.
 ### Changed
 
 - **`OidcSubject` is now a `record`** (was a sealed class; same shape, adds value equality). Lets a
-  host DECORATE the registered `IOidcSubjectResolver` and overlay fields with a `with` expression —
+  host DECORATE the registered `IOidcSubjectResolver` and overlay fields with a `with` expression,
   e.g. enriching subjects with live org context from an external system of record on every
-  authorize/refresh — without hand-copying (and silently dropping) the remaining fields.
+  authorize/refresh, without hand-copying (and silently dropping) the remaining fields.
 
 ## [0.10.3], 2026-07-21
 
@@ -3246,11 +3558,11 @@ this a minor bump.
 - **Per-connection MFA challenge control** (`ChallengeMfaAfterLogin`, SAML + OIDC connections,
   default `true`): whether users are still routed through the LOCAL MFA challenge after this
   connection authenticates them (F42). `false` = the tenant trusts the upstream IdP's own MFA as
-  the second factor — federation signs the session in `mfa_authenticated` without a local
+  the second factor: federation signs the session in `mfa_authenticated` without a local
   challenge. Threaded through config seed, admin create/update DTOs and the Azure/Dynamo stores
   (persisted in the negative, so pre-existing rows keep challenging).
 - **`Scopes[]` config seeding** (`ScopeSeedService`): register custom scopes (name, display name,
-  `UserClaims`, discovery visibility) from configuration at startup, mirroring `Clients[]` — they
+  `UserClaims`, discovery visibility) from configuration at startup, mirroring `Clients[]`; they
   appear in `scopes_supported` and are ready for per-scope claim release.
 - **`BackchannelLogoutUri` on `Clients[]` seed entries**: config-seeded clients can now register a
   back-channel logout endpoint (previously only dynamic registration could), e.g. a BFF's
@@ -3265,8 +3577,104 @@ this a minor bump.
   refreshed access token, stored in the shared distributed cache under `agbff:wst:{ticket}`. A browser
   websocket handshake can't carry a bearer or custom headers, so the SPA fetches a ticket (anti-forgery
   header required), puts it on the connect URL, and the API host exchanges + deletes the cache key to
-  authenticate the socket. Requires a shared cache (Redis) — the in-memory default can't serve another
+  authenticate the socket. Requires a shared cache (Redis): the in-memory default can't serve another
   process. The ticket must never be written to client storage: fetch, connect, drop.
+
+## [0.10.0], 2026-07-20
+
+### Added
+
+- **One BFF can serve many tenants.** `AuthagonalBffOptions.TenantQueryParam` (`tenantQueryParam` in
+  `@authagonal/bff`) switches the BFF into multi-tenant mode: `/bff/login?<param>=acme` selects the tenant, a
+  registered `IBffTenantResolver` returns a `BffTenantConfig` (`TenantKey`, `Authority`, `ClientId`,
+  `ClientSecret`, `Scope`) for it, and the key is stored on the session (`BffSession.TenantKey`) so refresh and
+  logout re-resolve the same tenant. The correlation cookie carries the key through the login handshake.
+- **Back-channel logout resolves the tenant from the token issuer.** `IBffTenantResolver.ResolveByIssuerAsync`
+  (`resolveByIssuer` in Node) maps the `iss` of a logout token to a tenant, since a back-channel request carries
+  no session cookie. OIDC metadata and signing keys are now cached per authority in `BffOidcConfig`, so many
+  tenants do not share one discovery document.
+- **Single-tenant hosts are unaffected.** The default `StaticBffTenantResolver` returns the one configured
+  tenant, and `Authority`, `ClientId` and `ClientSecret` are only required when `TenantQueryParam` is unset. The
+  Node package `@authagonal/bff` mirrors the .NET seam (`IBffTenantResolver`, `BffTenantConfig`,
+  `StaticBffTenantResolver`, `tenantResolver`).
+
+### Changed
+
+- **`ITokenClient` and `BffOidcConfig.GetAsync` take the resolved tenant.** `ExchangeCodeAsync`, `RefreshAsync`
+  and `RevokeAsync` gain a leading `BffTenantConfig tenant` parameter, and `BffOidcConfig.GetAsync` takes an
+  `authority`. This only affects hosts that implement or call these internals directly; configuring the BFF
+  through `AuthagonalBffOptions` is unchanged.
+
+## [0.9.1], 2026-07-19
+
+### Added
+
+- **Opt-in server-side session self-management.** A new `IUserSessionRegistry` seam (Core) lets a host that
+  registers an `ITicketStore` also let users list and revoke their own sessions. `/api/auth/sessions` (GET,
+  DELETE, revoke-others) lights up when a registry is registered and is inert otherwise; the cookie
+  `SessionStore` is wired through a `PostConfigure` opt-in. The account page gains an "Active sessions" section
+  that hides when the tenant does not track sessions.
+
+### Changed
+
+- **BREAKING: JIT provisioning now defaults off, and the SAML admin DTOs use the positive flag.** New OIDC and
+  SAML connections default to JIT off. The OIDC admin create DTO gains `JitProvisioningEnabled` (previously it
+  never set the flag, so new OIDC connections were stuck off and could not be enabled), and the SAML create and
+  update DTOs move from `DisableJitProvisioning` to `JitProvisioningEnabled`. Existing stored rows keep
+  provisioning through the entities' negative-form column (the Core `DisableJitProvisioning` alias), so there is
+  no backfill and nothing stops working.
+- **`@authagonal/bff` package metadata** (version, `exports`, `files`) pinned from the initial publish. The
+  published version is still driven by the release tag.
+
+## [0.9.0], 2026-07-18
+
+### Added
+
+- **`@authagonal/bff`, the Node twin of `Authagonal.Bff`.** The same protocol (confidential OIDC client,
+  server-side session, httpOnly cookie) as Express and Next adapters, wired into `release.yml` as a parallel npm
+  publish job.
+- **Token-injecting proxy.** `{basePath}/api/**` forwards to configured upstreams with the session's refreshed
+  access token attached as a bearer, the session cookie stripped and path and query preserved; it requires the
+  anti-forgery header. In .NET it is `BffProxy` with an `Upstreams` option; in Node it is a shared
+  `authorizeProxy` with native streaming forwards in both adapters.
+- **Browser client.** `@authagonal/bff/client` (`createBffClient`: CSRF fetch, `login`, `logout`, `getUser`,
+  `apiFetch`) and `@authagonal/bff/react` (`useUser` hook; React is an optional peer).
+
+## [0.8.2], 2026-07-18
+
+### Fixed
+
+- **Back-channel logout sent nothing on multi-tenant hosts.** The emit resolved the grant, client and key stores
+  from a background scope, which has no tenant context, so resolution threw and was swallowed. Grants and
+  clients are now resolved and the logout tokens signed synchronously in the request, with only the HTTP POSTs
+  fired in the background (they need just the singleton `IHttpClientFactory` and the built tokens).
+
+## [0.8.1], 2026-07-18
+
+### Fixed
+
+- **Host startup crash on the email-config diagnostic.** `UseAuthagonal`'s "no email sender configured" warning
+  resolved `IEmailService` from the root provider, which threw for integrators whose `IEmailService` is
+  tenant-scoped and crashed the host on boot. It now resolves inside a scope and swallows failures; the
+  diagnostic is best effort and never blocks startup.
+
+## [0.8.0], 2026-07-18
+
+### Added
+
+- **`Authagonal.Bff`, a Backend-for-Frontend for SPAs.** A confidential OIDC client that runs the
+  authorization-code and PKCE flow server-side, keeps access and refresh tokens in a server-side session, and
+  exposes only an httpOnly cookie to the browser. Includes login, callback, user and logout routes,
+  single-flight rotation-aware refresh, and an OIDC back-channel-logout consumer. The host seams are
+  `IBffSessionStore` (a distributed-cache implementation ships), `ICookieProtector` and `ITokenClient`. Wired
+  into the solution and `release.yml`.
+
+### Fixed
+
+- **Back-channel logout never sent a logout token.** The `end_session` emit ran in a `Task.Run` using the
+  request's service provider after the response returned, so the disposed scope threw `ObjectDisposedException`,
+  which was swallowed. The singleton `IServiceScopeFactory` is now captured first (a multi-tenant gap remained,
+  fixed in 0.8.2).
 
 ## [0.7.11], 2026-07-16
 
@@ -3296,7 +3704,7 @@ this a minor bump.
   (negative sense) to `JitProvisioningEnabled` (positive) on `OidcProviderConfig` / `SamlProviderConfig`,
   keeping `DisableJitProvisioning` as an inverting alias for back-compat. The stored column/blob is
   unchanged, so existing STORED connections keep their behaviour (an old `DisableJitProvisioning=false`
-  reads back as JIT-on) — only the C# default flips, which affects config-seeded connections. A
+  reads back as JIT-on): only the C# default flips, which affects config-seeded connections. A
   connection must now explicitly opt in to auto-provisioning of unknown federated users.
 
 ## [0.7.9], 2026-07-16
@@ -3563,6 +3971,199 @@ Hardening from a full security review (the "top 8"):
 - **Pushed Authorization Requests (PAR, RFC 9126)**: clients can POST authorize parameters to `/connect/par` and receive a short-lived `request_uri`. Per-client enforcement via `RequirePushedAuthorizationRequests`. See [PAR](par).
 - **OIDC federation**: extended upstream OIDC federation: upstream claim propagation, scope forwarding, and upstream session caps.
 
+## [0.1.100], 2026-04-26
+
+### Fixed
+
+- **Docker build includes `Authagonal.Protocol`.** The `Dockerfile` copies the Protocol project so the
+  multi-project restore resolves.
+
+## [0.1.99], 2026-04-26
+
+### Changed
+
+- **Package metadata** moves from the DrawboardLtd GitHub organization to `authagonal`, and the NuGet READMEs
+  cover `Authagonal.Protocol` and the new user lifecycle hooks. The `Authagonal.Protocol` README gains a quick
+  start and federation claim passthrough documentation.
+
+## [0.1.98], 2026-04-26
+
+### Added
+
+- **User lifecycle hooks.** `IAuthHook.OnUserUpdatedAsync(userId, email, updatedVia)` and
+  `OnUserDeletedAsync(userId, email, deletedVia)` (plus `RunOnUserUpdatedAsync` / `RunOnUserDeletedAsync` on
+  `AuthHookExtensions`) are notification-only callbacks. The admin user endpoints invoke them after updating or
+  deleting a user. `NullAuthHook` implements them as no-ops; custom `IAuthHook` implementations must add both
+  methods.
+
+### Changed
+
+- **npm package renamed `@authagonal/login`** (was `@drawboard/authagonal-login`) and published with npm
+  provenance instead of a token. The repository URL moves to `https://github.com/authagonal/authagonal`.
+  `Authagonal.OidcProvider` is removed from release packaging.
+
+## [0.1.97], 2026-04-25
+
+### Added
+
+- **OIDC federation routing and claim propagation.** An unauthenticated authorize request carrying `idp_hint` is
+  routed to the matching federation login endpoint. Claims from the upstream OIDC IdP are carried as per-session
+  federation claims, emitted on issued tokens under the same scope-gated rules as custom attributes, and
+  preserved across refresh rotations without being written to the user record. Downstream request scopes are
+  forwarded to the upstream IdP so claims stay consistent.
+- **`OidcProviderConfig.PassthroughParams`.** A whitelist of query parameters on the original `/authorize`
+  request that is forwarded to the upstream IdP's authorize URL (for example a one-shot `link_token` for
+  share-link federation). Empty by default; the standard scope, state, nonce and PKCE parameters are always
+  forwarded.
+- **`IOidcSubjectResolver`** in `Authagonal.Protocol` gains the federation-claim members, and
+  `UserStoreOidcSubjectResolver` supplies them.
+
+## [0.1.96], 2026-04-25
+
+### Added
+
+- **Environment-aware storage partitioning.** `EnvPartitioner` prefixes partition keys with `{env}|` in non-live
+  environments, and every Table Storage store uses it when building and querying keys, so several sandbox
+  environments can share one per-tenant sandbox table set without data leakage. `ITenantContext.Env` (default
+  `live`, constant `ITenantContext.LiveEnv`) names the environment. Live tables are bit-exact unchanged.
+- **Downstream organization and attributes from TCC provisioning.** A provisioning app's Try response may return
+  `OrganizationId` and `CustomAttributes`; they are merged into the user before tokens are generated and
+  persisted. `CustomAttributes` supplied at registration are passed through.
+- **Provisioning timeouts.** `ProvisioningApp.TryTimeoutSeconds` sets the Try-phase timeout (default 60
+  seconds); Confirm, Cancel and Deprovision use a fixed 10 second timeout so a slow downstream app cannot block
+  sign-up.
+
+### Changed
+
+- **`Authagonal.Storage` multi-targets `net9.0` and `net10.0`.**
+
+## [0.1.95], 2026-04-22
+
+### Added
+
+- **`Authagonal.Protocol` package.** A dependency-free OIDC/OAuth protocol layer replaces the OpenIddict-based
+  `Authagonal.OidcProvider` removed in this release: authorize, token, userinfo, discovery and JWKS endpoints,
+  PKCE validation, signing key management and `ProtocolTokenService` behind `IProtocolTokenService`. Configured
+  through `AuthagonalProtocolOptions` (`Clients`, `Scopes`, `EnableDiscoveryEndpoints`,
+  `SigningKeyLifetimeDays`, `RefreshTokenReuseGraceSeconds`, `AuthenticationScheme`), with client secrets
+  verified through `IClientSecretVerifier`.
+- **Pushed Authorization Requests (RFC 9126).** `POST /connect/par` in `Authagonal.Protocol`, and
+  `OAuthClient.RequirePushedAuthorizationRequests` to require it per client.
+- **`OAuthClient.DeviceCodeLifetimeSeconds`** (default 300) configures the device code lifetime.
+
+### Changed
+
+- **`Authagonal.Core` and `Authagonal.Protocol` multi-target `net9.0` and `net10.0`.**
+
+### Removed
+
+- **`Authagonal.OidcProvider`** (the OpenIddict wrapper from 0.1.93 and 0.1.94), replaced by
+  `Authagonal.Protocol`.
+- **`ITokenService`** is removed from `Authagonal.Core`.
+
+## [0.1.94], 2026-04-21
+
+### Added
+
+- **OIDC provider end-session endpoint** with cookie clearance and post-logout redirect handling.
+- **Structured subject rejection.** `IOidcSubjectResolver` can return an `OidcSubjectResult` that rejects with
+  `login_required`, `consent_required`, `account_selection_required` or `access_denied`.
+- **Session cap enforcement** across authorization code and refresh token rotations in the OIDC provider, so
+  federated sessions cannot be extended past their upstream expiration.
+
+### Changed
+
+- **`Authagonal.OidcProvider` is added to the NuGet release workflow.**
+
+## [0.1.93], 2026-04-21
+
+### Added
+
+- **`Authagonal.OidcProvider` package.** A lightweight OIDC provider library built on OpenIddict for hosts that
+  want `authorization_code` + PKCE without the full Authagonal server: `AddAuthagonalOidcProvider` with
+  `AuthagonalOidcProviderOptions`, automatic client seeding from configuration (`OidcClientSeeder`), authorize,
+  token and userinfo endpoint handlers, configurable token lifetimes and session cap enforcement on refresh
+  tokens. The host supplies user identity through the `IOidcSubjectResolver` extension point. (Replaced by
+  `Authagonal.Protocol` in 0.1.95, so this package only existed in releases 0.1.93 and 0.1.94.)
+
+## [0.1.92], 2026-04-21
+
+### Added
+
+- **Refresh token reuse grace window.** `Auth:RefreshTokenReuseGraceSeconds` is an opt-in retry-race tolerance:
+  when greater than 0, a consumed refresh token presented within that window is treated as an idempotent retry
+  and its successor tokens are re-delivered instead of triggering replay revocation. Rotation changes from
+  consume-first to issue-first to make the retry idempotent.
+- **Upstream session cap.** `OidcProviderConfig.SessionExpClaim` names an upstream `id_token` claim (Unix
+  seconds) that caps the lifetime of the local session established through federation. The cap is carried on the
+  authorization code and into issued refresh tokens, and persists through rotation, so a refresh token cannot
+  outlive the upstream IdP session.
+
+### Changed
+
+- **Breaking default: `RefreshTokenReuseGraceSeconds` defaults to 0** (was 10). Any reuse of a consumed refresh
+  token now revokes the family unless a grace window is configured. Clients that sometimes retry a refresh with
+  the same token (typically mobile apps on flaky connections) need the window set explicitly.
+
+## [0.1.91], 2026-04-20
+
+### Added
+
+- **User search by first and last name prefix.** Two new index tables (`UserFirstNames`, `UserLastNames`,
+  entities `UserFirstNameEntity` / `UserLastNameEntity`) are written when a user is created or renamed, cleaned
+  up on rename and removed on user delete. User search now runs the email, first-name and last-name prefix
+  lookups in parallel. `BackupDefaults.Tables` includes the two new tables, and the migration tool's store
+  factory creates them. Existing users are not indexed until they are next updated.
+
+## [0.1.90], 2026-04-20
+
+### Added
+
+- **Refresh token expiration strategy per client.** `OAuthClient.RefreshTokenExpiration` is `Absolute` (default;
+  every rotation keeps the original issuance window and the token expires at the original creation time plus
+  `AbsoluteRefreshTokenLifetimeSeconds`) or `Sliding` (the window extends by
+  `SlidingRefreshTokenLifetimeSeconds` on each rotation, capped at the absolute ceiling). The original issuance
+  time is carried through rotations to hold the cap.
+- **Client metadata on the consent screen.** `OAuthClient.Description`, `ClientUri` and `LogoUri` are returned
+  by the consent endpoint and shown on the login SPA's consent page.
+- **Disable a client.** `OAuthClient.Enabled` (default `true`); a disabled client is refused at authorize
+  (`unauthorized_client`, "Client is disabled") and at the token endpoint.
+- **`OAuthClient.BackChannelLogoutSessionRequired`** (default `true`) is persisted on the client record.
+
+## [0.1.89], 2026-04-18
+
+### Changed
+
+- Package version bump with test coverage only: 281 lines of `AuthorizeEndpointTests` for the RFC 8707 behaviour
+  added in 0.1.88 (URI format, registration, rejection, audience narrowing, refresh-token resource subsets). No
+  source changes.
+
+## [0.1.88], 2026-04-18
+
+### Added
+
+- **RFC 8707 resource indicators.** `/connect/authorize` accepts one or more `resource` parameters. Each must be
+  an absolute URI without a fragment and must appear in the client's `Audiences`, otherwise the request fails
+  with `invalid_target`. The resources are stored on the authorization code (`AuthorizationCode.Resources`),
+  validated again at the token endpoint, narrow the access token's `aud` to the requested resources (falling
+  back to the client's configured audiences when none are requested), and are preserved through refresh token
+  rotation and client credentials grants. `ITokenService.CreateAccessTokenAsync`, `CreateRefreshTokenAsync`,
+  `HandleRefreshTokenAsync` and `HandleClientCredentialsAsync` gain an optional `resources` argument.
+
+### Security
+
+- **`System.Security.Cryptography.Xml` is pinned to 9.x** in `Authagonal.Server` to avoid the vulnerable 8.0.2
+  transitive version (GHSA-37gx-xxp4-5rgx and GHSA-w3x6-4m5h-cxqf).
+
+## [0.1.87], 2026-04-18
+
+### Changed
+
+- **Documentation.** New guides for scope management, dynamic client registration and front-channel logout, and
+  a dark-mode section in the branding guide. The release commit also back-filled CHANGELOG entries for 0.1.82 to
+  0.1.86. No source changes in this range (the commit message lists the features themselves, which are already
+  described by those entries).
+
 ## [0.1.86], 2026-04-17
 
 ### Added
@@ -3619,6 +4220,69 @@ Hardening from a full security review (the "top 8"):
 - **Refresh token grace period reduced**: shorter window for accepting a refresh token after rotation.
 - **SCIM endpoints scoped to client**: SCIM requests are now scoped to the requesting OAuth client with per-client rate limiting, preventing cross-client enumeration.
 - **Consent data error handling**: improved logging and error paths when persisted consent data is malformed.
+
+## [0.1.81], 2026-04-14
+
+### Fixed
+
+- **`required` properties removed from the client and provider config models.** `OAuthClient`,
+  `OidcProviderConfig` and `SamlProviderConfig` use empty-string defaults instead of `required` members, which
+  the source-generated JSON serializer used for Native AOT cannot populate. Code that constructed these models
+  with object initializers keeps compiling; the compiler no longer forces the properties to be set.
+
+## [0.1.80], 2026-04-14
+
+### Added
+
+- **Server startup test.** `ServerStartupTests` builds the host to catch dependency-injection lifetime errors
+  like the one fixed here.
+
+### Changed
+
+- **`WebAuthnService`, `IProvisioningAppProvider` and `IProvisioningOrchestrator` are scoped** (previously
+  singletons), so they can depend on per-request or per-tenant stores.
+
+## [0.1.79], 2026-04-14
+
+### Changed
+
+- **Admin endpoint responses are typed DTOs** (users, MFA admin, consent). Error responses use a shared
+  `ErrorInfoResponse` DTO across endpoints, and `ExternalLoginInfo` is renamed `ExternalLoginDto`. This range
+  also includes the 0.1.78 work (no `v0.1.78` tag exists).
+
+### Fixed
+
+- **AOT serialization fixes.** Nullable `UpdatedAt` fields fall back to `CreatedAt` when null, recovery codes
+  are returned as a `List`, and explicit `IResult` casts keep `TypedResults.Json` compatible with
+  source-generated serialization.
+
+## [0.1.77], 2026-04-14
+
+### Changed
+
+- **Endpoint responses are strongly-typed DTOs.** Anonymous response objects across the admin (roles, SCIM
+  tokens), auth, consent, device authorization, MFA setup and logout endpoints are replaced by DTOs
+  (`ResponseModels.cs`) returned with `TypedResults.Json` and registered in `AuthagonalJsonContext`, for Native
+  AOT serialization. JSON shapes are unchanged.
+
+## [0.1.76], 2026-04-14
+
+### Changed
+
+- **Breaking: `OidcDiscoveryDocument` is renamed `DiscoveryResponse`.** Only hosts that referenced the type from
+  0.1.75 are affected.
+
+## [0.1.75], 2026-04-14
+
+### Changed
+
+- **Discovery and JWKS responses are typed DTOs.** `/.well-known/openid-configuration` and the JWKS endpoint
+  return `OidcDiscoveryDocument`, `JwksDocument` and `JwkKey` through `TypedResults.Json`, registered in
+  `AuthagonalJsonContext`, so they serialize under Native AOT. The wire format is unchanged.
+  (`OidcDiscoveryDocument` is renamed in 0.1.76.)
+- **Documentation** for the consent screen, device authorization grant, token introspection, back-channel
+  logout, Vault Transit signing, Resend, login UI CSS variables and backup integrity hashes is brought up to
+  date. The release commit also back-filled CHANGELOG entries 0.1.67 to 0.1.74.
 
 ## [0.1.74], 2026-04-10
 
@@ -3737,6 +4401,13 @@ Hardening from a full security review (the "top 8"):
 
 - **PBKDF2 iterations**: reduced from 100,000 to 50,000 to balance security with performance.
 
+## [0.1.61], 2026-04-08
+
+### Fixed
+
+- **Unused `react-i18next` imports removed from `DevicePage`** in the login app. Package versions bumped to
+  0.1.61.
+
 ## [0.1.60], 2026-04-08
 
 ### Added
@@ -3777,6 +4448,124 @@ This release is a re-cut of 0.1.57 with package version bumps. See [0.1.57] for 
 - **Conditional background services**: `GrantReconciliationService` and `SigningKeyRotationService` only register in single-tenant mode. Multi-tenant hosts manage these per-tenant.
 - **Demo login pages**: `AcmeLoginPage` and `RegisterPage` refactored to use the library's UI components (`Button`, `Input`, `Label`, `Alert`, `CardTitle`, `CardFooter`) instead of the old pre-Tailwind CSS classes.
 
+## [0.1.56], 2026-04-08
+
+### Added
+
+- **Enter key triggers the SSO check.** Pressing Enter in the login email field runs the SSO domain check when
+  the address is valid.
+
+## [0.1.55], 2026-04-07
+
+### Added
+
+- **`RegisterPage` and a standalone `App` component** are exported from `@drawboard/authagonal-login`, so
+  consumers can mount the registration page or the full routing-enabled login application.
+
+## [0.1.54], 2026-04-07
+
+### Changed
+
+- **`AddAuthagonal` is split.** `AddAuthagonalCore` registers the services a multi-tenant host needs, and
+  `AddAuthagonal` is the single-tenant entry point that adds the singleton-dependent infrastructure. The
+  `multiTenant` parameter added in 0.1.50 is removed in favour of this split.
+- **`TccProvisioningOrchestrator` resolves `IUserProvisionStore` from the request scope** instead of by
+  constructor injection.
+
+## [0.1.53], 2026-04-07
+
+### Fixed
+
+- **`DynamicCorsPolicyProvider` and `ScimBearerAuthenticationHandler` resolve `IClientStore` and
+  `IScimTokenStore` from the request scope** instead of by constructor injection, so a multi-tenant host's
+  per-tenant stores are used for CORS decisions and SCIM bearer authentication.
+
+## [0.1.52], 2026-04-07
+
+### Fixed
+
+- **JWT bearer validation supports a scoped `IKeyManager`.** `IKeyManager` is resolved per request through
+  `IHttpContextAccessor` (now registered) instead of being captured once, so a multi-tenant host with a scoped
+  key manager validates bearer tokens against the right tenant's keys.
+
+## [0.1.51], 2026-04-07
+
+### Changed
+
+- Package version bump (`Authagonal.Server`, `Authagonal.Storage` and `@drawboard/authagonal-login` set to
+  0.1.51). No source changes in this range.
+
+## [0.1.50], 2026-04-07
+
+### Changed
+
+- **Multi-tenant mode is an explicit `AddAuthagonal` parameter** instead of being detected from keyed services.
+  The single-tenant background services, `KeyManager` and `SigningKeyRotationService` are registered according
+  to that mode. (Superseded in 0.1.54 by the `AddAuthagonalCore` split.)
+
+## [0.1.49], 2026-04-07
+
+### Fixed
+
+- **Single-tenant background services are conditional.** `TokenCleanupService`, `GrantReconciliationService`,
+  `ClientSeedService` and `ProviderSeedService` are registered only for single-tenant hosts, so multi-tenant
+  deployments (such as authagonal-cloud) no longer try to register them.
+
+## [0.1.48], 2026-04-06
+
+### Fixed
+
+- **`GrantReconciliationService` is only registered when keyed `TableClient` services exist**, so a multi-tenant
+  host that supplies its own stores no longer gets a reconciliation service it cannot construct.
+
+## [0.1.47], 2026-04-06
+
+### Changed
+
+- **Demo sample client is a public client.** The sample OAuth client in the custom-server demo no longer
+  requires a client secret (`appsettings.json`). Package versions bumped to 0.1.47.
+
+## [0.1.46], 2026-04-06
+
+### Changed
+
+- **Demo login pages use the package UI components.** The custom-server demo's `AcmeLoginPage` and
+  `RegisterPage` replace custom CSS with the `Button`, `Input`, `Label`, `Alert`, `CardTitle`, `CardFooter` and
+  `Separator` components exported by `@drawboard/authagonal-login`. No library API change.
+
+## [0.1.45], 2026-04-06
+
+### Added
+
+- **k6 load tests.** `tests/load` holds smoke, stress and soak suites with shared helpers, and a `load-test.yml`
+  workflow runs smoke tests after a release, stress tests on demand and soak tests daily. The demo server gains
+  a `load-test` OAuth client.
+
+### Changed
+
+- **`Authagonal.Backup` is packed in the release pipeline.**
+
+## [0.1.44], 2026-04-06
+
+### Changed
+
+- **Signing key operations extracted into `SigningKeyOps`.** Key generation, rotation checks
+  (`CheckAndRotateAsync`), RSA parameter serialization, signing credentials and JWKS building move from
+  `KeyManager` into a reusable static class so cloud and multi-tenant `IKeyManager` implementations can share
+  them. `KeyManager` and `SigningKeyRotationService` delegate to it. Behaviour is unchanged.
+
+## [0.1.43], 2026-04-06
+
+### Added
+
+- **Automatic signing key rotation.** `SigningKeyRotationService` is a hosted service that periodically checks
+  whether the active signing key is approaching expiry and rotates it. Only the cluster leader rotates, to avoid
+  concurrent key generation. It is off by default: set `Auth:KeyRotationEnabled` to `true`.
+  `Auth:KeyRotationCheckIntervalMinutes` (default 360) sets the check interval and
+  `Auth:KeyRotationLeadTimeDays` (default 14) sets how far ahead of expiry a new key is created.
+  `KeyManager.ForceRefreshAsync` reloads keys from storage so the new key is picked up as soon as the old one is
+  deactivated.
+
 ## [0.1.42], 2026-04-06
 
 ### Fixed
@@ -3784,11 +4573,128 @@ This release is a re-cut of 0.1.57 with package version bumps. See [0.1.57] for 
 - **npm package CSS**: login-app now imports `styles.css` as a side effect in the entry point, so Vite emits `dist/index.css` in library mode. Fixed export map to point to `dist/index.css`.
 - **npm package types**: swapped build order to `vite build && tsc -b` so Vite's `emptyOutDir` doesn't wipe TypeScript declaration files.
 
+## [0.1.41], 2026-04-06
+
+### Added
+
+- **`Authagonal.Backup` library.** `BackupService`, `RestoreService`, `MergeService` and `RollupService` with
+  `BackupOptions` (`Tables`, `TablePrefix`, `Incremental`, `Gzip`, `DryRun`) and `RestoreOptions` (`Tables`,
+  `TablePrefix`, `Mode`, `DryRun`; `RestoreMode` is `Upsert`, `Merge` or `Clean`). Storage is abstracted behind
+  `IBackupSource` / `IBackupTarget`, with file-system implementations. `BackupDefaults.Tables` lists the 20 data
+  tables and excludes the transient `SamlReplayCache` and `OidcStateStore` tables. Each backup writes a
+  `BackupManifest` (backup id, mode, watermark, parent backup id, per-table counts, tombstone count).
+- **Incremental backups with tombstones.** `ITombstoneWriter` (`WriteAsync`, `WriteBatchAsync`) records deletes
+  in a `Tombstones` table, and `TableTombstoneWriter` is wired into the Table Storage stores (users, clients,
+  grants, MFA, SSO domains, providers, SCIM, roles, signing keys, provisions), so an incremental backup, which
+  filters on the table `Timestamp` watermark, also captures deletions.
+
+### Changed
+
+- **`Authagonal.Backup` and `Authagonal.Restore` tools are rebuilt on the library**, replacing the 0.1.7
+  stand-alone implementation.
+
+## [0.1.40], 2026-04-05
+
+### Changed
+
+- Package versions bumped to 0.1.40; the custom-server demo consumes a local package tarball with the new
+  dependencies (`i18next`, `tailwind-merge`, `lucide-react`, `class-variance-authority`).
+
+### Fixed
+
+- **Stylesheet export path.** The `@drawboard/authagonal-login` styles export points at `dist/index.css` instead
+  of `styles.css`.
+
+## [0.1.39], 2026-04-05
+
+### Changed
+
+- **Login package styles are a side effect import.** `login-app/src/index.ts` imports its stylesheet as a side
+  effect so consumers get the styles without a separate import. Package versions bumped to 0.1.39.
+
 ## [0.1.38], 2026-04-05
 
 ### Changed
 
 - **Compiled library**: `@drawboard/authagonal-login` now ships compiled JS + CSS in `dist/` instead of raw TypeScript source. Consumers no longer need Tailwind or the Vite build toolchain.
+
+## [0.1.37], 2026-04-05
+
+### Changed
+
+- **`@drawboard/authagonal-login` ships compiled output.** The package previously exported raw TypeScript that
+  used `@/` path aliases, which broke any consumer that did not configure the same aliases. It now builds as an
+  ES module library (`dist/index.js` plus type declarations) with React externalized, and its `exports` point at
+  `dist/`. `vite.config.ts` is the library build and the new `vite.spa.config.ts` builds the standalone SPA.
+- **Server image builds the standalone SPA.** The `Dockerfile` runs `build:spa` instead of the library build.
+
+## [0.1.36], 2026-04-05
+
+### Changed
+
+- Package version bump (server, demo and `@drawboard/authagonal-login` set to 0.1.36). The release commit
+  repeats the 0.1.35 message about multi-hook support and `ClusterNode`; the range carries no source changes.
+
+## [0.1.35], 2026-04-05
+
+### Changed
+
+- Package version bump (server, demo and `@drawboard/authagonal-login` set to 0.1.35). The release commit
+  message describes multi-hook support and `ClusterNode`, but that code is already in the 0.1.33 range and this
+  range carries no source changes.
+
+## [0.1.34], 2026-04-05
+
+### Changed
+
+- Package version bump (server, demo and `@drawboard/authagonal-login` set to 0.1.34). The release commit
+  carries no source changes.
+
+## [0.1.33], 2026-04-05
+
+### Added
+
+- **Role-based access control.** `Role` (`Id`, `Name`, `Description`, `CreatedAt`, `UpdatedAt`), `IRoleStore`
+  and a role admin API: `GET/POST /api/v1/roles/`, `GET/PUT/DELETE /api/v1/roles/{roleId}`,
+  `POST /api/v1/roles/assign`, `POST /api/v1/roles/unassign` and `GET /api/v1/roles/user/{userId}`. `AuthUser`
+  gains a `Roles` list.
+- **Roles and SCIM groups in tokens (opt-in).** `OAuthClient.IncludeGroupsInTokens` (default `false`) makes the
+  token service emit the user's roles and SCIM groups, and the userinfo endpoint reflects them for clients that
+  opt in.
+- **`AuthUser.LastLoginAt`** is recorded on every successful sign-in.
+- **`IAuditLogger`.** `LogAsync(actor, action, entityType, entityId, detail)` is called from the admin and auth
+  endpoints so a host can record an audit trail. `NullAuditLogger` is the default.
+- **Multiple `IAuthHook` implementations.** Endpoints take `IEnumerable<IAuthHook>` and run every registered
+  hook in registration order through the new `AuthHookExtensions` (`RunOnUserAuthenticatedAsync`,
+  `RunOnUserCreatedAsync`, `RunOnLoginFailedAsync`, `RunOnTokenIssuedAsync`, `RunResolveMfaPolicyAsync`,
+  `RunOnMfaVerifiedAsync`). `RunResolveMfaPolicyAsync` threads the policy through each hook in turn.
+- **Cluster node identity and leader election.** `ClusterNode` is extracted as the identity primitive (it was
+  buried in `DistributedRateLimiter`) and `ClusterLeaderService` elects the lowest node id among live gossip
+  peers as leader. `ClusterDiscoveryService` and `ClusterGossipService` use `ClusterNode` directly.
+
+### Changed
+
+- **`IRateLimiter` and the cluster services are reworked** to sit on `ClusterNode`; hosts that implement
+  `IRateLimiter` or reference the gossip types directly should rebuild against this release.
+
+## [0.1.32], 2026-04-01
+
+### Added
+
+- **`ITenantContext`.** Issuer resolution moves behind this interface so a multi-tenant host can supply
+  per-tenant configuration. `DefaultTenantContext` serves single-tenant deployments by reading the issuer from
+  configuration, and endpoints use the injected context instead of reading `IConfiguration["Issuer"]` directly.
+- **`IKeyManager`.** Signing key management is extracted behind an interface so a host can plug in a per-tenant
+  key strategy.
+- **Tailwind-based login UI.** The login SPA is rebuilt on Tailwind CSS with reusable `Button`, `Input`,
+  `Label`, `Card`, `Alert` and `Separator` components (CVA variants), `lucide-react` status icons and `@/` path
+  aliases. All authentication pages are migrated.
+
+### Changed
+
+- **Storage service registrations use `TryAdd` semantics**, so a multi-tenant host can register scoped
+  implementations before the library's defaults.
+- **License** changes from proprietary (Drawboard Ltd.) to MIT.
 
 ## [0.1.31], 2026-03-31
 
@@ -3812,6 +4718,32 @@ This release is a re-cut of 0.1.57 with package version bumps. See [0.1.57] for 
 - **Tailwind CSS**: login SPA migrated from custom CSS to Tailwind. Reusable UI components exported: `Button`, `Input`, `Label`, `Card`, `Alert`, `Separator`, `cn`.
 - **Multiple IAuthHook support**: all registered `IAuthHook` implementations now run in registration order via `IEnumerable<IAuthHook>` pipeline.
 - **Backup & restore library**: `src/Authagonal.Backup` with `BackupService`, `RestoreService`, tombstone-based delete tracking, merge and rollup for backup compaction.
+
+## [0.1.29], 2026-03-30
+
+### Added
+
+- **SCIM request logging middleware** in `AuthagonalExtensions`, to diagnose SCIM connectivity from identity
+  providers.
+
+## [0.1.28], 2026-03-30
+
+### Changed
+
+- **SCIM auth handler debug logging.** `ScimBearerAuthenticationHandler` logs additional detail to help diagnose
+  Entra connectivity. No behaviour change.
+
+## [0.1.27], 2026-03-30
+
+### Changed
+
+- **Demo SAML metadata** points at the unified Entra enterprise app that supports both SAML SSO and SCIM
+  provisioning (`demos/custom-server/appsettings.json`, `demos/docker-compose.yml`).
+
+### Fixed
+
+- **Ambiguous route for the SCIM base URL.** `/scim/v2` and `/scim/v2/` both matched and conflicted with the SPA
+  fallback route (`AmbiguousMatchException`). Only `/scim/v2/` is mapped now.
 
 ## [0.1.26], 2026-03-30
 
@@ -3862,6 +4794,139 @@ This release is a re-cut of 0.1.57 with package version bumps. See [0.1.57] for 
 
 - **QR code test**: `TotpSetup_ReturnsQrCodeAndSetupToken` test assertion updated from SVG to PNG to match actual QR code output format.
 
+## [0.1.23], 2026-03-30
+
+### Changed
+
+- **`Microsoft.Bcl.Memory` dependency** added to `Authagonal.Server`. Package versions bumped to 0.1.23.
+
+## [0.1.22], 2026-03-30
+
+### Changed
+
+- **Terms-of-service acceptance moved to registration.** The checkbox is removed from the custom-server demo's
+  login page and required only on its registration page.
+
+## [0.1.21], 2026-03-30
+
+### Fixed
+
+- **Login app TOTP setup state types the manual key.** `MfaSetupPage` adds `manualKey` to its TOTP setup state
+  so the Base32 key returned by the setup endpoint (0.1.19) is carried to the manual-entry field.
+
+## [0.1.20], 2026-03-30
+
+### Fixed
+
+- **Pending MFA credentials no longer appear in the setup status.** The MFA setup status endpoint excludes
+  credentials still named `TOTP (pending)` or `WebAuthn (pending)` from both the method list and the "MFA
+  enabled" determination, so an abandoned setup is not reported as an enrolled factor.
+
+## [0.1.19], 2026-03-30
+
+### Added
+
+- **Manual TOTP entry.** The TOTP setup step returns the secret as a Base32 key so users can type it in when the
+  QR code cannot be scanned.
+- **"Skip for now" on MFA setup** when setup is not forced (`MfaPolicy` is not `Required`). New strings are
+  translated across 7 languages.
+
+### Changed
+
+- **TOTP QR codes are generated as PNG instead of SVG** for broader authenticator-app compatibility.
+
+## [0.1.18], 2026-03-30
+
+### Fixed
+
+- **Orphaned MFA setup credentials broke enrollment.** Pending TOTP and WebAuthn setup credentials left by
+  cancelled attempts are now cleaned up when a new setup starts, and the "is TOTP already enrolled" check
+  ignores pending credentials, so a user who abandoned setup once can enroll later.
+
+## [0.1.17], 2026-03-30
+
+### Added
+
+- **MFA enrollment prompt after password login.** When the effective MFA policy is `Enabled` and the user has
+  not enrolled, `POST /api/auth/login` now includes `mfaAvailable: true` and the `clientId` in its success
+  response. The login SPA uses it to offer MFA setup once per user and client (dismissal is remembered in
+  `localStorage`), and the user can continue without enrolling. `MfaLoginResponse` in the login package types
+  gains `mfaAvailable` and `clientId`.
+- **Prompt strings** in 8 languages (en, de, es, fr, pt, tlh, vi, zh-Hans).
+
+## [0.1.16], 2026-03-30
+
+### Added
+
+- **MIT license.** A `LICENSE` file is added and the package metadata declares MIT.
+
+### Changed
+
+- **Demo server MFA policy** is `Required` instead of optional in `demos/custom-server/appsettings.json`.
+
+## [0.1.15], 2026-03-30
+
+### Added
+
+- **MFA documentation** in English and 6 translations (de, es, fr, pt, vi, zh-Hans), with a new Security section
+  in the docs navigation and the labels added to every docs locale.
+
+### Changed
+
+- Package versions bumped to 0.1.15 (`Authagonal.Server`, `Authagonal.Storage`, `@drawboard/authagonal-login`).
+
+## [0.1.14], 2026-03-30
+
+### Added
+
+- **Gzip compression for backups.** `Authagonal.Backup` takes an optional `--gzip` flag that writes `.jsonl.gz`
+  files, and `Authagonal.Restore` decompresses `.gz` backups automatically. The backup and restore docs (7
+  languages) gain compression examples, and Backup & Restore appears in the docs sidebar.
+
+## [0.1.13], 2026-03-29
+
+### Added
+
+- **Backup and restore documentation** in 7 languages (en, de, es, fr, pt, vi, zh-Hans), linked from the docs
+  index.
+- **`tag.sh`** release helper script.
+
+### Changed
+
+- **Docker builds and deploys run on tags only.** The redundant `docker.yml` workflow (master push and PR) is
+  removed because `release.yml` (tag-triggered) already did the same work.
+
+## [0.1.12], 2026-03-29
+
+### Fixed
+
+- **Checkboxes and radios rendered full width.** The login app's global `input { width: 100% }` rule is now
+  scoped to exclude checkbox and radio inputs, so the terms-of-service checkbox no longer stretches.
+
+## [0.1.11], 2026-03-29
+
+### Changed
+
+- Package references and the `@drawboard/authagonal-login` version bumped to 0.1.11.
+
+### Fixed
+
+- **Terms-of-service checkbox alignment** in the custom-server demo login page.
+
+## [0.1.10], 2026-03-29
+
+### Changed
+
+- **Node 24 build toolchain.** The release workflow and the Dockerfiles (server image, custom-server demo,
+  sample-app frontend) move to Node 24.
+
+### Fixed
+
+- **Deprecated forwarded-header network types.** `AuthagonalExtensions` replaces
+  `Microsoft.AspNetCore.HttpOverrides.IPNetwork` / `KnownNetworks` with `System.Net.IPNetwork` /
+  `KnownIPNetworks` when trusting forwarded headers, replacing the obsolete types. The trusted range
+  (`0.0.0.0/0`) is unchanged.
+
 ## [0.1.9], 2026-03-29
 
 ### Improved
@@ -3894,6 +4959,32 @@ This release is a re-cut of 0.1.57 with package version bumps. See [0.1.57] for 
 - **Login response**: `POST /api/auth/login` may now return `{ mfaRequired, challengeId, methods, webAuthn }` or `{ mfaSetupRequired, setupToken }` instead of setting a cookie directly.
 - **Fido2.AspNet** dependency added for WebAuthn credential verification.
 - **QRCoder** dependency added for server-side QR code generation.
+
+## [0.1.7], 2026-03-29
+
+### Added
+
+- **Table Storage backup tool.** `tools/Authagonal.Backup` is a CLI that exports every Authagonal table to JSONL
+  files. Incremental mode uses the Azure Table Storage `Timestamp` property so only entities modified since the
+  last backup are exported. A Dockerfile is included for cron or container use.
+
+## [0.1.6], 2026-03-29
+
+### Added
+
+- **Branding-controlled language picker.** `branding.json` accepts a `languages` array of `{ code, label }`
+  entries that decides which languages the login UI offers. When it is absent the standard 7 languages are shown
+  (`languages` defaults to `null` in the login app's branding type).
+- **Klingon (`tlh`) translation.** A `tlh` locale is bundled with the login app as an easter egg and is shown in
+  the demo's picker.
+
+### Changed
+
+- **Release and demo deploy workflows.** The duplicate `deploy-demo` job is removed from `release.yml` (the
+  master-push deploy already covers the same commit), and the remaining deploy jobs use the `azure-demo` GitHub
+  environment for Azure OIDC federation, because federated credentials cannot match a `refs/tags/v*` wildcard
+  subject. `demos/infra/setup.sh` now creates OIDC federated credentials instead of the deprecated `--sdk-auth`
+  service principal.
 
 ## [0.1.5], 2026-03-29
 

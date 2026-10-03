@@ -6,32 +6,34 @@ locale: vi
 
 # Bắt đầu nhanh
 
-Chạy Authagonal trên máy local trong 5 phút.
+Chạy Authagonal trên máy cục bộ trong 5 phút.
 
-## 1. Khởi động máy chủ
+## 1. Khởi động máy chủ {#1-start-the-server}
 
 ```bash
 docker compose up
 ```
 
-Lệnh này khởi động Authagonal tại `http://localhost:8080` với Azurite làm hệ thống lưu trữ.
+Lệnh này khởi động Authagonal tại `http://localhost:8080` cùng với Azurite làm kho lưu trữ.
 
-## 2. Xác minh đang chạy
+> Tệp compose đặt `Auth__AllowInsecureHttp=true`, vì RFC 6749 §3.1/§3.2 yêu cầu TLS tại authorization endpoint và token endpoint, và nếu không có thiết lập này Authagonal sẽ từ chối các request plaintext tới `/connect/*`. Công tắc này chỉ dành cho máy tính cá nhân. Bất cứ thứ gì người khác có thể truy cập tới đều phải đặt sau một proxy kết thúc TLS có chuyển tiếp `X-Forwarded-Proto: https`, và gỡ bỏ công tắc này: xem [Cài đặt](installation).
+
+## 2. Kiểm tra máy chủ đang chạy {#2-verify-its-running}
 
 ```bash
-# Kiểm tra sức khỏe
+# Health check
 curl http://localhost:8080/health
 
-# Khám phá OIDC
+# OIDC discovery
 curl http://localhost:8080/.well-known/openid-configuration
 
-# Trang đăng nhập (trả về SPA)
+# Login page (returns the SPA)
 curl http://localhost:8080/login
 ```
 
-## 3. Đăng ký Client
+## 3. Đăng ký một client {#3-register-a-client}
 
-Thêm client vào tệp `appsettings.json` (hoặc truyền qua biến môi trường):
+Thêm một client vào `appsettings.json` (hoặc truyền qua biến môi trường):
 
 ```json
 {
@@ -51,11 +53,11 @@ Thêm client vào tệp `appsettings.json` (hoặc truyền qua biến môi trư
 }
 ```
 
-Các client được khởi tạo khi khởi động: an toàn để chạy trong mỗi lần triển khai.
+Client được nạp sẵn khi khởi động, chạy lại ở mỗi lần triển khai cũng an toàn.
 
-## 4. Khởi tạo đăng nhập
+## 4. Bắt đầu một lượt đăng nhập {#4-initiate-a-login}
 
-Chuyển hướng người dùng đến:
+Chuyển hướng người dùng tới:
 
 ```
 http://localhost:8080/connect/authorize
@@ -68,11 +70,11 @@ http://localhost:8080/connect/authorize
   &code_challenge_method=S256
 ```
 
-Người dùng sẽ thấy trang đăng nhập, xác thực, và được chuyển hướng trở lại với mã ủy quyền.
+Người dùng thấy trang đăng nhập, xác thực, rồi được chuyển hướng trở lại kèm một authorization code.
 
-> **Người dùng đầu tiên:** đăng ký một người dùng tại `http://localhost:8080/login/register`, hoặc tạo một người dùng qua [Admin API](admin-api). Việc tự đăng ký sẽ gửi một email xác minh, và khi chưa cấu hình trình gửi email (mặc định cục bộ) thì email đó bị loại bỏ, nên để kiểm thử cục bộ hãy đặt `Auth__AutoConfirmEmailDomains__0=example.dev` (bất kỳ tên miền nào bạn dùng để đăng ký) để bỏ qua xác minh, hoặc cấu hình `Email:ResendApiKey` + `Email:SenderEmail`. Xem [Cấu hình → Email](configuration#email).
+> **Người dùng đầu tiên:** đăng ký một người dùng tại `http://localhost:8080/login/register`, hoặc tạo qua [Admin API](admin-api). Tự đăng ký sẽ gửi email xác minh, và khi chưa cấu hình bên gửi email nào (mặc định trên máy cục bộ) thì email đó bị loại bỏ, nên để thử nghiệm cục bộ hãy đặt `Auth__AutoConfirmEmailDomains__0=example.dev` (bất kỳ tên miền nào bạn dùng để đăng ký) để bỏ qua bước xác minh, hoặc cấu hình `Email:ResendApiKey` + `Email:SenderEmail`. Xem [Cấu hình → Email](configuration#email).
 
-## 5. Đổi mã lấy token
+## 5. Đổi code lấy token {#5-exchange-the-code}
 
 ```bash
 curl -X POST http://localhost:8080/connect/token \
@@ -90,18 +92,21 @@ Phản hồi:
   "access_token": "eyJ...",
   "id_token": "eyJ...",
   "token_type": "Bearer",
-  "expires_in": 1800
+  "expires_in": 1800,
+  "scope": "openid profile email"
 }
 ```
 
-## Demo hoạt động
+`expires_in` là `AccessTokenLifetimeSeconds` của client (1800 với một client được nạp sẵn trừ khi bạn tự đặt). Ở đây không có `refresh_token`: client chỉ nhận được refresh token khi nó đặt `AllowOfflineAccess` và request có yêu cầu scope `offline_access`.
 
-Thư mục `demos/sample-app/` chứa một ứng dụng React SPA + API hoàn chỉnh triển khai đầy đủ luồng OIDC ở trên. Xem [README của demos](https://github.com/authagonal/authagonal/tree/master/demos) để biết hướng dẫn.
+## Bản demo hoạt động {#working-demo}
 
-## Bước tiếp theo
+Thư mục `demos/sample-app/` chứa một React SPA + API hoàn chỉnh hiện thực toàn bộ luồng OIDC ở trên. Xem [README của demos](https://github.com/authagonal/authagonal/tree/master/demos) để biết hướng dẫn.
 
-- [Cấu hình](configuration): tài liệu tham khảo đầy đủ cho tất cả cài đặt
-- [Khả năng mở rộng](extensibility): tích hợp như thư viện, thêm hook tùy chỉnh
-- [Tùy chỉnh giao diện](branding): tùy chỉnh giao diện đăng nhập
-- [SAML](saml): thêm nhà cung cấp SSO qua SAML
-- [Cấp phát](provisioning): cấp phát người dùng vào các ứng dụng phía sau
+## Bước tiếp theo {#next-steps}
+
+- [Cấu hình](configuration), tài liệu tham chiếu đầy đủ cho mọi thiết lập
+- [Khả năng mở rộng](extensibility), chạy dưới dạng thư viện, thêm hook tùy chỉnh
+- [Thương hiệu](branding), tùy biến giao diện đăng nhập
+- [SAML](saml), thêm các provider SAML SSO
+- [Cấp phát](provisioning), cấp phát người dùng vào các ứng dụng downstream

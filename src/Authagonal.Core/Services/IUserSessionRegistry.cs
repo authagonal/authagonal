@@ -13,7 +13,7 @@ public sealed record SessionDescriptor(
 /// <summary>
 /// Optional companion to a server-side <c>ITicketStore</c>: lets a user enumerate and revoke their own
 /// active sessions. Register an implementation to light up the account page's "active sessions" section and
-/// the <c>/api/account/sessions</c> endpoints; without one, session self-management is simply absent.
+/// the <c>/api/auth/sessions</c> endpoints; without one, session self-management is simply absent.
 /// </summary>
 public interface IUserSessionRegistry
 {

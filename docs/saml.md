@@ -21,13 +21,13 @@ Authagonal includes a homebrew SAML 2.0 Service Provider implementation. No thir
 - Artifact binding
 - AES-GCM assertion encryption (.NET `EncryptedXml` limitation; configure AES-CBC at the IdP, see below)
 
-**IdP-initiated sign-in works, and the tile does not need reconfiguring** — but the unsolicited assertion is not what signs the user in. A Response with no `InResponseTo` is discarded, and the ACS redirects the browser to `/saml/{connectionId}/login`, which issues a fresh AuthnRequest bound to that browser. The user is already authenticated at the IdP, so it answers immediately and the round trip is invisible; the IdP's `RelayState` rides across as the return URL, so they still land on the deep link the tile was configured with.
+**IdP-initiated sign-in works, and the tile does not need reconfiguring**, but the unsolicited assertion is not what signs the user in. A Response with no `InResponseTo` is discarded, and the ACS redirects the browser to `/saml/{connectionId}/login`, which issues a fresh AuthnRequest bound to that browser. The user is already authenticated at the IdP, so it answers immediately and the round trip is invisible; the IdP's `RelayState` rides across as the return URL, so they still land on the deep link the tile was configured with.
 
-The assertion has to be discarded because accepting an unsolicited one lets anyone with an account at that IdP sign a session into any user-agent — every §4.1.4.3 rule is satisfied by an assertion the attacker obtained legitimately for their own account — and because requiring the request cookie on the SP-initiated path is worth nothing while the same assertion replays with `InResponseTo` removed. Restarting the flow keeps the tile working without accepting any of that: whoever ends up signed in is whoever the IdP names in the *new* exchange.
+The assertion has to be discarded because accepting an unsolicited one lets anyone with an account at that IdP sign a session into any user-agent (every §4.1.4.3 rule is satisfied by an assertion the attacker obtained legitimately for their own account) and because requiring the request cookie on the SP-initiated path is worth nothing while the same assertion replays with `InResponseTo` removed. Restarting the flow keeps the tile working without accepting any of that: whoever ends up signed in is whoever the IdP names in the *new* exchange.
 
 The restart is one-shot per browser. An IdP that answers the AuthnRequest with another unsolicited Response is refused with `error=saml_unsolicited` rather than bounced again, so a misconfigured IdP cannot produce a redirect loop.
 
-To accept the unsolicited assertion as it stands instead, set `allowUnsolicitedResponses: true` on the connection — **off by default**. With it on, the request-ID check is skipped for unsolicited responses but assertion-ID single-use is still enforced (see Security).
+To accept the unsolicited assertion as it stands instead, set `allowUnsolicitedResponses: true` on the connection (**off by default**). With it on, the request-ID check is skipped for unsolicited responses but assertion-ID single-use is still enforced (see Security).
 
 ## Azure AD Setup
 
@@ -51,11 +51,13 @@ Add to `appsettings.json`:
 }
 ```
 
-Providers are seeded on startup. SSO domain mappings are registered automatically from `AllowedDomains`. Config-seeded providers require a `MetadataLocation` URL and do not get an SP keypair (so no signed AuthnRequests, encrypted assertions, or signed logout messages); use the Admin API for those features.
+Providers are seeded on startup. `ConnectionId`, `EntityId` and `MetadataLocation` are required for a new connection (startup fails without them). SSO domain mappings are registered automatically from `AllowedDomains`, except for an organisation-scoped connection, whose domains are matched only within its organisation. A newly seeded provider does not get an SP keypair (so no signed AuthnRequests, encrypted assertions, or signed logout messages); use the Admin API for those features.
+
+The seed can also set `OrganizationId`, `JitProvisioningEnabled` (default `false`), `ChallengeMfaAfterLogin` (default `true`), `ProvisioningAttributeParams`, `AllowUninvitedJit` and `AllowUnsolicitedResponses`. Seeding reads the stored connection and merges, so an existing connection keeps its SP keypair, pasted metadata, NameID format, `signAuthnRequests` and icon, which the seed has no field for. The behaviour flags above are written from the seed on every start, so a flag you leave out reverts to its default.
 
 `EntityId` is **your SP entity ID** (the identifier you register at the IdP), not the IdP's entity ID.
 
-> **An IdP on your own private network.** `MetadataLocation` must be https and, by default, must resolve to a publicly routable address — the metadata document carries the certificates every assertion is validated against, and Authagonal refuses internal targets on every URL it fetches. To federate with an on-premises IdP, name it in [`Auth:AllowedInternalTargets`](configuration#outbound-fetches-ssrf-guard). If the IdP publishes no https metadata endpoint at all, paste the document into `MetadataXml` via the Admin API instead.
+> **An IdP on your own private network.** `MetadataLocation` must be https and, by default, must resolve to a publicly routable address: the metadata document carries the certificates every assertion is validated against, and Authagonal refuses internal targets on every URL it fetches. To federate with an on-premises IdP, name it in [`Auth:AllowedInternalTargets`](configuration#outbound-fetches-ssrf-guard). If the IdP publishes no https metadata endpoint at all, paste the document into `MetadataXml` via the Admin API instead.
 
 **Option B: Admin API (for runtime management)**
 
@@ -71,7 +73,7 @@ curl -X POST https://auth.example.com/api/v1/saml/connections \
   }'
 ```
 
-The API generates the `connectionId` (a GUID) and returns it in the `Location` header and response body. Additional optional fields: `metadataXml` (pasted metadata, see below), `nameIdFormat` (see below), `signAuthnRequests` (force signed AuthnRequests), `iconUrl` (login-button icon), `disableJitProvisioning` (reject unknown users instead of auto-creating them), `allowUnsolicitedResponses` (accept an IdP-initiated assertion as-is instead of restarting the flow — off by default, see above). API-created connections also get an auto-generated SP keypair (see SP Keypair below).
+The API generates the `connectionId` (a GUID) and returns it in the `Location` header and response body. Additional optional fields: `metadataXml` (pasted metadata, see below), `nameIdFormat` (see below), `signAuthnRequests` (force signed AuthnRequests), `iconUrl` (login-button icon), `jitProvisioningEnabled` (auto-create unknown users on first login; **off by default**, so an unknown user is rejected until you set it), `challengeMfaAfterLogin` (default `true`; `false` trusts the IdP's own MFA), `provisioningAttributeParams` and `allowUninvitedJit` (see [Self-Service SSO](self-service-sso)), `organizationId` (scope the connection to one organisation, see [Self-Service SSO](self-service-sso#organisation-scoped-connections)), `allowUnsolicitedResponses` (accept an IdP-initiated assertion as-is instead of restarting the flow; off by default, see above). API-created connections also get an auto-generated SP keypair (see SP Keypair below).
 
 Connections are managed via `POST` / `GET` / `PUT` / `DELETE` on `/api/v1/saml/connections[/{connectionId}]`. `PUT` is a partial update: only fields supplied on the wire are modified.
 
@@ -124,7 +126,7 @@ The post-login return URL is carried server-side on the stored AuthnRequest (key
 Every API-created connection gets an auto-generated SP keypair: a self-signed 2048-bit RSA certificate (10-year validity), stored as PKCS#12 and protected at rest by the host's secret provider. It is server-only and never returned by the API. The keypair enables:
 
 - **Signed AuthnRequests** (redirect-binding `SigAlg`/`Signature` query signing). Signing turns on automatically when the IdP's metadata declares `WantAuthnRequestsSigned`, or always when the connection sets `signAuthnRequests: true`.
-- **Encrypted assertion decryption.** When the SP metadata advertises an encryption certificate, ADFS starts encrypting assertions by default; the ACS decrypts them with the SP private key and runs the decrypted assertion through the same signature/conditions pipeline as a plaintext one. Supported: RSA-OAEP (SHA-1/SHA-256) key transport; AES-128/192/256-CBC and 3DES data encryption. **RSA-1.5 key transport is refused** — PKCS#1 v1.5 unwrapping is a Bleichenbacher/ROBOT oracle — and **AES-GCM is not supported** (.NET `EncryptedXml` limitation). Configure the IdP for RSA-OAEP and AES-CBC. Both failures return the same constant message ("Could not decrypt the assertion."), deliberately: naming the algorithm or the stage that failed is what builds the oracle, so diagnose from the IdP's configuration rather than from the error.
+- **Encrypted assertion decryption.** When the SP metadata advertises an encryption certificate, ADFS starts encrypting assertions by default; the ACS decrypts them with the SP private key and runs the decrypted assertion through the same signature/conditions pipeline as a plaintext one. Supported: RSA-OAEP (SHA-1/SHA-256) key transport; AES-128/192/256-CBC and 3DES data encryption. **RSA-1.5 key transport is refused** (PKCS#1 v1.5 unwrapping is a Bleichenbacher/ROBOT oracle) and **AES-GCM is not supported** (.NET `EncryptedXml` limitation). Configure the IdP for RSA-OAEP and AES-CBC. Both failures return the same constant message ("Could not decrypt the assertion."), deliberately: naming the algorithm or the stage that failed is what builds the oracle, so diagnose from the IdP's configuration rather than from the error.
 - **Signed logout messages** (LogoutRequest/LogoutResponse on the redirect binding).
 
 The SP metadata publishes the certificate as both a `signing` and an `encryption` `KeyDescriptor`, and sets `AuthnRequestsSigned="true"` when the connection forces signing.
@@ -176,13 +178,20 @@ Email resolution priority: explicit email attribute (any alias) → NameID when 
 
 ## JIT Provisioning
 
-Unknown users are auto-created on first login (email, first/last name from the assertion, email marked confirmed) and linked to the connection by their stable federated identity (`saml:{connectionId}` + NameID, or the object-id for transient NameIDs). Set `disableJitProvisioning: true` to reject unknown users instead. Returning users are matched by the federated link first, never by email alone; an existing local account is attached by email only when the connection's `AllowedDomains` covers that email's domain (the admin's explicit statement that this IdP owns the domain), preventing account takeover via a rogue IdP.
+JIT provisioning is **off by default**. A connection with `jitProvisioningEnabled: true` auto-creates unknown users on first login (email, first/last name from the assertion, email marked confirmed) and links them to the connection by their stable federated identity (`saml:{connectionId}` + NameID, or the object-id for transient NameIDs). Without it, an unknown user is rejected. A connection that declares `provisioningAttributeParams` additionally requires that invite context on the login unless `allowUninvitedJit` is set; see [Self-Service SSO](self-service-sso). Returning users are matched by the federated link first, never by email alone; an existing local account is attached by email only when the connection's `AllowedDomains` covers that email's domain (the admin's explicit statement that this IdP owns the domain), preventing account takeover via a rogue IdP.
+
+## Session Lifetime
+
+If the assertion's `AuthnStatement` carries a `SessionNotOnOrAfter`, that is the IdP's own upper bound on the session it just established, and Authagonal honours it. The login cookie expires no later than that instant (when it is within 30 days), and the same bound rides on the session as `session_max_exp`, which clamps every access, ID and refresh token issued from it. An assertion with no `SessionNotOnOrAfter` imposes no extra bound. SAML has no upstream refresh token, so this is the only way an IdP limits a session after sign-in; for OIDC connections see [Federated Sessions](federated-sessions).
 
 ## Security
 
 - **Replay prevention:** for SP-initiated flows, `InResponseTo` is validated against a stored request ID (single-use). Independently, every accepted assertion's ID is stored and enforced single-use, which also covers IdP-initiated responses and responses whose `InResponseTo` was stripped (the assertion ID lives inside the signed assertion, so it cannot be altered without breaking the signature).
 - **Clock skew:** 5-minute tolerance on NotBefore/NotOnOrAfter
+- **Assertion age cap:** an assertion presented more than one hour (plus skew) after its own `IssueInstant` is refused whatever its `NotOnOrAfter` says, and an `IssueInstant` in the future is refused
+- **Issuer, destination and audience:** the Response and Assertion `Issuer` must equal the connection's IdP entity ID, a signed Response must carry a `Destination` matching this ACS URL, and the audience must be this connection's SP entity ID
+- **IdP certificate validity:** a pinned IdP signing certificate outside its own `NotBefore`/`NotAfter` window (5-minute skew) is skipped, for assertions and for the Redirect-binding logout signatures alike, so refresh the metadata after a rollover
 - **Wrapping attack prevention:** the signature's Reference URI must match the signed element's ID
 - **Open redirect prevention:** the post-login return URL must be a root-relative path (starting with `/`, no `//`, no backslashes, since browsers treat `\` as `/`)
 - **Domain vouching:** when `AllowedDomains` is configured, assertions for emails outside those domains are rejected, so one connection can't assert another's domain or a local user's email
-- **MFA:** federation proves the first factor only. If the user's effective policy requires MFA, the login routes through the local MFA challenge/setup instead of issuing a fully-authenticated session.
+- **MFA:** federation proves the first factor only. If the user's effective policy requires MFA, the login routes through the local MFA challenge/setup instead of issuing a fully-authenticated session, unless the connection sets `challengeMfaAfterLogin: false`.

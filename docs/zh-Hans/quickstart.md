@@ -6,9 +6,9 @@ locale: zh-Hans
 
 # 快速入门
 
-5 分钟内让 Authagonal 在本地运行。
+5 分钟内在本地运行 Authagonal。
 
-## 1. 启动服务器
+## 1. 启动服务器 {#1-start-the-server}
 
 ```bash
 docker compose up
@@ -16,7 +16,9 @@ docker compose up
 
 这会在 `http://localhost:8080` 上启动 Authagonal，并使用 Azurite 作为存储。
 
-## 2. 验证运行状态
+> compose 文件设置了 `Auth__AllowInsecureHttp=true`，因为 RFC 6749 §3.1/§3.2 要求授权端点和令牌端点使用 TLS，否则 Authagonal 会拒绝发往 `/connect/*` 的明文请求。这个开关只适用于本机开发。任何其他人能够访问的部署，都必须放在一个终止 TLS 并转发 `X-Forwarded-Proto: https` 的代理之后，并移除该开关：参见[安装](installation)。
+
+## 2. 确认服务正在运行 {#2-verify-its-running}
 
 ```bash
 # Health check
@@ -29,9 +31,9 @@ curl http://localhost:8080/.well-known/openid-configuration
 curl http://localhost:8080/login
 ```
 
-## 3. 注册客户端
+## 3. 注册客户端 {#3-register-a-client}
 
-将客户端添加到您的 `appsettings.json`（或通过环境变量传入）：
+在 `appsettings.json` 中添加一个客户端（也可以通过环境变量传入）：
 
 ```json
 {
@@ -51,9 +53,9 @@ curl http://localhost:8080/login
 }
 ```
 
-客户端在启动时播种 -- 每次部署运行都是安全的。
+客户端会在启动时预置，每次部署都运行也是安全的。
 
-## 4. 发起登录
+## 4. 发起登录 {#4-initiate-a-login}
 
 将用户重定向到：
 
@@ -68,11 +70,11 @@ http://localhost:8080/connect/authorize
   &code_challenge_method=S256
 ```
 
-用户将看到登录页面，完成认证后被重定向回来，携带授权码。
+用户会看到登录页面，完成身份验证后，携带授权码被重定向回来。
 
-> **第一个用户：** 在 `http://localhost:8080/login/register` 注册一个，或通过 [管理 API](admin-api) 创建。自助注册会发送一封验证邮件，而在未配置邮件发送器时（本地默认情况），该邮件会被丢弃 -- 因此在本地测试时，可设置 `Auth__AutoConfirmEmailDomains__0=example.dev`（填入您注册时使用的任意域名）以跳过验证，或配置 `Email:ResendApiKey` + `Email:SenderEmail`。参见 [配置 → 邮件](configuration#email)。
+> **第一个用户：**在 `http://localhost:8080/login/register` 注册一个，或通过 [Admin API](admin-api) 创建。自助注册会发送一封验证邮件，而在未配置邮件发送方的情况下（本地默认如此），这封邮件会被丢弃。因此在本地测试时，可以设置 `Auth__AutoConfirmEmailDomains__0=example.dev`（填写你注册时使用的任意域名）以跳过验证，或者配置 `Email:ResendApiKey` + `Email:SenderEmail`。参见[配置 → 邮件](configuration#email)。
 
-## 5. 兑换授权码
+## 5. 兑换授权码 {#5-exchange-the-code}
 
 ```bash
 curl -X POST http://localhost:8080/connect/token \
@@ -90,18 +92,21 @@ curl -X POST http://localhost:8080/connect/token \
   "access_token": "eyJ...",
   "id_token": "eyJ...",
   "token_type": "Bearer",
-  "expires_in": 1800
+  "expires_in": 1800,
+  "scope": "openid profile email"
 }
 ```
 
-## 示例演示
+`expires_in` 即客户端的 `AccessTokenLifetimeSeconds`（预置客户端在未设置时为 1800）。这里不会出现 `refresh_token`：只有当客户端设置了 `AllowOfflineAccess`，并且请求中包含 `offline_access` 作用域时，客户端才会收到刷新令牌。
 
-`demos/sample-app/` 目录包含一个完整的 React SPA + API，实现了上述完整的 OIDC 流程。请参阅 [demos README](https://github.com/authagonal/authagonal/tree/master/demos) 了解使用说明。
+## 可运行的演示 {#working-demo}
 
-## 后续步骤
+`demos/sample-app/` 目录包含一个完整的 React SPA + API，实现了上述完整的 OIDC 流程。使用说明参见 [demos README](https://github.com/authagonal/authagonal/tree/master/demos)。
 
-- [配置](configuration) -- 所有设置的完整参考
-- [扩展性](extensibility) -- 作为库托管，添加自定义钩子
-- [品牌定制](branding) -- 自定义登录界面
-- [SAML](saml) -- 添加 SAML SSO 提供者
-- [预配](provisioning) -- 将用户预配到下游应用
+## 后续步骤 {#next-steps}
+
+- [配置](configuration)：所有设置的完整参考
+- [可扩展性](extensibility)：作为库托管，添加自定义钩子
+- [品牌定制](branding)：自定义登录界面
+- [SAML](saml)：添加 SAML SSO 提供方
+- [预配](provisioning)：将用户预配到下游应用

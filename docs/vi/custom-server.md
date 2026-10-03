@@ -4,13 +4,13 @@ title: Máy chủ tùy chỉnh
 locale: vi
 ---
 
-# Khởi đầu nhanh -- Máy chủ tùy chỉnh
+# Bắt đầu nhanh với máy chủ tùy chỉnh
 
-Hướng dẫn này trình bày cách lưu trữ Authagonal như một thư viện trong dự án ASP.NET Core của bạn, sau đó tùy chỉnh giao diện đăng nhập bằng các component React của riêng bạn.
+Hướng dẫn này đi qua cách chạy Authagonal dưới dạng thư viện trong dự án ASP.NET Core của riêng bạn, rồi tùy biến giao diện đăng nhập bằng các React component của riêng bạn.
 
-## Phần 1: Thiết lập máy chủ
+## Phần 1: Thiết lập máy chủ {#part-1-server-setup}
 
-### Tạo dự án
+### Tạo dự án {#create-the-project}
 
 ```bash
 dotnet new web -n MyAuthServer
@@ -21,7 +21,7 @@ dotnet add package Authagonal.Server
 dotnet add package Authagonal.AzureProvider
 ```
 
-File `.csproj` của bạn cần chứa:
+Tệp `.csproj` của bạn cần chứa:
 
 ```xml
 <ItemGroup>
@@ -30,16 +30,16 @@ File `.csproj` của bạn cần chứa:
 </ItemGroup>
 ```
 
-`Authagonal.AzureProvider` cung cấp các store Azure Table Storage mà `AddAuthagonal` khởi tạo từ cấu hình `Storage:*`. Để lưu trữ trên AWS thay vào đó, hãy tham chiếu `Authagonal.AwsProvider` và gọi `AddAuthagonalAwsStorage(...)` trước `AddAuthagonal` (xem [Cài đặt → backend AWS](installation#aws-backend)).
+`Authagonal.AzureProvider` cung cấp các store Azure Table Storage mà `AddAuthagonal` kết nối dựa trên cấu hình `Storage:*`. Để chạy trên AWS thay vào đó, hãy tham chiếu `Authagonal.AwsProvider` và gọi `AddAuthagonalAwsStorage(...)` trước `AddAuthagonal`, xem [Cài đặt → Backend AWS](installation#aws-backend).
 
-### Cấu hình Program.cs
+### Cấu hình Program.cs {#configure-programcs}
 
-Cấu hình tối thiểu gồm ba lệnh gọi: `AddAuthagonal`, `UseAuthagonal` và `MapAuthagonalEndpoints`.
+Thiết lập tối thiểu gồm ba lời gọi: `AddAuthagonal`, `UseAuthagonal` và `MapAuthagonalEndpoints`.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Register custom services BEFORE AddAuthagonal — yours take precedence
+// 1. Register custom services BEFORE AddAuthagonal (yours take precedence)
 builder.Services.AddSingleton<IAuthHook, AuditAuthHook>();
 builder.Services.AddSingleton<IEmailService, ConsoleEmailService>();
 
@@ -58,7 +58,7 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
-### Cấu hình appsettings.json
+### Cấu hình appsettings.json {#configure-appsettingsjson}
 
 ```json
 {
@@ -85,22 +85,22 @@ app.Run();
 
 | Khóa | Mô tả |
 |---|---|
-| `Issuer` | URL công khai của máy chủ xác thực. Được sử dụng trong token và khám phá OIDC. |
-| `Storage:ConnectionString` | Chuỗi kết nối Azure Table Storage. |
-| `Clients` | Mảng các client OAuth được khởi tạo khi khởi động. |
+| `Issuer` | URL công khai của máy chủ xác thực. Được dùng trong token và OIDC discovery. |
+| `Storage:ConnectionString` | Connection string của Azure Table Storage. Hoặc đặt `Storage:TableServiceUri` để xác thực bằng managed identity; bắt buộc phải có một trong hai. |
+| `Clients` | Mảng các OAuth client được nạp sẵn lúc khởi động. |
 
-### Các điểm mở rộng
+### Các điểm mở rộng {#extensibility-points}
 
-Đăng ký các implementation của bạn **trước** khi gọi `AddAuthagonal()` -- Authagonal sử dụng `TryAdd`, nên đăng ký của bạn được ưu tiên.
+Đăng ký các hiện thực của bạn **trước** khi gọi `AddAuthagonal()`, Authagonal dùng `TryAdd`, nên đăng ký của bạn được ưu tiên. `IAuthHook` là ngoại lệ về bản chất: bạn có thể đăng ký nhiều hook và tất cả đều chạy, còn hook không làm gì dựng sẵn chỉ được thêm khi bạn không đăng ký hook nào.
 
 | Interface | Mục đích | Mặc định |
 |---|---|---|
-| `IEmailService` | Gửi email xác minh và đặt lại mật khẩu | Trình gửi Resend tích hợp sẵn khi `Email:ResendApiKey` được đặt; nếu không thì không thực hiện gì (bỏ qua im lặng) |
-| `IAuthHook` | Chặn hoặc kiểm tra các sự kiện đăng nhập, đăng ký và token | Không thực hiện gì |
-| `IProvisioningOrchestrator` | Cung cấp người dùng cho các ứng dụng hạ nguồn tại thời điểm ủy quyền | Cung cấp TCC |
-| `ISecretProvider` | Giải quyết secret của client | Văn bản thuần (hoặc Key Vault với `SecretProvider:VaultUri`) |
+| `IEmailService` | Gửi email xác minh, đặt lại mật khẩu và thông báo tài khoản đã tồn tại | Bên gửi Resend dựng sẵn khi `Email:ResendApiKey` được đặt; nếu không thì không làm gì (âm thầm loại bỏ) |
+| `IAuthHook` | Chặn hoặc kiểm toán các sự kiện đăng nhập, đăng ký và token | Không làm gì |
+| `IProvisioningOrchestrator` | Cấp phát người dùng vào các ứng dụng downstream tại thời điểm authorize | Cấp phát TCC |
+| `ISecretProvider` | Phân giải client secret | Plaintext (hoặc Key Vault với `SecretProvider:VaultUri`) |
 
-#### Ví dụ: hook kiểm toán
+#### Ví dụ: hook kiểm toán {#example-audit-hook}
 
 ```csharp
 using Authagonal.Core.Models;
@@ -125,7 +125,7 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
     public Task OnLoginFailedAsync(string email, string reason,
         CancellationToken ct = default)
     {
-        logger.LogWarning("Failed login: {Email} — {Reason}", email, reason);
+        logger.LogWarning("Failed login: {Email}: {Reason}", email, reason);
         return Task.CompletedTask;
     }
 
@@ -154,9 +154,9 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
 }
 ```
 
-Interface còn có thêm các thành viên tùy chọn với triển khai mặc định không thực hiện gì (`OnMfaVerifyFailedAsync`, `OnEmailConfirmedAsync`, `OnMfaEnrolledAsync`, `OnMfaCredentialRemovedAsync`, `OnRecoveryCodesRegeneratedAsync`, `OnPasswordChangedAsync`); chỉ ghi đè chúng nếu bạn cần các sự kiện đó.
+Interface này còn có thêm các thành viên tùy chọn với hiện thực mặc định không làm gì (`OnMfaVerifyFailedAsync`, `OnEmailConfirmedAsync`, `OnMfaEnrolledAsync`, `OnMfaCredentialRemovedAsync`, `OnRecoveryCodesRegeneratedAsync`, `OnPasswordChangedAsync`, `OnTokenIssuingAsync`, `OnDelegationMintedAsync`, `OnApprovalRequestedAsync`, `OnApprovalResolvedAsync`, `OnAgentConsentChangedAsync`, `OnConsentRevokedAsync`, `OnCapabilityTicketRedeemedAsync`), chỉ ghi đè chúng nếu bạn cần các sự kiện đó.
 
-#### Ví dụ: dịch vụ email
+#### Ví dụ: dịch vụ email {#example-email-service}
 
 ```csharp
 using Authagonal.Core.Services;
@@ -179,9 +179,11 @@ public class ConsoleEmailService(ILogger<ConsoleEmailService> logger) : IEmailSe
 }
 ```
 
-> **Email là cái bẫy tích hợp phổ biến nhất.** Nếu bạn không đăng ký `IEmailService` nào và không đặt `Email:ResendApiKey`, email xác minh và đặt lại mật khẩu sẽ bị bỏ qua im lặng, và vì cổng đăng nhập yêu-cầu-email-đã-xác-nhận mặc định bật, người dùng tự đăng ký sẽ không bao giờ đăng nhập được (`UseAuthagonal` cảnh báo lúc khởi động). Trình gửi Resend tích hợp sẵn tự động kích hoạt khi `Email:ResendApiKey` + `Email:SenderEmail` được cấu hình; cho dev/test, `Auth:AutoConfirmEmailDomains` bỏ qua xác minh cho các tên miền được liệt kê. Xem [Cấu hình → Email](configuration#email).
+`IEmailService` cũng có một phương thức tùy chọn `SendAccountExistsEmailAsync(email, signInUrl, ct)` (mặc định không làm gì), được gửi khi ai đó đăng ký một địa chỉ đã có tài khoản.
 
-### Thêm endpoint tùy chỉnh
+> **Email là cái bẫy tích hợp phổ biến nhất.** Nếu bạn không đăng ký `IEmailService` nào và không đặt `Email:ResendApiKey`, thư xác minh và thư đặt lại mật khẩu bị âm thầm loại bỏ, và vì điều kiện đăng nhập yêu cầu email đã xác nhận được bật theo mặc định, người dùng tự đăng ký sẽ không bao giờ đăng nhập được (`UseAuthagonal` cảnh báo lúc khởi động). Bên gửi Resend dựng sẵn tự động kích hoạt khi `Email:ResendApiKey` + `Email:SenderEmail` được cấu hình; cho dev/test, `Auth:AutoConfirmEmailDomains` bỏ qua bước xác minh với các tên miền được liệt kê. Xem [Cấu hình → Email](configuration#email).
+
+### Thêm endpoint tùy chỉnh {#add-custom-endpoints}
 
 Bạn có thể thêm endpoint của riêng mình bên cạnh các endpoint của Authagonal:
 
@@ -189,9 +191,9 @@ Bạn có thể thêm endpoint của riêng mình bên cạnh các endpoint củ
 app.MapGet("/custom/health", () => Results.Ok(new { status = "healthy" }));
 ```
 
-### Tắt API quản trị
+### Tắt admin API {#disable-admin-api}
 
-Đối với các triển khai công khai, tắt các endpoint quản trị:
+Với các bản triển khai hướng ra công chúng, hãy tắt các endpoint quản trị:
 
 ```json
 {
@@ -201,21 +203,21 @@ app.MapGet("/custom/health", () => Results.Ok(new { status = "healthy" }));
 }
 ```
 
-### Chạy
+### Chạy thử {#run-it}
 
 ```bash
 dotnet run
 ```
 
-Máy chủ khởi động tại URL đã cấu hình, phục vụ tài liệu khám phá OIDC tại `/.well-known/openid-configuration`, giao diện đăng nhập tại `/login` và tất cả các API xác thực/quản trị.
+Máy chủ khởi động tại URL đã cấu hình, phục vụ tài liệu OIDC discovery tại `/.well-known/openid-configuration`, giao diện đăng nhập tại `/login`, cùng mọi API xác thực/quản trị.
 
 ---
 
-## Phần 2: Giao diện đăng nhập tùy chỉnh
+## Phần 2: Giao diện đăng nhập tùy chỉnh {#part-2-custom-login-ui}
 
-SPA đăng nhập mặc định hoạt động ngay lập tức, nhưng bạn có thể thay thế bằng ứng dụng React của riêng mình, nhập các component và API client từ gói npm `@authagonal/login`.
+SPA đăng nhập mặc định dùng được ngay, nhưng bạn có thể thay nó bằng ứng dụng React của riêng mình, import các component và API client từ gói npm `@authagonal/login`.
 
-### Thiết lập frontend
+### Dựng khung frontend {#scaffold-the-frontend}
 
 ```bash
 mkdir login-app && cd login-app
@@ -224,10 +226,10 @@ npm install react react-dom react-router @authagonal/login
 npm install -D vite @vitejs/plugin-react typescript @types/react @types/react-dom
 ```
 
-### Gói npm xuất những gì
+### Những gì gói npm export {#what-the-npm-package-exports}
 
 ```typescript
-// Components — use as-is or as reference
+// Components: use as-is or as reference
 import {
   AuthLayout,
   LoginPage,
@@ -237,17 +239,19 @@ import {
   MfaSetupPage,
   RegisterPage,
   ConsentPage,
+  AgentConsentPage,
   GrantsPage,
   DevicePage,
-  App,              // Standalone SPA with full routing
+  App,              // Standalone SPA with full routing (accepts an extraRoutes prop)
 } from '@authagonal/login';
 
 // UI primitives
 import {
-  Button, Input, Label, Card, Alert, Separator, cn,
+  Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
+  Alert, Separator, Turnstile, cn,
 } from '@authagonal/login';
 
-// API clients — call from your custom pages
+// API clients: call from your custom pages
 import {
   login, register, logout, ssoCheck, forgotPassword, resetPassword,
   getSession, getProviders, getPasswordPolicy,
@@ -259,10 +263,14 @@ import {
 
 // Branding
 import {
-  loadBranding, useBranding, BrandingContext, resolveLocalized,
+  loadBranding, useBranding, BrandingContext, brandingDefaults, resolveLocalized,
+  getBoot, getOrganization,
 } from '@authagonal/login';
 
-// i18n — always import from this package, not react-i18next directly
+// Redirect helpers for the post-login hop
+import { resolveRedirect, isSameOriginPath } from '@authagonal/login';
+
+// i18n: always import from this package, not react-i18next directly
 import { useTranslation, i18n } from '@authagonal/login';
 
 // Styles
@@ -276,9 +284,9 @@ import type {
 } from '@authagonal/login';
 ```
 
-### Điểm vào (main.tsx)
+### Điểm vào (main.tsx) {#entry-point-maintsx}
 
-Tải cấu hình thương hiệu từ máy chủ và bọc ứng dụng trong ngữ cảnh thương hiệu:
+Tải cấu hình thương hiệu từ máy chủ và bọc ứng dụng trong branding context:
 
 ```tsx
 import { createRoot } from 'react-dom/client';
@@ -287,7 +295,7 @@ import '@authagonal/login/styles.css';
 import App from './App';
 
 loadBranding().then((config) => {
-  document.title = `Sign In — ${config.appName}`;
+  document.title = `Sign In | ${config.appName}`;
   createRoot(document.getElementById('root')!).render(
     <BrandingContext.Provider value={config}>
       <App />
@@ -296,30 +304,35 @@ loadBranding().then((config) => {
 });
 ```
 
-### Định tuyến (App.tsx)
+### Định tuyến (App.tsx) {#routing-apptsx}
 
-Kết hợp các trang tùy chỉnh với các trang của gói cơ sở:
+Kết hợp các trang tùy chỉnh với các trang có sẵn trong gói. Máy chủ đưa người dùng tới các đường dẫn dưới `/login` (authorize endpoint chuyển hướng tới `/login?returnUrl=...`, còn email liên kết tới `/login/reset-password`, `/login/consent`, `/login/device`), nên router phải dùng `basename="/login"` và các route dưới đây là tương đối so với nó:
 
 ```tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import {
-  ForgotPasswordPage, ResetPasswordPage, ConsentPage, DevicePage, GrantsPage,
+  RegisterPage, ForgotPasswordPage, ResetPasswordPage, MfaChallengePage, MfaSetupPage,
+  ConsentPage, AgentConsentPage, DevicePage, GrantsPage,
 } from '@authagonal/login';
 import MyLoginPage from './MyLoginPage';
 import MyLayout from './MyLayout';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/login">
       <MyLayout>
         <Routes>
-          <Route path="/login" element={<MyLoginPage />} />
+          <Route path="/" element={<MyLoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/mfa-challenge" element={<MfaChallengePage />} />
+          <Route path="/mfa-setup" element={<MfaSetupPage />} />
           <Route path="/consent" element={<ConsentPage />} />
+          <Route path="/consent/agents/:clientId" element={<AgentConsentPage />} />
           <Route path="/device" element={<DevicePage />} />
           <Route path="/grants" element={<GrantsPage />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </MyLayout>
     </BrowserRouter>
@@ -327,16 +340,22 @@ export default function App() {
 }
 ```
 
-### Trang đăng nhập tùy chỉnh
+Nếu bạn chỉ muốn thêm trang vào ứng dụng có sẵn, hãy render `<App extraRoutes={...} />` từ gói thay vào đó. Nó đã cung cấp sẵn mọi route ở trên (cùng với `/account`).
+
+### Trang đăng nhập tùy chỉnh {#custom-login-page}
 
 Xây dựng form đăng nhập của riêng bạn bằng các API client từ gói npm:
 
 ```tsx
 import { useState } from 'react';
-import { login, ssoCheck, ApiRequestError, useBranding } from '@authagonal/login';
+import { useNavigate, useSearchParams } from 'react-router';
+import { login, resolveRedirect, ApiRequestError, useBranding } from '@authagonal/login';
 
 export default function MyLoginPage() {
   const branding = useBranding();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnUrl = searchParams.get('returnUrl') || '';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -344,10 +363,29 @@ export default function MyLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login(email, password);
-      // Login sets a cookie — redirect to the return URL
-      const params = new URLSearchParams(window.location.search);
-      window.location.href = params.get('returnUrl') || '/';
+      const result = await login(email, password, returnUrl || undefined);
+
+      // A second factor is still owed: hand over to the package's MFA pages.
+      if (result.mfaRequired && result.challengeId) {
+        const params = new URLSearchParams({
+          challengeId: result.challengeId,
+          ...(returnUrl ? { returnUrl } : {}),
+          ...(result.methods ? { methods: result.methods.join(',') } : {}),
+          ...(result.webAuthn ? { webAuthn: JSON.stringify(result.webAuthn) } : {}),
+        });
+        navigate(`/mfa-challenge?${params.toString()}`);
+        return;
+      }
+      if (result.mfaSetupRequired) {
+        navigate(`/mfa-setup${returnUrl ? `?returnUrl=${encodeURIComponent(returnUrl)}` : ''}`, {
+          state: { setupToken: result.setupToken },
+        });
+        return;
+      }
+
+      // Login sets a cookie. resolveRedirect only returns a same-origin path or the origin of a
+      // registered client's home URI; anything else falls back to the default.
+      window.location.href = await resolveRedirect(returnUrl, () => '/login/account');
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message || 'Login failed');
@@ -379,9 +417,9 @@ export default function MyLoginPage() {
 }
 ```
 
-### Layout tùy chỉnh
+### Bố cục tùy chỉnh {#custom-layout}
 
-Bọc `AuthLayout` cơ sở để thêm thương hiệu của riêng bạn:
+Bọc `AuthLayout` có sẵn để thêm nhận diện thương hiệu của riêng bạn:
 
 ```tsx
 import { AuthLayout } from '@authagonal/login';
@@ -391,7 +429,7 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
     <>
       <AuthLayout>{children}</AuthLayout>
       <footer>
-        &copy; {new Date().getFullYear()} My Company —
+        &copy; {new Date().getFullYear()} My Company |
         <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a>
       </footer>
     </>
@@ -399,7 +437,7 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
 }
 ```
 
-### Thương hiệu (wwwroot/branding.json)
+### Thương hiệu (wwwroot/branding.json) {#branding-wwwrootbrandingjson}
 
 Cấu hình giao diện đăng nhập mà không cần build lại:
 
@@ -416,11 +454,11 @@ Cấu hình giao diện đăng nhập mà không cần build lại:
 }
 ```
 
-Toàn bộ schema (bao gồm văn bản chào mừng đã bản địa hóa, danh sách bộ chọn ngôn ngữ, và các ghi đè màu sáng/tối cùng nền logo theo từng chế độ) nằm ở trang [Tùy chỉnh giao diện](branding).
+Schema đầy đủ, bao gồm văn bản chào mừng đã bản địa hóa, danh sách bộ chọn ngôn ngữ, và các giá trị ghi đè màu sắc cùng nền logo riêng cho từng chế độ tối/sáng, có trên trang [Thương hiệu](branding).
 
-### Cấu hình Vite
+### Cấu hình Vite {#vite-config}
 
-Chuyển tiếp các lệnh gọi API đến backend trong quá trình phát triển:
+Chuyển tiếp (proxy) các lời gọi API tới backend trong lúc phát triển:
 
 ```typescript
 import { defineConfig } from 'vite';
@@ -442,9 +480,9 @@ export default defineConfig({
 });
 ```
 
-### Build và phục vụ
+### Build và phục vụ {#build-and-serve}
 
-Thêm mục tiêu build vào file `.csproj` để tự động build SPA và sao chép vào `wwwroot`:
+Thêm một build target vào `.csproj` để tự động build SPA và sao chép nó vào `wwwroot`:
 
 ```xml
 <Target Name="BuildLoginApp" BeforeTargets="Build" Condition="!Exists('wwwroot/index.html')">
@@ -457,4 +495,4 @@ Thêm mục tiêu build vào file `.csproj` để tự động build SPA và sao
 </Target>
 ```
 
-Bây giờ `dotnet build` sẽ build cả máy chủ .NET và SPA React, và `dotnet run` phục vụ mọi thứ từ một tiến trình duy nhất.
+Giờ đây `dotnet build` build cả máy chủ .NET lẫn React SPA, và `dotnet run` phục vụ mọi thứ từ một tiến trình duy nhất.

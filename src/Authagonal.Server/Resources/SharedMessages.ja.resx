@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" msdata:Ordinal="0" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>1.3</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <!-- Authentication messages -->
+  <data name="Auth_ResetTokenRequired" xml:space="preserve"><value>リセットトークンが必要です。</value></data>
+  <data name="Auth_PasswordRequired" xml:space="preserve"><value>パスワードを入力してください。</value></data>
+  <data name="Auth_WeakPassword" xml:space="preserve"><value>パスワードが強度の要件を満たしていません。</value></data>
+  <data name="Auth_InvalidTokenFormat" xml:space="preserve"><value>リセットトークンの形式が正しくありません。</value></data>
+  <data name="Auth_TokenExpired" xml:space="preserve"><value>このリセットリンクは有効期限が切れています。</value></data>
+  <data name="Auth_TokenUsedOrExpired" xml:space="preserve"><value>このリセットリンクはすでに使用されたか、有効期限が切れています。</value></data>
+  <data name="Auth_InvalidToken" xml:space="preserve"><value>リセットトークンが無効です。</value></data>
+  <data name="Auth_EmailConfirmed" xml:space="preserve"><value>メールアドレスを認証しました</value></data>
+  <data name="Auth_VerificationSent" xml:space="preserve"><value>認証メールを送信しました</value></data>
+
+  <!-- Password validation -->
+  <data name="Password_Required" xml:space="preserve"><value>パスワードを入力してください。</value></data>
+  <data name="Password_MinLength" xml:space="preserve"><value>パスワードは{0}文字以上である必要があります。</value></data>
+  <data name="Password_RequireUppercase" xml:space="preserve"><value>パスワードには大文字を1文字以上含める必要があります。</value></data>
+  <data name="Password_RequireLowercase" xml:space="preserve"><value>パスワードには小文字を1文字以上含める必要があります。</value></data>
+  <data name="Password_RequireDigit" xml:space="preserve"><value>パスワードには数字を1文字以上含める必要があります。</value></data>
+  <data name="Password_RequireSpecialChar" xml:space="preserve"><value>パスワードには英数字以外の文字を1文字以上含める必要があります。</value></data>
+  <data name="Password_MinUniqueChars" xml:space="preserve"><value>パスワードには異なる文字を{0}種類以上含める必要があります。</value></data>
+
+  <!-- Password policy labels -->
+  <data name="PasswordPolicy_MinLength" xml:space="preserve"><value>{0}文字以上</value></data>
+  <data name="PasswordPolicy_Uppercase" xml:space="preserve"><value>大文字</value></data>
+  <data name="PasswordPolicy_Lowercase" xml:space="preserve"><value>小文字</value></data>
+  <data name="PasswordPolicy_Digit" xml:space="preserve"><value>数字</value></data>
+  <data name="PasswordPolicy_SpecialChar" xml:space="preserve"><value>記号</value></data>
+
+  <!-- Error messages -->
+  <data name="Error_BadRequest" xml:space="preserve"><value>リクエストが無効です。</value></data>
+  <data name="Error_Unauthorized" xml:space="preserve"><value>認証が必要です。</value></data>
+  <data name="Error_NotFound" xml:space="preserve"><value>リクエストされたリソースが見つかりませんでした。</value></data>
+  <data name="Error_ServerError" xml:space="preserve"><value>予期しないエラーが発生しました。</value></data>
+
+  <!-- End session -->
+  <data name="EndSession_SignedOut" xml:space="preserve"><value>サインアウトしました。</value></data>
+  <data name="EndSession_ConfirmPrompt" xml:space="preserve"><value>{0}からサインアウトしますか？</value></data>
+  <data name="EndSession_ConfirmButton" xml:space="preserve"><value>サインアウト</value></data>
+  <data name="EndSession_CancelButton" xml:space="preserve"><value>キャンセル</value></data>
+
+  <!-- Admin user endpoint messages -->
+  <data name="Admin_UserNotFound" xml:space="preserve"><value>ユーザー「{0}」が見つかりません</value></data>
+  <data name="Admin_EmailRequired" xml:space="preserve"><value>メールアドレスは必須です</value></data>
+  <data name="Admin_PasswordRequired" xml:space="preserve"><value>パスワードは必須です</value></data>
+  <data name="Admin_UserExists" xml:space="preserve"><value>このメールアドレスのユーザーはすでに存在します</value></data>
+  <data name="Admin_UserIdInUse" xml:space="preserve"><value>このIDのユーザーはすでに存在します</value></data>
+  <data name="Admin_UserIdRequired" xml:space="preserve"><value>ユーザーIDは必須です</value></data>
+  <data name="Admin_TokenRequired" xml:space="preserve"><value>トークンは必須です</value></data>
+  <data name="Admin_InvalidTokenFormat" xml:space="preserve"><value>トークンの形式が正しくありません</value></data>
+  <data name="Admin_VerificationExpired" xml:space="preserve"><value>この認証リンクは有効期限が切れています</value></data>
+  <data name="Admin_UserNotFoundSimple" xml:space="preserve"><value>ユーザーが見つかりません</value></data>
+  <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>トークンが無効か、有効期限が切れています</value></data>
+  <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>メールアドレスはすでに認証済みです</value></data>
+  <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>プロバイダーとプロバイダーキーは必須です</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>情報が不足しています</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>この確認リンクは不完全です。最新の確認メールを開いて、メール内のリンクをお試しください。</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>このリンクは正しくないようです</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>最新の確認メールを開いて、メール内のリンクをご利用ください。</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>このリンクは有効期限が切れています</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>サインインすると、新しい確認メールが送信されます。</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>メールアドレスはすでに認証済みです</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>今すぐサインインできます。</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>メールアドレスを認証してください</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>このメールアドレスがご本人のものであることを確認してください。</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>メールアドレスを認証する</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>サインインへ</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>メールアドレスの確認</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>メールアドレスの確認</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>以下のリンクをクリックして、メールアドレスを確認してください。</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>メールアドレスを確認</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>アカウントを作成していない場合は、このメールを無視していただいて問題ありません。</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>パスワードのリセット</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>パスワードのリセット</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>以下のリンクをクリックして、新しいパスワードを設定してください。</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>パスワードをリセット</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>このリンクの有効期間は1時間です。パスワードのリセットをリクエストしていない場合は、このメールを無視していただいて問題ありません。</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>すでにアカウントをお持ちです</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>すでにアカウントをお持ちです</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>どなたかがこのメールアドレスで登録しようとしましたが、アカウントはすでに存在しています。サインインするか、パスワードをお忘れの場合はリセットしてください。</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>サインイン</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>お心当たりがない場合は、このメールを無視していただいて問題ありません。</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>サインアウトしました</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>サインアウト</value></data>
+</root>

@@ -86,4 +86,37 @@
   <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>令牌无效或已过期</value></data>
   <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>电子邮件已确认</value></data>
   <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>提供者和提供者密钥是必需的</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>缺少信息</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>此确认链接不完整。请打开最新的验证邮件，并使用邮件中的链接。</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>此链接似乎不正确</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>请打开最新的验证邮件，并使用邮件中的链接。</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>此链接已过期</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>请登录，以便我们重新发送验证邮件。</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>您的邮箱已确认</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>您现在可以登录了。</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>确认您的邮箱</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>请确认此邮箱地址属于您。</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>确认我的邮箱</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>前往登录</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>验证您的邮箱地址</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>验证您的邮箱</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>请点击下方链接验证您的邮箱地址：</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>验证邮箱</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>如果您没有创建账户，可以放心忽略此邮件。</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>重置您的密码</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>重置您的密码</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>请点击下方链接设置新密码：</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>重置密码</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>此链接 1 小时后失效。如果您没有申请重置密码，可以放心忽略此邮件。</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>您已经有账户了</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>您已经有账户了</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>有人尝试使用此邮箱注册，但该账户已存在。请直接登录，如果忘记了密码，也可以重置密码。</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>登录</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>如果这不是您本人的操作，可以放心忽略此邮件。</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>已退出登录</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>退出登录</value></data>
 </root>

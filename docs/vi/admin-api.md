@@ -1,20 +1,20 @@
 ---
 layout: default
-title: API Quản trị
+title: Admin API
 locale: vi
 ---
 
-# API Quản trị
+# Admin API
 
-Các endpoint quản trị yêu cầu JWT access token với scope `authagonal-admin` (cấu hình qua `AdminApi:Scope`).
+Các endpoint quản trị yêu cầu một JWT access token mang scope `authagonal-admin` (có thể cấu hình qua `AdminApi:Scope`).
 
-Tất cả endpoint nằm dưới `/api/v1/`.
+Mọi endpoint đều nằm dưới `/api/v1/`.
 
-## Khởi tạo token quản trị đầu tiên
+## Khởi tạo admin token đầu tiên {#bootstrapping-the-first-admin-token}
 
-Mọi endpoint `/api/v1/*` đều yêu cầu một bearer token mang scope quản trị, nhưng bản thân API quản trị (và [đăng ký client động](client-registration)) **từ chối tạo hoặc cập nhật bất kỳ client nào giữ scope đó** (`403 forbidden_scope`), nên một client được tạo tại thời điểm chạy không bao giờ có thể leo thang thành quản trị. Cách duy nhất để cấp một token quản trị là một **client được seed từ cấu hình**: các mục trong phần cấu hình `Clients:` được upsert khi khởi động bởi `ClientSeedService`, và cấu hình được tin cậy, nên lớp bảo vệ forbidden-scope chỉ áp dụng cho các API tại thời điểm chạy.
+Mọi endpoint `/api/v1/*` đều yêu cầu một bearer token mang scope quản trị, nhưng chính admin API (và [đăng ký client động](client-registration)) lại **từ chối tạo hoặc cập nhật bất kỳ client nào giữ scope đó** (`403 forbidden_scope`), nên một client được tạo lúc chạy không bao giờ có thể leo thang thành quản trị. Cách duy nhất để tạo admin token là một **client được nạp từ cấu hình**: các mục trong phần cấu hình `Clients:` được `ClientSeedService` upsert lúc khởi động, và cấu hình được tin cậy, cơ chế chặn scope bị cấm chỉ áp dụng cho các API lúc chạy.
 
-Seed một client `client_credentials` với scope quản trị trong `appsettings.json` (hoặc các biến môi trường / kho bí mật tương đương):
+Nạp một client `client_credentials` có scope quản trị trong `appsettings.json` (hoặc các biến môi trường / kho secret tương đương):
 
 ```json
 {
@@ -30,9 +30,9 @@ Seed một client `client_credentials` với scope quản trị trong `appsettin
 }
 ```
 
-(`ClientSecret` được băm khi khởi động; hãy cung cấp `SecretHashes` thay thế nếu bạn muốn chỉ giữ một giá trị đã băm sẵn trong cấu hình. `ClientId`/`ClientName`/`AllowedGrantTypes`/`AllowedScopes` được chấp nhận như các bí danh cho `Id`/`Name`/`GrantTypes`/`Scopes`.)
+(`ClientSecret` được hash lúc khởi động; hãy cung cấp `SecretHashes` thay vào đó nếu bạn chỉ muốn giữ một giá trị đã hash sẵn trong cấu hình. `ClientId`/`ClientName`/`AllowedGrantTypes`/`AllowedScopes` được chấp nhận làm bí danh cho `Id`/`Name`/`GrantTypes`/`Scopes`.)
 
-Sau đó đổi thông tin đăng nhập lấy token tại endpoint token tiêu chuẩn:
+Sau đó đổi thông tin xác thực lấy token tại token endpoint tiêu chuẩn:
 
 ```bash
 curl -X POST https://auth.example.com/connect/token \
@@ -47,33 +47,39 @@ curl -X POST https://auth.example.com/connect/token \
 { "access_token": "eyJhbGci...", "token_type": "Bearer", "expires_in": 1800, "scope": "authagonal-admin" }
 ```
 
-Cấp quyền `client_credentials` kiểm tra scope được yêu cầu so với `AllowedScopes` của client, và vì client được seed giữ `authagonal-admin`, token sẽ được cấp. Dùng nó dưới dạng `Authorization: Bearer {access_token}` trên mọi lệnh gọi quản trị:
+Grant `client_credentials` kiểm tra scope được yêu cầu với `AllowedScopes` của client; vì client được nạp sẵn giữ `authagonal-admin`, token được phát hành. Dùng nó dưới dạng `Authorization: Bearer {access_token}` trong mọi lời gọi quản trị:
 
 ```bash
 curl https://auth.example.com/api/v1/clients -H "Authorization: Bearer eyJhbGci..."
 ```
 
-Hãy giữ bí mật của client được seed trong kho bí mật của triển khai của bạn; xoay vòng nó là một thay đổi cấu hình + khởi động lại.
+Hãy giữ secret của client được nạp sẵn trong kho secret của bản triển khai; xoay vòng nó là một thay đổi cấu hình + khởi động lại.
 
-## Người dùng
+## Người dùng {#users}
 
-### Lấy thông tin người dùng
+### Lấy người dùng {#get-user}
 
 ```
 GET /api/v1/profile/{userId}
 ```
 
-Trả về chi tiết người dùng bao gồm các liên kết đăng nhập bên ngoài.
+Trả về hồ sơ cùng những gì một bảng điều khiển hỗ trợ cần để chẩn đoán sự cố đăng nhập:
+`emailConfirmed`, `isActive`, `lockoutEnd`, `accessFailedCount`, `roles`, các
+`externalLogins` đã liên kết, và `hasPassword` (chỉ cho biết có hay không, không bao giờ trả hash). Trường cuối cùng đó là khác biệt
+giữa "họ đã quên mật khẩu" và "họ chưa từng có mật khẩu, họ đăng nhập bằng SSO",
+hai lời khuyên hoàn toàn trái ngược nhau.
 
-### Người dùng có tồn tại
+Trả về thông tin chi tiết của người dùng, bao gồm các liên kết external login.
+
+### Người dùng có tồn tại không {#user-exists}
 
 ```
 GET /api/v1/profile/{userId}/exists
 ```
 
-Trả về `204` nếu người dùng tồn tại, `404` nếu không (một phép thăm dò tồn tại chi phí thấp, không có body).
+Trả `204` nếu người dùng tồn tại, ngược lại `404` (một phép thăm dò sự tồn tại rẻ, không có body).
 
-### Đăng ký người dùng
+### Đăng ký người dùng {#register-user}
 
 ```
 POST /api/v1/profile/
@@ -87,11 +93,17 @@ Content-Type: application/json
 }
 ```
 
-Tạo người dùng và gửi email xác minh. Trả về `409 user_exists` nếu email đã được sử dụng.
+Tạo người dùng và gửi email xác minh. Trả `409 user_exists` nếu email đã được dùng.
 
-Các trường tùy chọn chỉ dành cho quản trị: `userId` (id do người gọi cung cấp, `409 user_id_in_use` khi trùng), `emailConfirmed` (tạo người dùng đã được xác minh sẵn, bỏ qua email xác minh), `companyName`, `organizationId`, `phone`, `locale`, và `customAttributes` (một map chuỗi được lưu trên người dùng và chuyển tiếp đến các đích cấp phát).
+Các trường tùy chọn chỉ dành cho admin: `userId` (id do bên gọi cung cấp, `409 user_id_in_use` khi trùng), `emailConfirmed` (tạo người dùng ở trạng thái đã xác minh, bỏ qua email xác minh), `companyName`, `organizationId`, `phone`, `locale`, và `customAttributes` (một map chuỗi được lưu trên người dùng và chuyển tiếp tới các đích cấp phát).
 
-### Cập nhật người dùng
+`skipProvisioning: true` tạo danh tính mà không chạy bước cấp phát. Nó dành cho một ứng dụng
+của chính bạn mà BẢN THÂN nó là một đích cấp phát và đang dở dang việc thiết lập người dùng này: nó
+gọi tới đây để tạo danh tính, không phải để bị gọi ngược lại về một người dùng mà nó đang tạo
+dở. Không có cờ này, ứng dụng đó sẽ nhận lời gọi Try của chính nó cho một người dùng mới được dựng một nửa, chỉ mang những
+thuộc tính còn sống sót qua vòng gọi, và nếu nó xử lý tiếp được thì cuối cùng sẽ cấp phát người dùng hai lần.
+
+### Cập nhật người dùng {#update-user}
 
 ```
 PUT /api/v1/profile/
@@ -105,31 +117,113 @@ Content-Type: application/json
 }
 ```
 
-`userId` là bắt buộc; mọi trường khác là tùy chọn, chỉ các trường được cung cấp mới được cập nhật. Thay đổi `organizationId` kích hoạt:
-- Xoay vòng SecurityStamp (vô hiệu hóa tất cả phiên cookie trong vòng 30 phút)
-- Thu hồi tất cả refresh token
+`userId` là bắt buộc; mọi trường khác đều tùy chọn, chỉ các trường được cung cấp mới được cập nhật.
 
-### Xóa người dùng
+`isActive` vô hiệu hóa hoặc kích hoạt lại tài khoản. `emailConfirmed` (cũng chấp nhận dưới tên `emailVerified`)
+đánh dấu địa chỉ là đã xác nhận mà không gửi thư xác minh, dùng khi quyền sở hữu địa chỉ đã được
+xác lập bằng cách khác.
+
+Thay đổi `organizationId`, hoặc vô hiệu hóa, sẽ kích hoạt:
+- Xoay vòng SecurityStamp (vô hiệu hóa mọi phiên cookie trong vòng 30 phút)
+- Thu hồi mọi refresh token
+
+Một lệnh chặn chỉ có hiệu lực ở lần đăng nhập tiếp theo thì không phải là lệnh chặn, đó là lý do việc vô hiệu hóa thu hồi ngay
+thay vì đợi hết hạn.
+
+### Tìm kiếm người dùng {#search-users}
+
+```
+GET /api/v1/profile/search?q=jane&maxResults=20
+```
+
+Tìm kiếm theo tiền tố trên các chỉ mục email và tên. Trả về `{ "users": [ ... ] }`.
+
+### Lấy người dùng theo email {#get-user-by-email}
+
+```
+GET /api/v1/profile/by-email?email=jane@example.com
+```
+
+Tra cứu chính xác, khác với tìm kiếm, vốn khớp theo tiền tố và có thể trả về nhiều người. Bên gọi
+cần phân giải "địa chỉ này" thành "tài khoản này" muốn một câu trả lời hoặc không có gì. Trả `404` nếu không có người dùng như vậy.
+
+### Liệt kê người dùng {#list-users}
+
+```
+GET /api/v1/profile?organizationId=&count=100&continuationToken=
+```
+
+Liệt kê thư mục theo phân trang bằng con trỏ; truyền lại `continuationToken` được trả về để lấy trang tiếp theo, và
+dừng khi nó là null. Dùng con trỏ thay vì offset vì store phân trang theo token: offset sẽ
+quét lại từ đầu ở mỗi trang.
+
+### Những người dùng nào tồn tại {#which-users-exist}
+
+```
+POST /api/v1/profile/exists
+Content-Type: application/json
+
+{ "userIds": [ "a", "b", "c" ] }
+```
+
+Trả về tập con các id tồn tại, cùng `truncated: true` khi request vượt giới hạn 500 id, để
+bên gọi được biết lô của mình đã bị cắt bớt thay vì âm thầm chỉ được trả lời về 500 trong số 600 id. Dùng để
+đối chiếu một tập id với tập id của hệ thống khác.
+
+### Trạng thái MFA của nhiều người dùng {#mfa-status-for-many-users}
+
+```
+POST /api/v1/profile/mfa-status
+Content-Type: application/json
+
+{ "userIds": [ "a", "b", "c" ] }
+```
+
+Trả về `{ "statuses": { "a": true, "b": false }, "truncated": false }`: `true` nghĩa là người dùng có ít nhất một thông tin xác thực MFA. Giới hạn 500 id; `truncated: true` cho biết request đã bị cắt bớt. Dùng cho huy hiệu "dùng MFA" trên giao diện thư mục.
+
+### Đặt mật khẩu {#set-a-password}
+
+```
+POST /api/v1/profile/{userId}/set-password
+Content-Type: application/json
+
+{ "password": "N3w!Password" }
+```
+
+Đường hỗ trợ cho người bị khóa khỏi tài khoản mà địa chỉ email không còn tới được họ nữa. Tuân theo
+chính sách mật khẩu. Thu hồi mọi refresh token và xoay vòng security stamp: một lần đổi mật khẩu
+mà để các phiên cũ tiếp tục chạy thì chưa hề thay đổi ai có thể hành động với tư cách người đó.
+
+### Mở khóa người dùng {#unlock-a-user}
+
+```
+POST /api/v1/profile/{userId}/unlock
+```
+
+Xóa trạng thái khóa và bộ đếm số lần thất bại, cho phép người đó vào lại ngay thay vì đợi tới khi
+thời hạn khóa tình cờ hết.
+
+### Xóa người dùng {#delete-user}
 
 ```
 DELETE /api/v1/profile/{userId}
 ```
 
-Xóa người dùng, thu hồi tất cả cấp quyền, và hủy cấp phát khỏi tất cả ứng dụng phía sau (nỗ lực tốt nhất).
+Xóa người dùng, thu hồi mọi grant, và thu hồi cấp phát khỏi mọi ứng dụng downstream (theo khả năng tốt nhất).
 
-### Xác nhận email
+### Xác nhận email {#confirm-email}
 
 ```
 POST /api/v1/profile/confirm-email?token={token}
 ```
 
-### Gửi email xác minh
+### Gửi email xác minh {#send-verification-email}
 
 ```
 POST /api/v1/profile/{userId}/send-verification-email
 ```
 
-### Liên kết danh tính bên ngoài
+### Liên kết danh tính bên ngoài {#link-external-identity}
 
 ```
 POST /api/v1/profile/{userId}/identities
@@ -142,80 +236,82 @@ Content-Type: application/json
 }
 ```
 
-### Hủy liên kết danh tính bên ngoài
+### Hủy liên kết danh tính bên ngoài {#unlink-external-identity}
 
 ```
 DELETE /api/v1/profile/{userId}/identities/{provider}/{externalUserId}
 ```
 
-## Quản lý MFA
+## Quản lý MFA {#mfa-management}
 
-### Lấy trạng thái MFA
+### Lấy trạng thái MFA {#get-mfa-status}
 
 ```
 GET /api/v1/profile/{userId}/mfa
 ```
 
-Trả về trạng thái MFA và các phương thức đã đăng ký của người dùng.
+Trả về trạng thái MFA và các phương thức đã đăng ký của một người dùng.
 
-### Đặt lại toàn bộ MFA
+### Đặt lại toàn bộ MFA {#reset-all-mfa}
 
 ```
 DELETE /api/v1/profile/{userId}/mfa
 ```
 
-Xóa tất cả thông tin xác thực MFA và đặt `MfaEnabled=false`. Người dùng sẽ cần đăng ký lại nếu được yêu cầu.
+Gỡ mọi thông tin xác thực MFA và đặt `MfaEnabled=false`. Người dùng sẽ cần đăng ký lại nếu được yêu cầu.
 
-### Xóa thông tin xác thực MFA cụ thể
+### Gỡ một thông tin xác thực MFA cụ thể {#remove-specific-mfa-credential}
 
 ```
 DELETE /api/v1/profile/{userId}/mfa/{credentialId}
 ```
 
-Xóa một thông tin xác thực MFA cụ thể (ví dụ: ứng dụng xác thực bị mất). Nếu phương thức chính cuối cùng bị xóa, MFA sẽ bị vô hiệu hóa.
+Gỡ một thông tin xác thực MFA cụ thể (ví dụ một ứng dụng xác thực bị mất). Nếu phương thức chính cuối cùng bị gỡ, MFA sẽ bị tắt.
 
-## Nhà cung cấp SSO
+## SSO Provider {#sso-providers}
 
-### Nhà cung cấp SAML
-
-```
-POST   /api/v1/saml/connections                    # Tạo mới
-GET    /api/v1/saml/connections/{connectionId}     # Lấy một
-PUT    /api/v1/saml/connections/{connectionId}     # Cập nhật (một phần, chỉ các trường được cung cấp mới thay đổi)
-DELETE /api/v1/saml/connections/{connectionId}     # Xóa
-```
-
-Việc tạo yêu cầu `connectionName`, `entityId`, và **đúng một trong** `metadataLocation` (một URL metadata) hoặc `metadataXml` (metadata IdP được dán vào, cho các IdP không có URL metadata, nó được kiểm tra cú pháp và cô đọng khi lưu). Tùy chọn: `nameIdFormat` (bỏ qua để dùng mặc định emailAddress, `"none"` để bỏ NameIDPolicy, được khuyến nghị cho ADFS, hoặc một URN định dạng NameID), `signAuthnRequests`, `iconUrl`, `allowedDomains`, `disableJitProvisioning`. Mỗi connection nhận một cặp khóa SP do máy chủ tạo; nó không bao giờ được API trả về. Xem [SAML](saml) để biết chi tiết.
-
-### Nhà cung cấp OIDC
+### SAML Provider {#saml-providers}
 
 ```
-POST   /api/v1/oidc/connections                    # Tạo mới
-GET    /api/v1/oidc/connections/{connectionId}     # Lấy một
-DELETE /api/v1/oidc/connections/{connectionId}     # Xóa
+POST   /api/v1/saml/connections                    # Create
+GET    /api/v1/saml/connections/{connectionId}     # Get one
+PUT    /api/v1/saml/connections/{connectionId}     # Update (partial: only supplied fields change)
+DELETE /api/v1/saml/connections/{connectionId}     # Delete
 ```
 
-Việc tạo yêu cầu `connectionName`, `metadataLocation`, `clientId`, `clientSecret`, `redirectUrl`. Tùy chọn: `iconUrl`, `allowedDomains`, `passthroughParams`. Client secret được bảo vệ khi lưu trữ và không bao giờ được trả về. Xem [Liên kết OIDC](oidc-federation).
+Thao tác tạo yêu cầu `connectionName`, `entityId`, và **đúng một trong hai** `metadataLocation` (một URL metadata) hoặc `metadataXml` (metadata của IdP được dán vào, cho các IdP không có URL metadata, nó được kiểm tra cú pháp và thu gọn khi lưu). Tùy chọn: `nameIdFormat` (bỏ trống để dùng mặc định emailAddress, `"none"` để bỏ NameIDPolicy, khuyến nghị cho ADFS, hoặc một URN định dạng NameID), `signAuthnRequests`, `iconUrl`, `allowedDomains`, `disableJitProvisioning`, `organizationId`. Mỗi kết nối nhận một cặp khóa SP do máy chủ sinh ra; nó không bao giờ được API trả về. Xem [SAML](saml) để biết chi tiết.
 
-### Tên miền SSO
+`organizationId` giới hạn kết nối trong một [tổ chức](organizations): kết nối chỉ được đưa ra khi tổ chức đó được chọn, `allowedDomains` của nó chỉ được so khớp bên trong tổ chức đó (và *không* được ghi vào chỉ mục tên miền SSO toàn tenant), và mọi người đăng nhập qua kết nối đó đều trở thành thành viên của tổ chức. Bỏ trống hoặc `null` = một kết nối cấp tenant. Một tổ chức không tồn tại sẽ trả `400 unknown_organization`. Khi cập nhật, `null` (trường vắng mặt) giữ nguyên phạm vi, `""` đưa kết nối trở về cấp tenant, và cả hai chiều đều ghi lại chỉ mục tên miền tương ứng. Xem [Kết nối theo phạm vi tổ chức](self-service-sso#organisation-scoped-connections).
 
-```
-GET    /api/v1/sso/domains                 # Liệt kê tất cả
-```
-
-## Client
-
-Quản lý các OAuth client tại thời điểm chạy. Tất cả route yêu cầu policy `IdentityAdmin` (scope quản trị).
+### OIDC Provider {#oidc-providers}
 
 ```
-GET    /api/v1/clients              # Liệt kê tất cả client
-GET    /api/v1/clients/{clientId}   # Lấy một client
-POST   /api/v1/clients              # Tạo một client
-PUT    /api/v1/clients/{clientId}   # Cập nhật một client
-DELETE /api/v1/clients/{clientId}   # Xóa một client
+POST   /api/v1/oidc/connections                    # Create
+GET    /api/v1/oidc/connections/{connectionId}     # Get one
+DELETE /api/v1/oidc/connections/{connectionId}     # Delete
 ```
 
-### Tạo / Cập nhật Client
+Thao tác tạo yêu cầu `connectionName`, `metadataLocation`, `clientId`, `clientSecret`, `redirectUrl`. Tùy chọn: `iconUrl`, `allowedDomains`, `passthroughParams`, `organizationId` (cùng ý nghĩa như trên kết nối SAML ở trên). Client secret được bảo vệ khi lưu trữ và không bao giờ được trả về. Xem [Liên kết OIDC](oidc-federation).
+
+### Tên miền SSO {#sso-domains}
+
+```
+GET    /api/v1/sso/domains                 # List all
+```
+
+## Client {#clients}
+
+Quản lý OAuth client lúc chạy. Mọi route đều yêu cầu policy `IdentityAdmin` (scope quản trị).
+
+```
+GET    /api/v1/clients              # List all clients
+GET    /api/v1/clients/{clientId}   # Get one client
+POST   /api/v1/clients              # Create a client
+PUT    /api/v1/clients/{clientId}   # Update a client
+DELETE /api/v1/clients/{clientId}   # Delete a client
+```
+
+### Tạo / cập nhật client {#create--update-client}
 
 ```
 POST /api/v1/clients
@@ -230,24 +326,24 @@ Content-Type: application/json
 }
 ```
 
-`POST` trả về `409` nếu client đã tồn tại. `PUT` cập nhật một client hiện có (`404` nếu không tìm thấy); khi cập nhật, chỉ các scope mới được thêm vào mới bị kiểm tra leo thang đặc quyền.
+`POST` trả `409` nếu client đã tồn tại. `PUT` cập nhật một client hiện có (`404` nếu không tìm thấy); khi cập nhật, chỉ các scope mới được thêm vào mới bị kiểm tra leo thang quyền.
 
 Lưu ý:
 
-- **Hash bí mật không bao giờ được trả về.** `clientSecretHashes` bị loại bỏ khỏi mọi phản hồi (liệt kê, lấy, tạo, cập nhật). Khi cập nhật, việc bỏ qua `clientSecretHashes` sẽ giữ nguyên bí mật đã lưu; cung cấp hash mới sẽ xoay vòng nó.
-- **Scope quản trị không thể được cấp cho một client.** Yêu cầu `AdminApi:Scope` (mặc định `authagonal-admin`) trong `allowedScopes` sẽ trả về `403 forbidden_scope`: không client nào được giữ scope quản trị, nếu không một client `client_credentials` có thể cấp token quản trị vô thời hạn.
-- Thêm các scope mà người gọi không được phép cấp sẽ trả về `403`.
+- **Hash của secret không bao giờ được trả về.** `clientSecretHashes` bị loại khỏi mọi phản hồi (list, get, create, update). Khi cập nhật, bỏ trống `clientSecretHashes` sẽ giữ nguyên secret đã lưu; cung cấp hash mới sẽ xoay vòng nó.
+- **Không thể cấp scope quản trị cho một client.** Yêu cầu `AdminApi:Scope` (mặc định `authagonal-admin`) trong `allowedScopes` trả `403 forbidden_scope`, không client nào được giữ scope quản trị, nếu không một client `client_credentials` có thể tạo admin token vô thời hạn.
+- Thêm các scope mà bên gọi không được phép cấp sẽ trả `403`.
 
-## Scope
+## Scope {#scopes}
 
-Quản lý các OAuth scope tùy chỉnh tại thời điểm chạy. Xem [OAuth Scopes](scopes) để biết mô hình scope đầy đủ.
+Quản lý OAuth scope tùy chỉnh lúc chạy. Xem [OAuth Scope](scopes) để biết đầy đủ mô hình scope.
 
 ```
-GET    /api/v1/scopes           # Liệt kê tất cả scope
-GET    /api/v1/scopes/{name}    # Lấy một scope
-POST   /api/v1/scopes           # Tạo một scope
-PUT    /api/v1/scopes/{name}    # Cập nhật một scope (chỉ các trường được cung cấp mới thay đổi)
-DELETE /api/v1/scopes/{name}    # Xóa một scope
+GET    /api/v1/scopes           # List all scopes
+GET    /api/v1/scopes/{name}    # Get one scope
+POST   /api/v1/scopes           # Create a scope
+PUT    /api/v1/scopes/{name}    # Update a scope (only supplied fields change)
+DELETE /api/v1/scopes/{name}    # Delete a scope
 ```
 
 ```
@@ -256,27 +352,27 @@ Content-Type: application/json
 
 {
   "name": "billing.read",
-  "displayName": "Billing — read-only",
+  "displayName": "Billing, read-only",
   "description": "View invoices and payment history",
   "userClaims": ["billing_plan"]
 }
 ```
 
-Trả về `201` khi tạo (`409` nếu scope đã tồn tại), JSON của scope khi lấy/cập nhật, và `204` khi xóa.
+Trả `201` khi tạo (`409` nếu scope đã tồn tại), JSON của scope khi get/update, và `204` khi xóa.
 
-## Ứng dụng cấp phát
+## Ứng dụng cấp phát {#provisioning-apps}
 
-Quản lý các đích cấp phát phía sau tại thời điểm chạy. Tất cả route yêu cầu policy `IdentityAdmin`.
+Quản lý các đích cấp phát downstream lúc chạy. Mọi route đều yêu cầu policy `IdentityAdmin`.
 
 ```
-GET    /api/v1/provisioning/apps               # Liệt kê các app (cũng trả về giới hạn đã cấu hình)
-POST   /api/v1/provisioning/apps               # Tạo một app
-PUT    /api/v1/provisioning/apps/{appId}       # Cập nhật một app
-DELETE /api/v1/provisioning/apps/{appId}       # Xóa một app
-POST   /api/v1/provisioning/apps/{appId}/test  # Gửi một lệnh gọi /try thử nghiệm đến callback của app
+GET    /api/v1/provisioning/apps               # List apps (also returns the configured limit)
+POST   /api/v1/provisioning/apps               # Create an app
+PUT    /api/v1/provisioning/apps/{appId}       # Update an app
+DELETE /api/v1/provisioning/apps/{appId}       # Delete an app
+POST   /api/v1/provisioning/apps/{appId}/test  # Send a test /try call to the app's callback
 ```
 
-### Tạo / Cập nhật Ứng dụng cấp phát
+### Tạo / cập nhật ứng dụng cấp phát {#create--update-provisioning-app}
 
 ```
 POST /api/v1/provisioning/apps
@@ -291,33 +387,33 @@ Content-Type: application/json
 ```
 
 - `name` và `callbackUrl` là bắt buộc; `callbackUrl` phải là một URL `http(s)` tuyệt đối.
-- `tryTimeoutSeconds` bị giới hạn trong khoảng 5–300.
-- **Khóa API không bao giờ được trả về.** Các phản hồi hiển thị `hasApiKey` (một boolean) thay vì chính khóa đó. Khi cập nhật, việc bỏ qua `apiKey` sẽ giữ nguyên nó, một chuỗi rỗng sẽ xóa nó, và một giá trị sẽ thay thế nó.
-- Việc tạo phải tuân theo một hạn ngạch cấu hình được theo từng triển khai (`IProvisioningAppQuota`); vượt quá nó sẽ trả về `400 provisioning_app_limit`. Phản hồi liệt kê bao gồm `limit` hiện tại.
+- `tryTimeoutSeconds` bị kẹp trong khoảng 5–300.
+- **API key không bao giờ được trả về.** Phản hồi chỉ ra `hasApiKey` (một giá trị boolean) thay vì chính khóa. Khi cập nhật, bỏ trống `apiKey` giữ nguyên nó, chuỗi rỗng xóa nó, và một giá trị sẽ thay thế nó.
+- Việc tạo chịu một hạn mức có thể cấu hình cho mỗi bản triển khai (`IProvisioningAppQuota`); vượt hạn mức sẽ trả `400 provisioning_app_limit`. Phản hồi danh sách bao gồm `limit` hiện tại.
 
-### Thử nghiệm một Ứng dụng cấp phát
+### Kiểm thử ứng dụng cấp phát {#test-a-provisioning-app}
 
 ```
 POST /api/v1/provisioning/apps/{appId}/test
 ```
 
-Gửi một `POST {callbackUrl}/try` tổng hợp với payload mẫu (và khóa API của app dưới dạng bearer token nếu được đặt) và trả về `{ success, statusCode, body }` để bạn có thể xác minh khả năng kết nối từ giao diện quản trị.
+Gửi một `POST {callbackUrl}/try` giả lập với payload mẫu (kèm API key của ứng dụng dưới dạng bearer token nếu có đặt) và trả về `{ success, statusCode, body }` để bạn có thể kiểm tra kết nối từ giao diện quản trị.
 
-## Vai trò
+## Vai trò {#roles}
 
-### Liệt kê vai trò
+### Liệt kê vai trò {#list-roles}
 
 ```
 GET /api/v1/roles
 ```
 
-### Lấy vai trò
+### Lấy vai trò {#get-role}
 
 ```
 GET /api/v1/roles/{roleId}
 ```
 
-### Tạo vai trò
+### Tạo vai trò {#create-role}
 
 ```
 POST /api/v1/roles
@@ -329,7 +425,7 @@ Content-Type: application/json
 }
 ```
 
-### Cập nhật vai trò
+### Cập nhật vai trò {#update-role}
 
 ```
 PUT /api/v1/roles/{roleId}
@@ -341,13 +437,13 @@ Content-Type: application/json
 }
 ```
 
-### Xóa vai trò
+### Xóa vai trò {#delete-role}
 
 ```
 DELETE /api/v1/roles/{roleId}
 ```
 
-### Gán vai trò cho người dùng
+### Gán vai trò cho người dùng {#assign-role-to-user}
 
 ```
 POST /api/v1/roles/assign
@@ -359,9 +455,9 @@ Content-Type: application/json
 }
 ```
 
-Việc gán theo **tên vai trò**, không phải id vai trò. Trả về danh sách vai trò đã cập nhật của người dùng.
+Việc gán dựa trên **tên vai trò**, không phải id vai trò. Trả về danh sách vai trò đã cập nhật của người dùng.
 
-### Hủy gán vai trò khỏi người dùng
+### Bỏ gán vai trò khỏi người dùng {#unassign-role-from-user}
 
 ```
 POST /api/v1/roles/unassign
@@ -373,15 +469,34 @@ Content-Type: application/json
 }
 ```
 
-### Lấy vai trò của người dùng
+### Lấy vai trò của người dùng {#get-users-roles}
 
 ```
 GET /api/v1/roles/user/{userId}
 ```
 
-## Token SCIM
+### Người dùng có một vai trò {#users-in-a-role}
 
-### Tạo token
+```
+GET /api/v1/roles/{roleName}/users?maxResults=200
+```
+
+Chiều ngược lại của endpoint trên (ai đang giữ vai trò này), được trả lời từ một chỉ mục thành viên vai trò thay vì
+đọc từng người dùng. Trả về `{ "roleName": "...", "members": [ { "userId", "email", "firstName",
+"lastName", "roles" } ] }`; mỗi thành viên mang toàn bộ tập vai trò của họ, vì một bảng điều khiển liệt kê một
+vai trò hầu như luôn muốn hiển thị các thành viên của nó còn có những vai trò gì khác.
+
+Trả `404 role_not_found` cho vai trò không tồn tại, thay vì một danh sách rỗng: "không ai giữ vai trò này"
+và "bạn gõ sai tên vai trò" là hai vấn đề khác nhau. Trả `501 not_supported` nếu store được cấu hình
+không đánh chỉ mục thành viên vai trò, cũng vì lý do đó: một danh sách thành viên rỗng sẽ bị hiểu thành
+"không ai quản trị thứ này".
+
+Các tài khoản được ghi trước khi có chỉ mục sẽ vô hình với nó cho tới khi được đánh chỉ mục lại
+(`IUserStore.ReindexUserAsync`, phương thức này upsert tư cách thành viên của người dùng mà không xóa bất kỳ mục nào).
+
+## SCIM token {#scim-tokens}
+
+### Tạo token {#generate-token}
 
 ```
 POST /api/v1/scim/tokens
@@ -394,41 +509,41 @@ Content-Type: application/json
 }
 ```
 
-`description` và `expiresInDays` là tùy chọn (bỏ qua `expiresInDays` để có token không hết hạn). Trả về token thô một lần. Lưu trữ an toàn, không thể truy xuất lại.
+`description` và `expiresInDays` là tùy chọn (bỏ `expiresInDays` để có token không hết hạn). Trả về token thô một lần duy nhất. Hãy lưu giữ nó an toàn, không thể lấy lại token này.
 
-### Liệt kê token
+### Liệt kê token {#list-tokens}
 
 ```
 GET /api/v1/scim/tokens?clientId=client-id
 ```
 
-Trả về metadata token (ID, ngày tạo) mà không có giá trị token thô.
+Trả về metadata của token (ID, ngày tạo) mà không kèm giá trị token thô.
 
-### Thu hồi token
+### Thu hồi token {#revoke-token}
 
 ```
 DELETE /api/v1/scim/tokens/{tokenId}?clientId=client-id
 ```
 
-## Token
+## Token {#tokens}
 
-### Giả mạo người dùng
+### Mạo danh người dùng {#impersonate-user}
 
 ```
 POST /api/v1/token?clientId=client-id&userId=user-id&scopes=openid%20profile
 ```
 
-Cấp token (access, refresh, và, khi `openid` được yêu cầu, id token) thay mặt người dùng mà không cần thông tin đăng nhập của họ. Hữu ích cho kiểm thử và hỗ trợ. Các tham số được truyền dưới dạng query string.
+Phát hành token (access, refresh, và id token khi có yêu cầu `openid`) thay mặt một người dùng mà không cần thông tin xác thực của họ. Hữu ích cho kiểm thử và hỗ trợ. Tham số được truyền dưới dạng query string.
 
-| Tham số query | Bắt buộc | Mô tả |
+| Tham số truy vấn | Bắt buộc | Mô tả |
 |---|---|---|
-| `clientId` | Có | Client mà token được cấp cho. Thời hạn token đến từ cấu hình của client này. |
-| `userId` | Có | Người dùng cần giả mạo. |
-| `scopes` | Không | Danh sách scope **phân cách bằng dấu cách** (mã hóa URL các dấu cách). Mặc định là `AllowedScopes` của client khi bỏ qua. |
+| `clientId` | Có | Client mà token được phát hành cho. Thời gian sống của token lấy từ cấu hình của client này. |
+| `userId` | Có | Người dùng cần mạo danh. |
+| `scopes` | Không | Danh sách scope **phân cách bằng dấu cách** (mã hóa URL cho dấu cách). Mặc định là `AllowedScopes` của client khi bỏ trống. |
 
 Hạn chế:
 
-- Các scope bị giới hạn trong `AllowedScopes` của client: yêu cầu bất kỳ scope nào mà chính client không thể tự yêu cầu sẽ trả về `400 invalid_scope`.
-- Scope quản trị (`AdminApi:Scope`, mặc định `authagonal-admin`) **không thể** được cấp qua endpoint này; yêu cầu nó sẽ trả về `403 forbidden_scope`. Điều này ngăn một token quản trị (có thể có thời hạn giới hạn) cấp một access/refresh token quản trị tồn tại lâu dài.
+- Scope bị giới hạn trong `AllowedScopes` của client, yêu cầu bất kỳ scope nào mà chính client không thể yêu cầu sẽ trả `400 invalid_scope`.
+- Scope quản trị (`AdminApi:Scope`, mặc định `authagonal-admin`) **không thể** được phát hành qua endpoint này; yêu cầu nó sẽ trả `403 forbidden_scope`. Điều này ngăn một admin token (có thể có thời hạn) tạo ra admin access/refresh token sống lâu.
 
-Phản hồi là một phản hồi token tiêu chuẩn với `access_token`, `refresh_token`, `id_token` tùy chọn, `expires_in`, và `scope` được cấp (phân cách bằng dấu cách).
+Phản hồi là một token response tiêu chuẩn với `access_token`, `refresh_token`, `id_token` tùy chọn, `expires_in`, và `scope` đã được cấp (phân cách bằng dấu cách).

@@ -1,27 +1,27 @@
 ---
 layout: default
-title: Logout Front-Channel
+title: Front-Channel Logout
 locale: pt
 ---
 
-# Logout Front-Channel
+# Front-Channel Logout
 
-O Authagonal implementa o **OpenID Connect Front-Channel Logout 1.0**, um mecanismo de logout conduzido pelo navegador que complementa o [logout back-channel](index#features). Enquanto o logout back-channel é um POST de servidor para servidor, o logout front-channel renderiza a URL de logout de cada parte confiante (RP) num iframe oculto, de modo que a sessão de navegador de cada aplicação (cookies, local storage) seja limpa a partir de dentro do navegador do utilizador.
+O Authagonal implementa o **OpenID Connect Front-Channel Logout 1.0**, um mecanismo de logout conduzido pelo browser que complementa o [back-channel logout](index#key-features). Enquanto o back-channel logout é um POST de servidor para servidor, o front-channel logout apresenta o URL de logout de cada relying party num iframe oculto, para que a sessão de browser de cada aplicação (cookies, armazenamento local) seja limpa a partir do próprio browser do utilizador.
 
-## Quando Usar Cada Um
+## Quando usar cada um {#when-to-use-which}
 
 | Aspeto | Back-Channel | Front-Channel |
 |---|---|---|
 | Sessões do lado do servidor | ✅ | ❌ |
-| Cookies do navegador / local storage | ❌ | ✅ |
-| Funciona quando o navegador do utilizador está offline | ✅ | ❌ |
-| Sobrevive a erros de rede (repetição) | ✅ | ❌ (uma única tentativa de melhor esforço) |
+| Cookies do browser / armazenamento local | ❌ | ✅ |
+| Funciona quando o browser do utilizador está offline | ✅ | ❌ |
+| Resiste a erros de rede (nova tentativa) | ✅ | ❌ (uma única tentativa, na medida do possível) |
 
-A maioria das aplicações beneficia de configurar **ambos**. O back-channel garante que o servidor é avisado; o front-channel limpa o navegador.
+A maioria das aplicações beneficia de configurar **ambos**. O back-channel garante que o servidor é notificado; o front-channel limpa o browser.
 
-## Configuração do Cliente
+## Configuração do cliente {#client-configuration}
 
-Adicione uma URI de logout front-channel ao registo `OAuthClient`:
+Acrescente um URI de front-channel logout ao registo `OAuthClient`:
 
 ```json
 {
@@ -33,33 +33,39 @@ Adicione uma URI de logout front-channel ao registo `OAuthClient`:
 
 | Campo | Descrição |
 |---|---|
-| `FrontChannelLogoutUri` | O endpoint de logout do cliente visível ao navegador |
-| `FrontChannelLogoutSessionRequired` | Se `true` (padrão), a URL é chamada com os parâmetros de query `iss` e `sid` para que o cliente possa correlacionar o logout com a sessão específica |
+| `FrontChannelLogoutUri` | O endpoint de logout do cliente visível pelo browser |
+| `FrontChannelLogoutSessionRequired` | Se for `true` (predefinição), o URL é chamado com os parâmetros de consulta `iss` e `sid`, para que o cliente possa associar o logout à sessão específica |
 
-## Como Funciona
+## Como funciona {#how-it-works}
 
-Quando o navegador visita `/connect/endsession`:
+Quando o browser visita `/connect/endsession` (GET ou POST):
 
-1. O servidor encontra todos os clientes com os quais o utilizador tem concessões atualmente.
-2. Para cada cliente com uma `FrontChannelLogoutUri`, o servidor constrói uma URL, anexando `iss=<issuer>` (e `sid=<session_id>`, quando a sessão tem um) se `FrontChannelLogoutSessionRequired` for `true`.
-3. O servidor termina a sessão do utilizador no cookie do servidor de autorização, dispara notificações de logout back-channel em segundo plano e retorna uma página HTML contendo um `<iframe>` oculto para cada URL de logout de cliente:
+1. **Confirmação (proteção contra CSRF).** Se o browser tiver uma sessão iniciada e o pedido não transportar um `id_token_hint` cujo `sub` corresponda a essa sessão, o servidor apresenta primeiro uma página "terminar sessão?" com um botão de confirmação, em vez de terminar a sessão do utilizador. O botão faz um POST de volta com um token de curta duração (15 minutos) vinculado a essa sessão. É isto que impede uma página de terceiros de terminar a sessão de um utilizador navegando até ao endpoint (o cookie de sessão é `SameSite=Lax`, pelo que acompanha um GET de nível superior entre sites). Um `id_token_hint` correspondente substitui a confirmação.
+2. O servidor encontra todos os clientes com os quais o utilizador tem atualmente concessões.
+3. Para cada cliente com um `FrontChannelLogoutUri` que passe a verificação de URLs de saída (o loopback é permitido porque é o próprio browser do utilizador que faz o pedido, mas os endereços de gamas privadas e link-local não), o servidor constrói um URL, acrescentando `iss=<issuer>` (e `sid=<session_id>`, quando a sessão tem um) se `FrontChannelLogoutSessionRequired` for `true`.
+4. O servidor revoga as concessões emitidas para a sessão, termina a sessão do utilizador no cookie do servidor de autorização, despoleta as notificações de back-channel logout em segundo plano e, quando foi construído pelo menos um URL de front-channel, devolve uma página HTML que contém um `<iframe>` oculto para cada um:
    ```html
    <iframe src="https://myapp.example.com/oidc/frontchannel?iss=https%3A%2F%2Fauth.example.com&sid=abc123" style="display:none"></iframe>
    ```
-4. Após um período de tolerância de 2 segundos, o navegador é redirecionado para `post_logout_redirect_uri`, honrado apenas quando a requisição também carrega um `id_token_hint` que identifica o cliente e a URI está nos `PostLogoutRedirectUris` registados desse cliente (um parâmetro `state`, se fornecido, é anexado ao redirecionamento). Caso contrário, é exibida uma confirmação de "sessão terminada".
+   A página transporta uma `Content-Security-Policy` cujo `frame-src` está limitado às origens desses URLs, e não contém scripts.
+5. O destino pós-logout é resolvido da mesma forma, haja ou não iframes envolvidos. O `post_logout_redirect_uri` só é respeitado quando o pedido identifica o cliente (através da audiência do `id_token_hint`, ou do parâmetro `client_id`) e o URI consta dos `PostLogoutRedirectUris` registados desse cliente (um parâmetro `state`, se for fornecido, é acrescentado). Com iframes, a página aguarda 2 segundos (um `meta refresh`) e depois redireciona, ou mostra uma mensagem de "sessão terminada" quando não há destino válido. Sem URLs de front-channel, o servidor redireciona de imediato (`302`), ou responde `200` com uma `message` JSON quando não há destino válido.
 
-## Handler de Logout do Lado do Cliente
+`id_token_hint` só é aceite se for um ID token assinado por este servidor (ES256, `typ: JWT`) com uma única audiência. Os tokens expirados são aceites. Os tokens de acesso, e os logout tokens, são rejeitados como hints. Se forem enviados `client_id` e `id_token_hint` e estes indicarem clientes diferentes, o pedido falha com `400 invalid_request`.
 
-Cada parte confiante (RP) deve implementar a URL referenciada por `FrontChannelLogoutUri`. Um handler mínimo:
+O endpoint JSON `POST /api/auth/logout` (usado pelo botão de terminar sessão da aplicação de início de sessão) executa os mesmos passos de revogação e notificação. Não apresenta iframes: devolve os URLs em `frontchannel_logout_uris` para que o chamador os carregue (consulte a [API de autenticação](auth-api#logout)).
+
+## Handler de logout do lado do cliente {#client-side-logout-handler}
+
+Cada relying party deve implementar o URL referido por `FrontChannelLogoutUri`. Um handler mínimo:
 
 ```http
 GET /oidc/frontchannel?iss=https://auth.example.com&sid=abc123
 ```
 
-1. Verifique que `iss` corresponde ao servidor de autorização esperado.
+1. Verifique se `iss` corresponde ao servidor de autorização esperado.
 2. Se `sid` for fornecido, confirme que corresponde ao ID de sessão do cookie de sessão.
 3. Limpe a sessão local (cookies, sessão do lado do servidor, armazenamento da SPA).
-4. Responda com `200 OK` e um corpo vazio (ou uma página minúscula): a resposta nunca é visível para o utilizador.
+4. Responda com `200 OK` e um corpo vazio (ou uma página mínima); a resposta nunca é visível para o utilizador.
 
 ```csharp
 app.MapGet("/oidc/frontchannel", (HttpContext ctx) =>
@@ -72,9 +78,9 @@ app.MapGet("/oidc/frontchannel", (HttpContext ctx) =>
 });
 ```
 
-## Documento de Descoberta
+## Documento de descoberta {#discovery-document}
 
-O logout front-channel é anunciado em `/.well-known/openid-configuration`:
+O front-channel logout é anunciado em `/.well-known/openid-configuration`:
 
 ```json
 {
@@ -83,9 +89,9 @@ O logout front-channel é anunciado em `/.well-known/openid-configuration`:
 }
 ```
 
-## Registo Dinâmico de Clientes
+## Registo dinâmico de clientes {#dynamic-client-registration}
 
-Os clientes registados via [Registo Dinâmico de Clientes](client-registration) podem incluir:
+Os clientes registados através do [registo dinâmico de clientes](client-registration) podem incluir:
 
 ```json
 {
@@ -94,13 +100,15 @@ Os clientes registados via [Registo Dinâmico de Clientes](client-registration) 
 }
 ```
 
-## Limitações
+O registo recusa um URI de logout que não seja um endereço externo (os nomes de loopback, link-local, de gamas privadas e `.localhost`/`.local`/`.internal` são rejeitados com `invalid_client_metadata`).
 
-- **Melhor esforço**: os iframes são carregados uma vez. Se um erro de rede ou uma extensão do navegador os bloquear, não há repetição. Combine com o logout back-channel para maior fiabilidade.
-- **Cookies de terceiros**: alguns navegadores bloqueiam cookies em iframes cross-site por padrão. Se a sua RP depende de cookies first-party, confirme que o handler de logout não depende do envio de cookies.
-- **Timeout**: a página espera ~2 segundos antes de redirecionar/confirmar. Handlers de logout de RP pesados podem não completar a tempo.
+## Limitações {#limitations}
 
-## Relacionados
+- **Na medida do possível**: os iframes são carregados uma única vez. Se um erro de rede ou uma extensão do browser os bloquear, não há nova tentativa. Combine-o com o back-channel logout para obter fiabilidade.
+- **Cookies de terceiros**: alguns browsers bloqueiam por predefinição os cookies em iframes entre sites. Se a sua RP depende de cookies de primeira parte, confirme que o handler de logout não depende do envio de cookies.
+- **Tempo limite**: a página aguarda ~2 segundos antes de redirecionar. Handlers de logout de RP pesados podem não terminar a tempo.
 
-- [Registo Dinâmico de Clientes](client-registration): parâmetros front-channel na requisição de registo
-- [Scopes OAuth](scopes): o consentimento ciente de scopes complementa o fluxo de logout
+## Relacionado {#related}
+
+- [Registo dinâmico de clientes](client-registration): parâmetros de front-channel no pedido de registo
+- [Âmbitos OAuth](scopes): o consentimento sensível aos âmbitos complementa o fluxo de logout

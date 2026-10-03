@@ -154,7 +154,7 @@ public static class EndSessionEndpoint
                 tail = $"<p>{msg}</p>";
             }
 
-            var html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Signed out</title>" +
+            var html = $"<!DOCTYPE html><html {HtmlDocumentLocale.HtmlAttributes()}><head><meta charset=\"utf-8\"><title>{System.Net.WebUtility.HtmlEncode(localizer["EndSession_TitleSignedOut"].Value)}</title>" +
                        $"{(tail.StartsWith("<meta", StringComparison.Ordinal) ? tail : "")}</head>" +
                        $"<body>{iframes}{(tail.StartsWith("<meta", StringComparison.Ordinal) ? "" : tail)}</body></html>";
 
@@ -364,7 +364,7 @@ public static class EndSessionEndpoint
             localizer["EndSession_ConfirmPrompt"].Value,
             httpContext.RequestServices.GetRequiredService<Authagonal.Core.Services.ITenantContext>().Issuer));
 
-        var html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Sign out</title></head><body>" +
+        var html = $"<!DOCTYPE html><html {HtmlDocumentLocale.HtmlAttributes()}><head><meta charset=\"utf-8\"><title>{Enc(localizer["EndSession_TitleConfirm"].Value)}</title></head><body>" +
                    $"<p>{prompt}</p>" +
                    "<form method=\"post\" action=\"/connect/endsession\">" +
                    hidden +

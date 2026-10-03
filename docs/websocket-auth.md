@@ -5,9 +5,9 @@ title: WebSocket Auth (BFF)
 
 # Authenticating WebSockets from the BFF
 
-The [BFF](installation) exists so a browser SPA never holds a token: it gets an httpOnly
+The [BFF](bff) exists so a browser SPA never holds a token: it gets an httpOnly
 session cookie, and the BFF injects the `Authorization: Bearer` header when it proxies API calls. That works
-for HTTP — but a browser `WebSocket` can't set an `Authorization` header, and you don't want to put the
+for HTTP, but a browser `WebSocket` can't set an `Authorization` header, and you don't want to put the
 access token in the URL or in JS-readable storage.
 
 The **ws-ticket** flow solves this. The SPA asks the BFF for a short-lived, single-use ticket, opens the
@@ -39,7 +39,7 @@ builder.Services.AddAuthagonalBff(o =>
 
 `GET {BasePath}/ws-ticket` requires the session cookie and the BFF's anti-forgery header (same as any BFF
 call). It returns an opaque ticket bound to the session's freshly-refreshed access token. Fetch it, connect,
-and drop it — never persist it:
+and drop it. Never persist it:
 
 ```javascript
 async function openSocket() {
@@ -81,7 +81,7 @@ app.Map("/live", async (HttpContext ctx, IDistributedCache cache) =>
 
 If your API host is a separate assembly and you'd rather not reference `Authagonal.Bff`, the cache key
 format is public: the token is stored under `WsTicketKey(ticket)` = `agbff:wst:{ticket}`. Read it and delete
-it yourself — but prefer the shipped helper.
+it yourself, but prefer the shipped helper.
 
 ## Security notes
 

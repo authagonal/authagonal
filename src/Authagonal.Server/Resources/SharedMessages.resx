@@ -86,4 +86,37 @@
   <data name="Admin_TokenInvalidOrExpired" xml:space="preserve"><value>Token is invalid or expired</value></data>
   <data name="Admin_EmailAlreadyConfirmed" xml:space="preserve"><value>Email is already confirmed</value></data>
   <data name="Admin_ProviderAndKeyRequired" xml:space="preserve"><value>Provider and ProviderKey are required</value></data>
+
+  <!-- Email confirmation page -->
+  <data name="ConfirmEmail_MissingHeading" xml:space="preserve"><value>Something is missing</value></data>
+  <data name="ConfirmEmail_MissingBody" xml:space="preserve"><value>This confirmation link is incomplete. Open the most recent verification email and try the link there.</value></data>
+  <data name="ConfirmEmail_InvalidHeading" xml:space="preserve"><value>This link doesn't look right</value></data>
+  <data name="ConfirmEmail_InvalidBody" xml:space="preserve"><value>Open the most recent verification email and use the link there.</value></data>
+  <data name="ConfirmEmail_ExpiredHeading" xml:space="preserve"><value>This link has expired</value></data>
+  <data name="ConfirmEmail_ExpiredBody" xml:space="preserve"><value>Sign in to have a new verification email sent.</value></data>
+  <data name="ConfirmEmail_AlreadyHeading" xml:space="preserve"><value>Your email is already confirmed</value></data>
+  <data name="ConfirmEmail_AlreadyBody" xml:space="preserve"><value>You can sign in now.</value></data>
+  <data name="ConfirmEmail_PromptHeading" xml:space="preserve"><value>Confirm your email</value></data>
+  <data name="ConfirmEmail_PromptBody" xml:space="preserve"><value>Confirm that this address belongs to you.</value></data>
+  <data name="ConfirmEmail_ConfirmButton" xml:space="preserve"><value>Confirm my email</value></data>
+  <data name="ConfirmEmail_SignInButton" xml:space="preserve"><value>Go to sign in</value></data>
+
+  <!-- Outgoing emails (verification, password reset, account exists) and sign-out page titles -->
+  <data name="Email_Verify_Subject" xml:space="preserve"><value>Verify your email address</value></data>
+  <data name="Email_Verify_Heading" xml:space="preserve"><value>Verify your email</value></data>
+  <data name="Email_Verify_Body" xml:space="preserve"><value>Click the link below to verify your email address:</value></data>
+  <data name="Email_Verify_Button" xml:space="preserve"><value>Verify Email</value></data>
+  <data name="Email_Verify_Footer" xml:space="preserve"><value>If you didn't create an account, you can safely ignore this email.</value></data>
+  <data name="Email_Reset_Subject" xml:space="preserve"><value>Reset your password</value></data>
+  <data name="Email_Reset_Heading" xml:space="preserve"><value>Reset your password</value></data>
+  <data name="Email_Reset_Body" xml:space="preserve"><value>Click the link below to set a new password:</value></data>
+  <data name="Email_Reset_Button" xml:space="preserve"><value>Reset Password</value></data>
+  <data name="Email_Reset_Footer" xml:space="preserve"><value>This link expires in 1 hour. If you didn't request a password reset, you can safely ignore this email.</value></data>
+  <data name="Email_Exists_Subject" xml:space="preserve"><value>You already have an account</value></data>
+  <data name="Email_Exists_Heading" xml:space="preserve"><value>You already have an account</value></data>
+  <data name="Email_Exists_Body" xml:space="preserve"><value>Someone tried to sign up with this email, but an account already exists. Sign in instead, or reset your password if you've forgotten it.</value></data>
+  <data name="Email_Exists_Button" xml:space="preserve"><value>Sign in</value></data>
+  <data name="Email_Exists_Footer" xml:space="preserve"><value>If this wasn't you, you can safely ignore this email.</value></data>
+  <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Signed out</value></data>
+  <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Sign out</value></data>
 </root>

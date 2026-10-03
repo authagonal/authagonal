@@ -35,19 +35,19 @@ to one customer), the `authagonal-boot` payload can carry a third member alongsi
 }
 ```
 
-`organization` is `null` (or the member is absent) when the request resolved to no organisation —
+`organization` is `null` (or the member is absent) when the request resolved to no organisation:
 a single-tenant deployment, or one with no custom-domain pin for this host. This library does not
 resolve an organisation for an anonymous, pre-authentication request itself (`OrganizationSelector`
-needs a signed-in `AuthUser`); a host that has its own pre-auth resolution — Authagonal Cloud pins
-one per custom domain — sets `organization` when it assembles the boot payload.
+needs a signed-in `AuthUser`); a host that has its own pre-auth resolution (Authagonal Cloud pins
+one per custom domain) sets `organization` when it assembles the boot payload.
 
-When `organization.name` is present and differs from `branding.appName` (case-insensitive, trimmed
-— so an organisation named the same as the tenant does not produce "Acme / Signing in to Acme"),
+When `organization.name` is present and differs from `branding.appName` (case-insensitive, trimmed,
+so an organisation named the same as the tenant does not produce "Acme / Signing in to Acme"),
 the login card renders a subtitle under the heading: "Signing in to {name}"
 (`data-testid="login-org-name"`, i18n key `login.signingInTo`). It is rendered once, by the shared
-`AuthLayout` header, so every route that mounts through it — sign in, register, forgot/reset
+`AuthLayout` header, so every route that mounts through it (sign in, register, forgot/reset
 password, the MFA challenge and setup pages, the device page, consent and agent-consent, grants,
-and account — shows it identically. Nothing renders, and the header keeps its normal spacing, when
+and account) shows it identically. Nothing renders, and the header keeps its normal spacing, when
 `organization` is absent, `null`, or its name matches `branding.appName`.
 
 ## Configuration
@@ -224,11 +224,13 @@ All login form elements have `data-auth` attributes for CSS targeting and test a
 | `data-auth="logo-chip"` | Wrapper around the logo image (padded only when a logo background is set) |
 | `data-auth="logo"` | Logo image |
 | `data-auth="app-name"` | App name heading |
+| `data-auth="welcome-title"` / `data-auth="welcome-subtitle"` | The optional `welcomeTitle` / `welcomeSubtitle` lines (only present when set) |
 | `data-auth="content"` | Main content area |
 | `data-auth="languages"` | Language selector |
 | `data-auth="language-trigger"` | Language selector trigger button |
 | `data-auth="theme-toggle"` | Light/system/dark theme toggle |
 | `data-auth="powered-by"` | "Powered by Authagonal" footer |
+| `data-auth="login-form"`, `"email-field"`, `"password-field"`, `"submit-button"` | The sign-in form and its parts (login page only) |
 
 Target these in your custom CSS:
 

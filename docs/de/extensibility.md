@@ -6,11 +6,11 @@ locale: de
 
 # Erweiterbarkeit
 
-Authagonal kann als Bibliothek in Ihrem eigenen ASP.NET Core-Projekt gehostet werden, mit voller Kontrolle über Service-Implementierungen.
+Authagonal lässt sich als Bibliothek in Ihrem eigenen ASP.NET-Core-Projekt hosten, mit voller Kontrolle über die Implementierungen der Services.
 
-## Erweiterungsmethoden
+## Erweiterungsmethoden {#extension-methods}
 
-Drei Methoden binden Authagonal in jede ASP.NET Core-App ein:
+Drei Methoden binden Authagonal in eine beliebige ASP.NET-Core-App ein:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -23,9 +23,9 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
-### Multi-Mandanten-Hosting
+### Mandantenfähiges Hosting {#multi-tenant-hosting}
 
-Verwenden Sie für Multi-Mandanten-Deployments stattdessen `AddAuthagonalCore()`. Es registriert Endpunkte, Middleware und Kerndienste, überspringt jedoch Storage und Hintergrunddienste; diese stellen Sie pro Mandant bereit. Die Signaturschlüssel-Verwaltung verwendet standardmäßig den Singleton `ProtocolKeyManager` von `Authagonal.Protocol`, und ein Host, der vor `AddAuthagonalCore()` einen eigenen `IKeyManager` registriert, behält diesen bei:
+Verwenden Sie für mandantenfähige Deployments stattdessen `AddAuthagonalCore()`. Es registriert Endpunkte, Middleware und die Kern-Services, lässt aber Speicher und Hintergrunddienste weg; diese stellen Sie pro Mandant bereit. Für die Verwaltung der Signaturschlüssel wird standardmäßig das Singleton `ProtocolKeyManager` aus `Authagonal.Protocol` verwendet, und ein Host, der vor `AddAuthagonalCore()` sein eigenes `IKeyManager` registriert, behält es:
 
 ```csharp
 builder.Services.AddScoped<ITenantContext, MyTenantContext>();
@@ -33,11 +33,32 @@ builder.Services.AddScoped<IKeyManager, MyPerTenantKeyManager>();
 builder.Services.AddAuthagonalCore(builder.Configuration);
 ```
 
-`IKeyManager` und Store-Schnittstellen (`IClientStore`, `IScimTokenStore` usw.) werden zur Anforderungszeit aus `HttpContext.RequestServices` aufgelöst, sodass Scoped-Registrierungen für die mandantenspezifische Isolierung korrekt funktionieren.
+`IKeyManager` und die Store-Schnittstellen (`IClientStore`, `IScimTokenStore` usw.) werden zur Laufzeit der Anfrage aus `HttpContext.RequestServices` aufgelöst, sodass Scoped-Registrierungen für die Isolation pro Mandant korrekt funktionieren.
 
-## Services überschreiben
+### `Authagonal.Protocol` allein einbetten {#embedding-authagonalprotocol-alone}
 
-Registrieren Sie Ihre benutzerdefinierten Implementierungen **vor** dem Aufruf von `AddAuthagonal()`. Authagonal verwendet intern `TryAdd`, sodass Ihre Registrierungen Vorrang haben:
+Ein Host, der nur die OIDC-Protokolloberfläche möchte (eigene Authentifizierung, eigene Pipeline, direkt einsetzbare `/connect/*`-Endpunkte), ruft `AddAuthagonalProtocol()` + `MapAuthagonalProtocolEndpoints()` auf, ohne irgendetwas aus `Authagonal.Server`.
+
+`/connect/authorize`, `/connect/token`, `/connect/userinfo` und `/connect/par` verweigern auch in dieser Form unverschlüsseltes http, gemäß RFC 6749 §3.1/§3.2. Weil das Paket in eine Pipeline eingehängt wird, die ihm nicht gehört, hängt die Anforderung als Filter an den Endpunkten statt als Middleware. Sie gilt also unabhängig davon, wie Sie Ihre Pipeline zusammensetzen und ob Sie die gesamte Oberfläche oder einzelne Endpunkte einhängen. Zwei Folgen, die Sie vor dem Upgrade kennen sollten:
+
+- **Rufen Sie hinter einem TLS-terminierenden Proxy `UseForwardedHeaders` mit deklariertem Proxy auf.** Der Filter liest das Schema nach dem Routing, sodass ein weitergeleitetes `X-Forwarded-Proto: https` ihn erfüllt. Ohne diese Middleware sieht Ihr Host unverschlüsselten Verkehr, was auch bedeutet, dass Ihre Cookies nicht als `Secure` markiert werden und Ihre erzeugten absoluten URLs falsch sind; es lohnt sich also, das zu beheben, statt es zu umgehen. Befüllen Sie `KnownProxies` / `KnownNetworks`, wenn Sie sie registrieren: ASP.NET Core liest eine leere Vertrauensmenge als „jeder Aufrufer ist ein vertrauenswürdiger Proxy“, womit jeder, der Ihren Host erreicht, das Schema bestimmen kann. Erwähnt der Body der Ablehnung ein nicht angewendetes `X-Forwarded-Proto`, ist dies die Middleware, nach der gefragt wird.
+- **Ein Host, der die Protokolloberfläche tatsächlich über http bereitstellt, setzt die Opt-in-Option**, so wie es auch der Server tut:
+
+```csharp
+builder.Services.AddAuthagonalProtocol(o =>
+{
+    o.AuthenticationScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    o.AllowInsecureHttp = builder.Environment.IsDevelopment();   // never in production
+});
+```
+
+Discovery und JWKS sind bewusst nicht abgesichert: Sie sind öffentliche Metadaten, und ein Client, der sie nicht lesen kann, kann gar nicht erst erfahren, dass er https braucht.
+
+Wenn Sie `AddAuthagonal()` (den vollständigen Server) verwenden, setzen Sie das nicht separat: `Auth:AllowInsecureHttp` wird automatisch in die Protokolloptionen übernommen, sodass ein einziger Schalter die gesamte Oberfläche steuert.
+
+## Services überschreiben {#overriding-services}
+
+Registrieren Sie Ihre eigenen Implementierungen **vor** dem Aufruf von `AddAuthagonal()`. Authagonal verwendet intern `TryAdd`, daher haben Ihre Registrierungen Vorrang:
 
 ```csharp
 // Custom implementations, registered first so they won't be overwritten
@@ -49,26 +70,30 @@ builder.Services.AddSingleton<ISecretProvider, AwsSecretsProvider>();
 builder.Services.AddAuthagonal(builder.Configuration);
 ```
 
-`IAuthHook` ist ein Sonderfall: Es handelt sich um eine Mehrfachregistrierungs-Pipeline. Registrieren Sie so viele Hooks, wie Sie möchten (jede Lebensdauer, einschließlich `AddScoped`), und alle laufen in Registrierungsreihenfolge. Der No-op `NullAuthHook` wird nur hinzugefügt, wenn zum Zeitpunkt der Ausführung von `AddAuthagonal()` / `AddAuthagonalCore()` noch kein Hook registriert wurde; registrieren Sie Ihre Hooks daher immer zuerst.
+`IAuthHook` ist ein Sonderfall: Es ist eine Pipeline mit Mehrfachregistrierung. Registrieren Sie beliebig viele Hooks (mit beliebiger Lebensdauer, auch `AddScoped`), und alle werden in der Reihenfolge der Registrierung ausgeführt. Der wirkungslose `NullAuthHook` wird nur hinzugefügt, wenn bis zur Ausführung von `AddAuthagonal()` / `AddAuthagonalCore()` kein Hook registriert wurde; registrieren Sie Ihre Hooks also immer zuerst.
 
-### Erweiterungspunkte
+### Erweiterungspunkte {#extensibility-points}
 
 | Schnittstelle | Standard | Zweck |
 |---|---|---|
-| `IAuthHook` | `NullAuthHook` (No-op, wird nur hinzugefügt, wenn kein Hook registriert ist) | Lebenszyklus-Hooks für Auth-Ereignisse: Audit-Protokollierung, benutzerdefinierte Validierung, Webhooks. Es können mehrere Hooks registriert werden; alle laufen in Registrierungsreihenfolge |
-| `IEmailService` | `NullEmailService` (No-op), oder der integrierte Resend-Sender, wenn `Email:ResendApiKey` konfiguriert ist | E-Mail-Zustellung für Verifizierung, Passwortzurücksetzung und Hinweise auf bereits bestehende Konten |
-| `IProvisioningOrchestrator` | `TccProvisioningOrchestrator` (Scoped) | Benutzerbereitstellung in nachgelagerte Apps |
-| `ISecretProvider` | `PlaintextSecretProvider`, oder der integrierte `KeyVaultSecretProvider`, wenn `SecretProvider:VaultUri` konfiguriert ist | Reversible Geheimnisspeicherung (Key Vault, AWS Secrets Manager, Vault Transit usw.) |
-| `ITenantContext` | `DefaultTenantContext` (liest aus `IConfiguration`) | Mandantenauflösung für Multi-Mandanten-Deployments |
-| `IKeyManager` | `ProtocolKeyManager` (Singleton, aus `Authagonal.Protocol`) | Signaturschlüssel-Verwaltung; überschreiben für mandantenspezifische Schlüsselisolierung |
-| `IProvisioningAppProvider` | `ConfigProvisioningAppProvider` (Scoped) | Löst verfügbare Bereitstellungs-Apps auf; überschreiben für dynamische oder mandantenspezifische App-Auflösung |
-| `IAuditLogger` | `NullAuditLogger` (No-op) | Audit-Protokoll für Konfigurationsänderungen und sicherheitsrelevante Ereignisse |
+| `IAuthHook` | `NullAuthHook` (wirkungslos, nur hinzugefügt, wenn kein Hook registriert ist) | Lebenszyklus-Hooks für Auth-Ereignisse: Audit-Logging, eigene Validierung, Webhooks. Mehrere Hooks können registriert werden; alle laufen der Reihe nach |
+| `IEmailService` | `NullEmailService` (wirkungslos) oder der eingebaute Resend-Versand, wenn `Email:ResendApiKey` konfiguriert ist | E-Mail-Versand für Verifizierung, Passwort-Reset und Hinweise auf bereits existierende Konten |
+| `IProvisioningOrchestrator` | `TccProvisioningOrchestrator` (scoped) | Provisionierung von Benutzern in nachgelagerte Apps |
+| `ISecretProvider` | `PlaintextSecretProvider` oder der eingebaute `KeyVaultSecretProvider`, wenn `SecretProvider:VaultUri` konfiguriert ist | Umkehrbare Speicherung von Secrets (Key Vault, AWS Secrets Manager, Vault Transit usw.) |
+| `ITenantContext` | `DefaultTenantContext` (liest aus `IConfiguration`) | Auflösung des Mandanten bei mandantenfähigen Deployments |
+| `IKeyManager` | `ProtocolKeyManager` (Singleton, aus `Authagonal.Protocol`) | Verwaltung der Signaturschlüssel; überschreiben Sie es für eine Schlüsselisolation pro Mandant |
+| `IProvisioningAppProvider` | `ConfigProvisioningAppProvider` (scoped) | Löst die verfügbaren Provisionierungs-Apps auf; überschreiben Sie es für eine dynamische Auflösung oder eine pro Mandant |
+| `IAuditLogger` | `NullAuditLogger` (wirkungslos) | Audit-Trail für Konfigurationsänderungen und sicherheitsrelevante Ereignisse |
+| `IClientCredentialsClaimsTransformer` | `NullClientCredentialsClaimsTransformer` (Singleton, aus `Authagonal.Protocol`) | Vom Aufrufer gelieferten Kontext bei einer `client_credentials`-Ausstellung prüfen und Claims in das Token erzwingen oder die Ausstellung ablehnen |
+| `ITokenExchangeSubjectTransformer` | `NullTokenExchangeSubjectTransformer` (Singleton, aus `Authagonal.Protocol`) | Zuordnung des Subjekts beim RFC 8693 Token Exchange; siehe [Agentic Auth](agentic-auth) |
+| `ITurnstileKeyProvider` | `OptionsTurnstileKeyProvider` (scoped, liest `TurnstileOptions`) | Welcher Turnstile-Sitekey und welches Secret für diese Anfrage gelten |
+| `IInteractiveCorsOriginPolicy` | `DenyInteractiveCorsOriginPolicy` (Singleton, lehnt jeden Origin ab) | Origins, die Cross-Origin-Aufrufe mit Anmeldedaten an `/api/auth/*` stellen dürfen |
 
-Drei weitere Erweiterungspunkte liegen auf **Store-Ebene** statt in der DI: `IFieldCipher`, `IIndexTokenizer` und `IChangeWriter` (alle in `Authagonal.Core.Services`). Die Storage-Provider nehmen sie als optionale Konstruktorparameter entgegen; siehe die entsprechenden Abschnitte unten.
+Drei weitere Nahtstellen liegen auf **Store-Ebene** statt in der DI: `IFieldCipher`, `IIndexTokenizer` und `IChangeWriter` (alle in `Authagonal.Core.Services`). Die Speicher-Provider nehmen sie als optionale Konstruktorparameter entgegen; siehe die jeweiligen Abschnitte unten.
 
-## IAuthHook
+## IAuthHook {#iauthhook}
 
-Die Schnittstelle `IAuthHook` bietet Hooks in den Authentifizierungs-Lebenszyklus. Methoden auf dem kritischen Pfad (Authentifizierung, Benutzererstellung, Token-Ausstellung) können eine Ausnahme werfen, um den Vorgang abzubrechen; die neueren Methoden sind nachträgliche Benachrichtigungen. Es können mehrere `IAuthHook`-Implementierungen registriert werden, und alle laufen in Registrierungsreihenfolge.
+Die Schnittstelle `IAuthHook` bietet Hooks in den Lebenszyklus der Authentifizierung. Methoden auf dem kritischen Pfad (Authentifizierung, Anlegen von Benutzern, Ausstellung von Tokens) können eine Ausnahme auslösen, um den Vorgang abzubrechen; die neueren Methoden sind nachträgliche Benachrichtigungen. Mehrere `IAuthHook`-Implementierungen können registriert werden, und alle laufen in der Reihenfolge der Registrierung.
 
 ```csharp
 public interface IAuthHook
@@ -105,29 +130,52 @@ public interface IAuthHook
         CancellationToken ct = default) => Task.CompletedTask;
     Task OnPasswordChangedAsync(string userId, string email, string changedVia,
         CancellationToken ct = default) => Task.CompletedTask;
+
+    // Token gate and agentic / consent notifications (also default no-ops)
+    Task OnTokenIssuingAsync(TokenIssuanceContext context,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnDelegationMintedAsync(DelegationAudit audit,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnApprovalRequestedAsync(ApprovalAudit audit,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnApprovalResolvedAsync(ApprovalAudit audit,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnAgentConsentChangedAsync(string subjectId, string clientId, string change,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnConsentRevokedAsync(string subjectId, string clientId, int grantsRemoved,
+        CancellationToken ct = default) => Task.CompletedTask;
+    Task OnCapabilityTicketRedeemedAsync(string ticketId, string? subjectId, string clientId,
+        CancellationToken ct = default) => Task.CompletedTask;
 }
 ```
 
-### Parameter
+### Parameter {#parameters}
 
-| Methode | Hinweise und `method`- / `via`-Werte |
+| Methode | Hinweise und Werte für `method` / `via` |
 |---|---|
 | `OnUserAuthenticatedAsync` | `"password"`, `"passkey"`, `"saml"`, `"oidc"` |
 | `OnUserCreatedAsync` | `"admin"`, `"saml"`, `"oidc"` |
-| `OnUserUpdatedAsync` | `"admin"`, `"self"` (Hosts können eigene Werte übergeben, z. B. einen SCIM-Ursprung) |
-| `OnUserDeletedAsync` | `"admin"`; nur Benachrichtigung, der Datensatz ist möglicherweise nicht mehr lesbar |
+| `OnUserUpdatedAsync` | `"admin"`, `"self"` (Hosts können eigene Werte übergeben, z. B. eine SCIM-Herkunft) |
+| `OnUserDeletedAsync` | `"admin"`; nur eine Benachrichtigung, der Datensatz ist möglicherweise nicht mehr lesbar |
 | `OnLoginFailedAsync` | `"user_not_found"`, `"invalid_password"` usw. |
-| `OnTokenIssuedAsync` | Gewährungstypen: `"authorization_code"`, `"refresh_token"`, `"client_credentials"` |
-| `ResolveMfaPolicyAsync` | Wird nach der Passwortprüfung aufgerufen; gibt die effektive MFA-Richtlinie für den Benutzer zurück. Standard: `clientPolicy` unverändert zurückgeben. |
+| `OnTokenIssuedAsync` | Grant-Typen: `"authorization_code"`, `"refresh_token"`, `"client_credentials"` |
+| `ResolveMfaPolicyAsync` | Wird nach der Passwortprüfung aufgerufen; liefert die für den Benutzer wirksame MFA-Richtlinie. Standard: `clientPolicy` unverändert zurückgeben. |
 | `OnMfaVerifiedAsync` | `"totp"`, `"webauthn"`, `"recovery"` |
-| `OnMfaVerifyFailedAsync` | Dieselben Methoden wie bei `OnMfaVerifiedAsync`. Wird nur nach gültigen Anmeldedaten des ersten Faktors ausgelöst, sodass Häufungen ein starkes Signal für einen MFA-Umgehungsversuch sind (im Unterschied zu `OnLoginFailedAsync`, der Passwortstufe) |
-| `OnEmailConfirmedAsync` | Der Benutzer hat seine E-Mail-Adresse über den Bestätigungslink bestätigt; bereits gespeichert |
-| `OnMfaEnrolledAsync` | `"totp"`, `"webauthn"`; die Anmeldeinformation ist bereits aktiv |
-| `OnMfaCredentialRemovedAsync` | `"totp"`, `"webauthn"`, `"recoverycode"`; `mfaDisabled` ist `true`, wenn nach der Entfernung kein primärer Faktor mehr vorhanden ist |
-| `OnRecoveryCodesRegeneratedAsync` | Der vorherige Wiederherstellungscode-Satz wird ungültig |
-| `OnPasswordChangedAsync` | z. B. `"reset"`; die Änderung wird gespeichert und bestehende Sitzungen werden ungültig gemacht |
+| `OnMfaVerifyFailedAsync` | Dieselben Methoden wie bei `OnMfaVerifiedAsync`. Wird nur nach gültigen Anmeldedaten für den ersten Faktor ausgelöst; gehäuftes Auftreten ist daher ein starkes Signal für einen Versuch, MFA zu umgehen (im Unterschied zu `OnLoginFailedAsync`, der Passwortstufe) |
+| `OnEmailConfirmedAsync` | Der Benutzer hat seine E-Mail-Adresse über den Verifizierungslink bestätigt; bereits gespeichert |
+| `OnMfaEnrolledAsync` | `"totp"`, `"webauthn"`; der Berechtigungsnachweis ist bereits aktiv |
+| `OnMfaCredentialRemovedAsync` | `"totp"`, `"webauthn"`, `"recoverycode"`; `mfaDisabled` ist true, wenn nach dem Entfernen kein primärer Faktor übrig ist |
+| `OnRecoveryCodesRegeneratedAsync` | Der vorherige Satz an Wiederherstellungscodes ist ungültig |
+| `OnPasswordChangedAsync` | z. B. `"reset"`; die Änderung ist gespeichert, und bestehende Sitzungen sind ungültig |
+| `OnTokenIssuingAsync` | Prüfung vor der Ausstellung, anders als `OnTokenIssuedAsync`. Wird bei `authorization_code`, `refresh_token` und `device_code` ausgelöst sowie bei den beiden agentischen Ausstellungen (delegierter Token Exchange und `client_credentials` für einen Client mit Agentenprofil). Lösen Sie eine Ausnahme aus, um abzulehnen: Eine einfache Ausnahme wird zu `access_denied` mit ihrer Meldung; lösen Sie `ProtocolTokenException` aus, um Ihren eigenen OAuth-Fehler zu benennen. Beim Refresh läuft sie vor der Rotation, sodass eine Ablehnung das vorgelegte Refresh Token verwendbar lässt. Der Kontext enthält `ClientId`, `SubjectId`, `GrantType`, `Scopes`, `RequestedAuthorityJson` sowie `OrganizationId` / `OrganizationSlug`, wenn die Anfrage eine Organisation ausgewählt hat |
+| `OnDelegationMintedAsync` | Ein delegiertes Token (zusammengesetzte Identität) wurde über Token Exchange ausgestellt; nur eine Benachrichtigung |
+| `OnApprovalRequestedAsync` | Ein delegierter Austausch wurde bei einer Aktion mit Rückfrage-Richtlinie angehalten, und eine ausstehende Freigabe wurde angelegt |
+| `OnApprovalResolvedAsync` | Eine ausstehende Freigabe wurde vom Benutzer genehmigt oder abgelehnt |
+| `OnAgentConsentChangedAsync` | `change` ist `"granted"` oder `"revoked"` (dauerhafte Zustimmung für einen Agenten) |
+| `OnConsentRevokedAsync` | Ein Benutzer hat einer autorisierten App die Berechtigung entzogen; die Zustimmung und die sitzungsgebundenen Grants des Clients sind bereits entfernt. `grantsRemoved` gibt an, wie viele entfernt wurden (0 bedeutet keine) |
+| `OnCapabilityTicketRedeemedAsync` | Ein Capability-Ticket wurde für sein gebundenes Token eingelöst |
 
-### Beispiel: Audit-Logger
+### Beispiel: Audit-Logger {#example-audit-logger}
 
 ```csharp
 public sealed class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
@@ -164,7 +212,7 @@ public sealed class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
 }
 ```
 
-### Beispiel: Domain-Beschränkung
+### Beispiel: Domain-Beschränkung {#example-domain-restriction}
 
 ```csharp
 public sealed class DomainRestrictionHook : IAuthHook
@@ -185,9 +233,59 @@ public sealed class DomainRestrictionHook : IAuthHook
 }
 ```
 
-## ISecretProvider
+## IClientCredentialsClaimsTransformer {#iclientcredentialsclaimstransformer}
 
-`ISecretProvider` (in `Authagonal.Core.Services`) ist der Erweiterungspunkt für reversible Verschlüsselung gespeicherter Geheimnisse wie SSO-Client-Secrets, SMTP-Passwörter und TOTP-Seeds. `ProtectAsync` wandelt einen Klartext in eine Referenz um, die der Store dauerhaft speichert; `ResolveAsync` wandelt die Referenz zurück in den Klartext. Der Standard `PlaintextSecretProvider` speichert Werte unverändert (die Referenz IST der Wert).
+Ein `client_credentials`-Token hat kein Subjekt, daher kann die Nahtstelle für den Token Exchange es nicht erreichen. Diese Nahtstelle ist für einen eigenen Service als Aufrufer gedacht, dessen Token den Kontext benennen muss, in dem er handelt (eine Organisation, einen Mandanten), ohne dass ein Benutzer beteiligt ist. Sie läuft, nachdem der Client, seine Scopes und alle RFC-8707-Ressourcen validiert sind, und bevor das Token ausgestellt wird.
+
+```csharp
+public interface IClientCredentialsClaimsTransformer
+{
+    Task<ClientCredentialsClaimsResult> TransformAsync(
+        OAuthClient client,
+        IReadOnlyList<string> grantedScopes,
+        IReadOnlyDictionary<string, string> extraParameters,
+        CancellationToken ct = default);
+}
+```
+
+- `extraParameters` enthält die nicht zum Protokoll gehörenden Formularparameter der Token-Anfrage (einwertig, der erste gewinnt), zum Beispiel eine `organization_id`, die der Aufrufer gesendet hat.
+- Geben Sie `ClientCredentialsClaimsResult.Allow(claims)` zurück, um `claims` in das Token zu erzwingen (null oder leer lässt es unverändert), oder `ClientCredentialsClaimsResult.Reject(error, description)`, um die Ausstellung mit diesem OAuth-Fehler abzulehnen.
+- Reservierte Namen von Protokoll-Claims bleiben bei der Ausstellung weiterhin gesperrt.
+- Prüfen Sie die vom Aufrufer gelieferte Bindung gegen Ihre eigene maßgebliche Quelle; übernehmen Sie sie nicht ungeprüft in das Token.
+- Der Standard `NullClientCredentialsClaimsTransformer` wird mit `TryAddSingleton` registriert; registrieren Sie Ihren also zuerst, um ihn zu ersetzen.
+
+## ITurnstileKeyProvider {#iturnstilekeyprovider}
+
+Beide Turnstile-Schlüssel stammen aus einem Objekt, damit das Widget, das der Browser rendert, und das Secret, gegen das der Server prüft, nie voneinander abweichen können. Der Standard `OptionsTurnstileKeyProvider` liest `SiteKey` und `SecretKey` aus `TurnstileOptions`, was zu einem Host passt, der eine Domain bedient. Ein Host, der von Kunden bereitgestellte Domains bedient, bei denen Cloudflare die Hostnamen pro Widget begrenzt, registriert seine eigene Scoped-Implementierung, die das Schlüsselpaar des Widgets zurückgibt, das dem anfragenden Host zugeteilt ist.
+
+```csharp
+public interface ITurnstileKeyProvider
+{
+    string? SiteKey { get; }     // null when disabled
+    string? SecretKey { get; }   // null or empty disables enforcement
+}
+```
+
+Mit `TryAddScoped` registriert, daher gewinnt eine Registrierung, die vor `AddAuthagonal` erfolgt.
+
+## IInteractiveCorsOriginPolicy {#iinteractivecorsoriginpolicy}
+
+Die interaktive Auth-API (`/api/auth/*`) lehnt Cross-Origin-Aufrufe mit Anmeldedaten standardmäßig ab, weil sie von der Login-App gesteuert wird, die vom selben Origin ausgeliefert wird. Ein Host, der einem Mandanten erlaubt, einen eigenen Anmeldebildschirm auf einem anderen Origin zu bauen, implementiert diese Schnittstelle, um sich für bestimmte Origins zu verbürgen.
+
+```csharp
+public interface IInteractiveCorsOriginPolicy
+{
+    ValueTask<bool> IsAllowedAsync(HttpContext context, string origin, string path);
+}
+```
+
+- Wird pro Anfrage und pro Origin abgefragt; die Auflösung des Mandanten ist beim Aufruf bereits erfolgt.
+- Gibt sie true zurück, darf dieser Origin authentifizierte Antworten der Konto-, Sitzungs-, Profil- und MFA-Einrichtungsendpunkte für die jeweils angemeldete Person lesen. Antworten Sie nur für Origins, die der Host kontrolliert oder verifiziert hat, niemals für einen, der aus der Anfrage stammt.
+- Der Standard (`DenyInteractiveCorsOriginPolicy`, `TryAddSingleton`) gibt für jeden Origin false zurück.
+
+## ISecretProvider {#isecretprovider}
+
+`ISecretProvider` (in `Authagonal.Core.Services`) ist die Nahtstelle für umkehrbare Verschlüsselung gespeicherter Secrets wie SSO-Client-Secrets, SMTP-Passwörter und TOTP-Seeds. `ProtectAsync` wandelt einen Klartext in eine Referenz um, die der Store speichert; `ResolveAsync` wandelt die Referenz wieder in den Klartext zurück. Der Standard `PlaintextSecretProvider` speichert Werte unverändert (die Referenz IST der Wert).
 
 ```csharp
 public interface ISecretProvider
@@ -197,11 +295,11 @@ public interface ISecretProvider
 }
 ```
 
-Durch das Setzen von `SecretProvider:VaultUri` wird automatisch der integrierte `KeyVaultSecretProvider` verdrahtet (Azure Key Vault über `DefaultAzureCredential`). Für alles andere registrieren Sie Ihre eigene Implementierung vor `AddAuthagonal()`.
+Wird `SecretProvider:VaultUri` gesetzt, wird automatisch der eingebaute `KeyVaultSecretProvider` verdrahtet (Azure Key Vault über `DefaultAzureCredential`). Für alles andere registrieren Sie vor `AddAuthagonal()` Ihre eigene Implementierung.
 
-## PII-Feldverschlüsselung: IFieldCipher
+## Verschlüsselung von PII-Feldern: IFieldCipher {#pii-field-encryption-ifieldcipher}
 
-`IFieldCipher` verschlüsselt einzelne PII-Feldwerte eines Benutzers (Telefonnummer, Firma, benutzerdefinierte Attribute, E-Mail-Adresse und Namen in der Profilzeile) im Ruhezustand. Es handelt sich um einen Erweiterungspunkt auf Store-Ebene: Die Storage-Provider nehmen ihn als optionalen Konstruktorparameter entgegen (z. B. `TableUserStore`), und wenn er fehlt, greift der Passthrough `NullFieldCipher`, sodass die Verschlüsselung strikt Opt-in ist und unkonfigurierte Hosts weiterhin Klartext speichern.
+`IFieldCipher` verschlüsselt einzelne PII-Feldwerte von Benutzern (Telefon, Firma, eigene Attribute, E-Mail-Adresse und Namen in der Profilzeile) im Ruhezustand. Es ist eine Nahtstelle auf Store-Ebene: Die Speicher-Provider nehmen sie als optionalen Konstruktorparameter entgegen (z. B. `TableUserStore`), und fehlt sie, gilt der durchreichende `NullFieldCipher`. Verschlüsselung ist also strikt Opt-in, und nicht konfigurierte Hosts speichern weiterhin Klartext.
 
 ```csharp
 public interface IFieldCipher
@@ -218,35 +316,30 @@ public interface IFieldCipher
 }
 ```
 
-Zwei Vertragspunkte sind entscheidend. `ProtectAsync` muss ein selbstbeschreibendes Chiffretext-Token zurückgeben (z. B. das `vault:v{n}:...` von Vault Transit), und `ResolveAsync` muss einen Wert, den es nicht als eigenen Chiffretext erkennt, unverändert durchreichen. Diese Passthrough-Regel ermöglicht es, die Verschlüsselung schrittweise über bestehende Zeilen auszurollen: Das Lesen einer noch nicht migrierten Zeile liefert den alten Klartext, und der nächste Schreibvorgang verschlüsselt sie erneut.
+Zwei Punkte des Vertrags sind wichtig. `ProtectAsync` muss ein selbstbeschreibendes Chiffretext-Token zurückgeben (z. B. das `vault:v{n}:...` von Vault Transit), und `ResolveAsync` muss einen Wert, den es nicht als eigenen Chiffretext erkennt, unverändert durchreichen. Diese Durchreicheregel ermöglicht es, die Verschlüsselung schrittweise über bestehende Zeilen auszurollen: Das Lesen einer nicht migrierten Zeile liefert den alten Klartext, und der nächste Schreibvorgang schützt ihn neu.
 
-## Blind-Index-Suche: IIndexTokenizer
+## Blind-Index-Suche: IIndexTokenizer {#blind-index-search-iindextokenizer}
 
-`IIndexTokenizer` hält verschlüsselte Felder durchsuchbar. Er wandelt einen normalisierten Klartextwert in ein deterministisches, tabellenschlüsselsicheres Blind-Index-Token um, typischerweise einen keyed HMAC, dessen Schlüssel außerhalb der Datenbank liegt. Determinismus bedeutet, dass eine Gleichheitsabfrage weiterhin funktioniert ("email = x" wird zu "token = HMAC(x)"), während ein Datenbank-Dump ein Token weder neu berechnen noch umkehren kann. Die Präfixsuche wird darübergelegt, indem jedes Präfix eines Werts separat tokenisiert wird, da ein keyed HMAC Reihenfolge und Bereichsabfragen zerstört.
+`IIndexTokenizer` hält verschlüsselte Felder durchsuchbar. Er wandelt einen normalisierten Klartextwert in ein deterministisches, als Tabellenschlüssel zulässiges Blind-Index-Token um, typischerweise ein schlüsselbasiertes HMAC, dessen Schlüssel außerhalb der Datenbank liegt. Der Determinismus bedeutet, dass eine Gleichheitssuche weiterhin funktioniert („email = x“ wird zu „token = HMAC(x)“), während ein Datenbank-Dump ein Token weder neu berechnen noch umkehren kann. Die Präfixsuche wird darübergelegt, indem jedes Präfix eines Werts einzeln tokenisiert wird, denn ein schlüsselbasiertes HMAC zerstört die Ordnung und damit Bereichsscans.
 
-> **Was ein Dump dennoch verrät.** "Weder neu berechnen noch umkehren" gilt für ein einzelnes Token,
-> nicht für den Index als Ganzes. Drei Reste bleiben bestehen, und man sollte sie kennen, bevor man
-> sich darauf verlässt:
+> **Was ein Dump dennoch preisgibt.** „Weder neu berechnen noch umkehren“ gilt für ein einzelnes Token, nicht für
+> den Index als Ganzes. Drei Rückstände bleiben, und Sie sollten sie kennen, bevor Sie sich darauf verlassen:
 >
->   *(Behoben.)* ~~**Struktur.** Der Präfixindex schreibt eine Zeile pro Präfix, sodass die
->   Zeilenanzahl eines Datensatzes der Länge des indizierten Felds entspricht.~~ Jeder indizierte
->   Wert schreibt jetzt eine feste Anzahl Zeilen, aufgefüllt mit Attrappen, die keine Abfrage
->   erzeugen kann und die ein Dump nicht von echten Präfixen unterscheiden kann.
-> - **Gleichheit und Häufigkeit.** Token sind konstruktionsbedingt deterministisch -- genau das lässt
->   die Suche funktionieren --, ein Dump zeigt also, welche Datensätze denselben Wert teilen und wie
->   häufig jeder Wert ist. Der Domain-Index gruppiert Ihre Population nach Arbeitgeber, was Personen
->   oft identifiziert, ohne eine Adresse wiederherzustellen.
-> - **Gewählter Klartext.** Wer den Speicher lesen *und* zugleich Werte indizieren lassen kann (ein
->   Konto registrieren, per SCIM bereitgestellt werden), kann einen Kandidaten einreichen und nach
->   dessen Token suchen. Das rekonstruiert jeden erratbaren Wert -- verbreitete Domains, verbreitete
->   Vornamen --, gleichgültig wo der Schlüssel liegt, denn das Orakel ist der Schreibpfad, nicht die
->   Chiffre.
+>   *(Behoben.)* ~~**Struktur.** Der Präfixindex schreibt eine Zeile pro Präfix, sodass die Zeilenanzahl eines Datensatzes
+>   der Länge des indizierten Felds entspricht.~~ Jeder indizierte Wert schreibt jetzt eine feste Anzahl von Zeilen,
+>   aufgefüllt mit Ködern, die keine Abfrage erzeugen kann und die ein Dump nicht von echten Präfixen unterscheiden kann.
+> - **Gleichheit und Häufigkeit.** Tokens sind konstruktionsbedingt deterministisch, und genau das macht die Suche
+>   möglich; ein Dump zeigt daher, welche Datensätze einen Wert teilen und wie häufig jeder Wert ist. Der Domain-Index
+>   teilt Ihre Population nach Arbeitgeber ein, was Personen oft identifiziert, ohne eine Adresse wiederherzustellen.
+> - **Gewählter Klartext.** Ein Angreifer, der den Store lesen *und* veranlassen kann, dass Werte indiziert werden
+>   (ein Konto registrieren, über SCIM provisioniert werden), kann einen Kandidaten einreichen und nach dessen Token suchen.
+>   Das stellt jeden erratbaren Wert wieder her (verbreitete Domains, verbreitete Vornamen), ganz gleich, wo der Schlüssel
+>   liegt, denn das Orakel ist der Schreibpfad und nicht die Chiffre.
 >
-> Die Tokenisierung schützt gegen den Fall, für den sie gebaut wurde: jemand hat einen Dump und sonst
-> nichts und will Adressen lesen. Die beiden verbleibenden Reste sind genau das, was ein
-> Registrierungs-Orakel ohnehin preisgibt. Sind sie nicht hinnehmbar, lassen Sie die Tabellen für
-> Präfix- und Domain-Index unkonfiguriert -- die Suche auf exakte Übereinstimmung trägt beides nicht
-> -- statt anzunehmen, der HMAC decke sie ab.
+> Die Tokenisierung schützt vor dem Fall, für den sie gebaut wurde: Jemand hat einen Dump und sonst nichts
+> und versucht, Adressen zu lesen. Die beiden verbleibenden Rückstände sind genau das, was ein Registrierungsorakel
+> ohnehin preisgibt. Sind sie inakzeptabel, lassen Sie die Tabellen für den Präfix- und den Domain-Index unkonfiguriert
+> (eine Suche mit exakter Übereinstimmung hat keinen der beiden), statt anzunehmen, dass das HMAC sie abdeckt.
 
 ```csharp
 public interface IIndexTokenizer
@@ -257,11 +350,11 @@ public interface IIndexTokenizer
 }
 ```
 
-Wie `IFieldCipher` ist er ein optionaler Store-Konstruktorparameter mit einem Passthrough-Standard (`NullIndexTokenizer`), sodass Index-Zeilen weiterhin auf Klartext geschlüsselt bleiben, bis Sie sich für die Verschlüsselung entscheiden. Zurückgegebene Tokens müssen als Azure Table PartitionKey-/RowKey-Werte sicher sein (keine `/ \ # ?` oder Steuerzeichen).
+Wie `IFieldCipher` ist er ein optionaler Konstruktorparameter des Stores mit einem durchreichenden Standard (`NullIndexTokenizer`), sodass Indexzeilen auf Klartext verschlüsselt bleiben, bis Sie sich dafür entscheiden. Zurückgegebene Tokens müssen als PartitionKey/RowKey-Werte in Azure Table zulässig sein (keines der Zeichen `/ \ # ?` und keine Steuerzeichen).
 
-## Änderungsprotokoll-Erfassung: IChangeWriter
+## Erfassung von Änderungen: IChangeWriter {#change-log-capture-ichangewriter}
 
-`IChangeWriter` (in 0.6.0 umbenannt von `ITombstoneWriter`) zeichnet den Schlüssel jeder geänderten Zeile in einer eigenen Änderungsprotokoll-Tabelle auf, sodass inkrementelle Sicherungen erkennen können, was sich geändert hat, ohne die nicht indizierte `Timestamp`-Spalte der Live-Tabellen zu durchsuchen. Löschungen werden für jede Tabelle erfasst (ein Scan der Live-Zeilen kann eine bereits gelöschte Zeile nicht sehen); Upserts werden für die Tabellen erfasst, bei denen die Sicherung aus dem Protokoll statt per Scan liest. Integrierte Implementierungen: `TableChangeWriter` (Azure Table Storage), `DynamoChangeWriter` (DynamoDB) und `SqlChangeWriter` (PostgreSQL / SQLite).
+`IChangeWriter` (in 0.6.0 von `ITombstoneWriter` umbenannt) zeichnet den Schlüssel jeder geänderten Zeile in einer eigenen Änderungsprotokoll-Tabelle auf, sodass inkrementelle Backups finden können, was sich geändert hat, ohne die nicht indizierte Spalte `Timestamp` der Live-Tabellen zu scannen. Löschungen werden für jede Tabelle erfasst (ein Scan der Live-Zeilen kann eine nicht mehr vorhandene Zeile nicht sehen); Upserts werden für die Tabellen erfasst, die das Backup aus dem Protokoll liest, statt sie zu scannen. Eingebaute Implementierungen: `TableChangeWriter` (Azure Table Storage), `DynamoChangeWriter` (DynamoDB) und `SqlChangeWriter` (PostgreSQL / SQLite).
 
 ```csharp
 public interface IChangeWriter
@@ -280,11 +373,11 @@ public interface IChangeWriter
 }
 ```
 
-Reihenfolgevertrag für Implementierer und Aufrufer: Schreiben Sie den Lösch-Tombstone, BEVOR Sie die Datenzeile löschen. Ein Absturz in der umgekehrten Reihenfolge verliert die Löschung aus jeder zukünftigen Sicherung, da Löschungen die einzige Mutationsklasse sind, die ein erneuter Scan nicht selbst heilen kann. Der umgekehrte Absturz ist unbedenklich: Ein späterer Schreibvorgang auf den Schlüssel stempelt einen neueren Zeitstempel, und Merge/Wiederherstellung behalten Zeilen, die nach dem Tombstone geschrieben wurden.
+Reihenfolgevertrag für Implementierer und Aufrufer: Schreiben Sie den Lösch-Tombstone, BEVOR Sie die Datenzeile löschen. Ein Absturz in der umgekehrten Reihenfolge lässt die Löschung in jedem künftigen Backup fehlen, denn Löschungen sind die einzige Art von Änderung, die ein erneuter Scan nicht selbst heilen kann. Der umgekehrte Absturz ist unbedenklich: Ein späterer Schreibvorgang auf den Schlüssel setzt einen neueren Zeitstempel, und Merge/Restore behalten Zeilen, die nach dem Tombstone geschrieben wurden.
 
-## Benutzerdefinierte Endpunkte
+## Eigene Endpunkte {#custom-endpoints}
 
-Fügen Sie Ihre eigenen Endpunkte neben denen von Authagonal hinzu:
+Fügen Sie neben denen von Authagonal Ihre eigenen Endpunkte hinzu:
 
 ```csharp
 app.UseAuthagonal();
@@ -297,49 +390,75 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 app.MapFallbackToFile("index.html");
 ```
 
-## HashiCorp Vault Transit-Integration
+## Integration von HashiCorp Vault Transit {#hashicorp-vault-transit-integration}
 
-Authagonal kann die JWT-Signierung an die Transit Secrets Engine von HashiCorp Vault delegieren. Private Schlüssel verlassen Vault niemals; nur der Signiervorgang erfolgt remote. Öffentliche Schlüssel werden lokal für die Verifizierung zwischengespeichert.
+> **Die JWT-Signierung wird nicht an Vault delegiert.** Dieser Abschnitt zeigte früher ein DI-Snippet, das sie scheinbar
+> aktivierte. Die Registrierung von `VaultTransitCryptoProvider` hat **keine Auswirkung auf die Token-Signierung**:
+> `ProtocolKeyManager` ruft `ProtocolSigningKeyOps.BuildSigningCredentials` auf, das einen
+> `ECDsaSecurityKey` aus dem Material in `ISigningKeyStore` erzeugt, und nichts ersetzt ihn durch einen
+> `VaultTransitSecurityKey`. Ein Host, der dem alten Snippet folgte, sah ES256-Tokens gegen JWKS verifizieren
+> und schloss nachvollziehbarerweise, dass Vault sie signierte, während der private Schlüssel beim ersten Start lokal erzeugt
+> und im primären Datenspeicher gespeichert wurde, im Klartext, sofern nicht zufällig ein `IFieldCipher` registriert war.
+> Lesezugriff auf diesen Speicher bedeutet, sich vollständig als Issuer ausgeben zu können. Wenn Sie die Compliance-Anforderung haben,
+> dass Signaturschlüssel ein HSM nie verlassen, wird diese damit nicht erfüllt.
+>
+> Der Server protokolliert jetzt beim Start einen Fehler, wenn er einen registrierten `VaultTransitCryptoProvider` findet, sodass
+> sich dieses Missverständnis nicht unbemerkt halten kann.
+>
+> Um das tatsächlich umzusetzen, braucht es mehr als eine DI-Registrierung: `ISigningKeyStore` müsste einen Schlüssel darstellen können, der
+> kein lokales Material hat (einen Transit-Schlüssel*namen* statt eines privaten Skalars), `BuildSigningCredentials` bräuchte eine
+> Nahtstelle, um einen `VaultTransitSecurityKey` zurückzugeben, `BuildJwksAsync` müsste den aus Vault zurückgelesenen öffentlichen Schlüssel
+> veröffentlichen, und Rotation sowie Vorabveröffentlichung müssten Transit-Schlüsselversionen anlegen und hochstufen, statt
+> lokal zu erzeugen. `VaultTransitClient`, `VaultTransitSecurityKey`, `VaultTransitSignatureProvider` und
+> `VaultTransitCryptoProvider` bleiben erhalten, weil sie die funktionierenden Teile sind; was fehlt, ist die Verdrahtung.
+
+Wofür `VaultTransitClient` heute **tatsächlich** taugt, sind die Nahtstellen für Verschlüsselung und HMAC: ein auf Vault gestützter
+`IFieldCipher` für PII im Ruhezustand oder ein `IIndexTokenizer` für verschlüsselte Blind-Indizes:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Vault Transit HTTP client
 builder.Services.AddHttpClient("Vault", client =>
 {
     client.BaseAddress = new Uri("https://vault.example.com");
     client.DefaultRequestHeaders.Add("X-Vault-Token", "hvs.xxx");
 });
 
-// Register Vault Transit services
 builder.Services.AddSingleton<VaultTransitClient>();
-builder.Services.AddSingleton<VaultTransitCryptoProvider>();
+
+// Your own adapters over the client. These are the seams Authagonal actually consumes.
+builder.Services.AddSingleton<IFieldCipher, MyVaultFieldCipher>();
+builder.Services.AddSingleton<IIndexTokenizer, MyVaultIndexTokenizer>();
 
 builder.Services.AddAuthagonal(builder.Configuration);
 ```
 
-Der `VaultTransitClient` bietet folgende Operationen:
+Die Registrierung eines `IFieldCipher` ist auch das, was `PlaintextSigningKeyWarning` zum Schweigen bringt, denn die Stores für
+Signaturschlüssel leiten ihr Schlüsselmaterial über dieselbe Nahtstelle. Das ist das, was der ursprünglichen Behauptung heute
+am nächsten kommt: Der private Schlüssel existiert weiterhin lokal, aber nicht im Klartext.
+
+Der `VaultTransitClient` bietet diese Operationen:
 
 | Methode | Beschreibung |
 |---|---|
-| `SignAsync(keyName, data)` | Signiert Daten mit einem Vault Transit-Schlüssel |
-| `VerifyAsync(keyName, data, signature)` | Verifiziert eine JWS-serialisierte Signatur über den Transit-Verify-Endpunkt |
-| `EncryptAsync` / `DecryptAsync` (+ `EncryptBatchAsync` / `DecryptBatchAsync`) | Symmetrische Verschlüsselung unter einem `aes256-gcm96`-Schlüssel; gibt `vault:v{n}:...`-Tokens zurück, die unverändert gespeichert werden |
-| `HmacAsync` / `HmacBatchAsync` | Keyed HMAC unter einem `hmac`-Schlüssel (Blind-Index-Tokens) |
-| `CreateKeyAsync(keyName, type)` | Erstellt einen neuen Transit-Schlüssel (Standard: `ecdsa-p256`) |
-| `EnsureKeyTypeAsync(keyName, type)` | Stellt idempotent sicher, dass ein Schlüssel mit dem gewünschten Typ existiert (erstellt bei Typabweichung neu; Transit-Schlüssel können nicht nachträglich umtypisiert werden) |
-| `RotateKeyAsync(keyName)` | Rotiert einen Schlüssel in eine neue Version |
-| `DeleteKeyAsync(keyName)` | Löscht einen Schlüssel (aktiviert zuerst `deletion_allowed`) |
-| `ReadKeyAsync(keyName)` | Liest Schlüsselmetadaten, Versionen und öffentliche Schlüssel |
-| `KeyExistsAsync(keyName)` | Prüft, ob ein Schlüssel existiert |
+| `SignAsync(keyName, data)` | Daten mit einem Vault-Transit-Schlüssel signieren |
+| `VerifyAsync(keyName, data, signature)` | Eine im JWS-Format serialisierte Signatur über den Transit-Verify-Endpunkt prüfen |
+| `EncryptAsync` / `DecryptAsync` (+ `EncryptBatchAsync` / `DecryptBatchAsync`) | Symmetrische Verschlüsselung mit einem `aes256-gcm96`-Schlüssel; liefert `vault:v{n}:...`-Tokens, die unverändert zu speichern sind |
+| `HmacAsync` / `HmacBatchAsync` | Schlüsselbasiertes HMAC mit einem `hmac`-Schlüssel (Blind-Index-Tokens) |
+| `CreateKeyAsync(keyName, type)` | Einen neuen Transit-Schlüssel anlegen (Standard: `ecdsa-p256`) |
+| `EnsureKeyTypeAsync(keyName, type)` | Idempotent sicherstellen, dass ein Schlüssel mit dem gewünschten Typ existiert (legt ihn bei abweichendem Typ neu an; der Typ von Transit-Schlüsseln lässt sich nicht nachträglich ändern) |
+| `RotateKeyAsync(keyName)` | Einen Schlüssel auf eine neue Version rotieren |
+| `DeleteKeyAsync(keyName)` | Einen Schlüssel löschen (aktiviert zuvor `deletion_allowed`) |
+| `ReadKeyAsync(keyName)` | Metadaten, Versionen und öffentliche Schlüssel eines Schlüssels lesen |
+| `KeyExistsAsync(keyName)` | Prüfen, ob ein Schlüssel existiert |
 
-Der `VaultTransitCryptoProvider` integriert sich in .NETs `JsonWebTokenHandler`, sodass die JWT-Signierung transparent Vault verwendet. Die `VaultTransitSecurityKey` und der `VaultTransitSignatureProvider` übernehmen die Low-Level-Integration.
+Der `VaultTransitCryptoProvider` integriert sich in den `JsonWebTokenHandler` von .NET, sodass die JWT-Signierung transparent Vault verwendet. `VaultTransitSecurityKey` und `VaultTransitSignatureProvider` übernehmen die Integration auf unterer Ebene.
 
-## E-Mail
+## E-Mail {#email}
 
-Der integrierte Resend-Sender aktiviert sich automatisch, wenn `Email:ResendApiKey` konfiguriert ist (setzen Sie auch `Email:SenderEmail`). Ohne einen `IEmailService` wird Mail über den `NullEmailService` verworfen, und da die Anmeldesperre für unbestätigte E-Mails standardmäßig aktiviert ist, könnten sich selbst registrierte Benutzer nie anmelden; `UseAuthagonal()` protokolliert in diesem Zustand eine deutliche Startwarnung.
+Der eingebaute Resend-Versand wird automatisch aktiv, wenn `Email:ResendApiKey` konfiguriert ist (setzen Sie auch `Email:SenderEmail`). Ohne ein `IEmailService` werden Mails über `NullEmailService` verworfen, und weil die Anmeldesperre für unbestätigte E-Mail-Adressen standardmäßig aktiv ist, könnten sich selbst registrierte Benutzer nie anmelden; `UseAuthagonal()` protokolliert in diesem Zustand beim Start eine deutliche Warnung.
 
-Um einen anderen Anbieter zu verwenden, registrieren Sie Ihren eigenen `IEmailService` vor `AddAuthagonal()`:
+Um einen anderen Anbieter zu verwenden, registrieren Sie vor `AddAuthagonal()` Ihr eigenes `IEmailService`:
 
 ```csharp
 public sealed class SmtpEmailService(SmtpClient smtp) : IEmailService
@@ -362,10 +481,9 @@ public sealed class SmtpEmailService(SmtpClient smtp) : IEmailService
 }
 ```
 
-`IEmailService` deklariert außerdem `SendAccountExistsEmailAsync` (wird gesendet, wenn jemand versucht, eine bereits registrierte E-Mail-Adresse erneut zu registrieren, wodurch die Registrierungsantwort neutral gegenüber Account-Enumeration bleibt). Sie hat eine standardmäßige No-op-Implementierung, sodass bestehende Implementierungen weiterhin kompilieren.
+`IEmailService` deklariert außerdem `SendAccountExistsEmailAsync` (wird gesendet, wenn jemand versucht, sich mit einer bereits registrierten E-Mail-Adresse zu registrieren; so bleibt die Antwort auf die Registrierung neutral gegenüber der Aufzählung von Konten). Es hat eine wirkungslose Standardimplementierung, sodass bestehende Implementierungen weiterhin kompilieren.
 
-## Siehe auch
+## Siehe auch {#see-also}
 
-- [demos/custom-server/](https://github.com/authagonal/authagonal/tree/master/demos/custom-server): vollständiges funktionierendes Beispiel
+- [demos/custom-server/](https://github.com/authagonal/authagonal/tree/master/demos/custom-server): vollständiges, lauffähiges Beispiel
 - [demos/sample-app/](https://github.com/authagonal/authagonal/tree/master/demos/sample-app): Beispiel für eine Client-App
-</content>

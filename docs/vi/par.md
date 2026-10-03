@@ -6,26 +6,33 @@ locale: vi
 
 # Pushed Authorization Requests (PAR)
 
-[RFC 9126](https://www.rfc-editor.org/rfc/rfc9126) cho phép một client POST các tham số của yêu cầu ủy quyền trực tiếp đến máy chủ với xác thực client tiêu chuẩn và nhận về một `request_uri` mờ, ngắn hạn để trao cho trình duyệt. Sau đó trình duyệt truy cập `/connect/authorize?request_uri=...&client_id=...` thay vì mang mọi tham số trên URL.
+[RFC 9126](https://www.rfc-editor.org/rfc/rfc9126) cho phép client POST các tham số authorize request thẳng tới server bằng cơ chế xác thực client tiêu chuẩn và nhận về một `request_uri` mờ, ngắn hạn để đưa cho trình duyệt. Sau đó trình duyệt truy cập `/connect/authorize?request_uri=...&client_id=...` thay vì mang mọi tham số trên URL.
 
-Vì sao nên dùng nó:
+Lý do nên dùng:
 
-- Các tham số ủy quyền không bao giờ xuất hiện trong lịch sử trình duyệt, nhật ký máy chủ, hoặc header `Referer`.
-- Máy chủ xác thực client tại thời điểm đẩy (push), nên các tham số được kiểm tra tính toàn vẹn trước khi bất kỳ chuyển hướng nào xảy ra.
-- Các tập tham số dài (các yêu cầu `claims` lớn, các luồng đa tài nguyên) không làm vỡ giới hạn độ dài URL.
+- Các tham số authorize không bao giờ xuất hiện trong lịch sử trình duyệt, log server hay header `Referer`.
+- Server xác thực client ngay lúc push, nên các tham số được kiểm tra toàn vẹn trước khi có bất kỳ lần chuyển hướng nào.
+- Các tập tham số dài (request `claims` lớn, flow nhiều resource) không vượt giới hạn độ dài URL.
 
-## Endpoint
+## Endpoint {#endpoint}
 
 ```
 POST /connect/par
 Content-Type: application/x-www-form-urlencoded
 ```
 
-Việc xác thực giống như `/connect/token`: HTTP Basic với `client_id`/`client_secret`, hoặc thông tin xác thực mã hóa dạng biểu mẫu. Các client bí mật phải xác thực; các client công khai đẩy mà không có secret. Các lỗi xác thực client trả về `401` (theo RFC 9126, khác với endpoint token, nơi chỉ `invalid_client` mới là 401).
+Xác thực giống như `/connect/token`: HTTP Basic với `client_id`/`client_secret`, hoặc thông tin xác thực mã hóa dạng form. Confidential client bắt buộc phải xác thực; public client post mà không cần secret. Lỗi xác thực client trả về `401` (theo RFC 9126, khác với token endpoint, nơi chỉ `invalid_client` là 401).
 
-Body của biểu mẫu mang cùng các tham số mà thông thường sẽ đi trên `/connect/authorize` (`response_type`, `redirect_uri`, `scope`, `state`, `code_challenge`, `code_challenge_method`, `nonce`, `resource`, v.v.). Bản thân `request_uri` bị từ chối: việc nối chuỗi một PAR bị cấm bởi §2.1 của đặc tả. Nếu body mang một `client_id`, nó phải khớp với client đã được xác thực.
+Body dạng form mang cùng các tham số vốn thường nằm trên `/connect/authorize` (`response_type`, `redirect_uri`, `scope`, `state`, `code_challenge`, `code_challenge_method`, `nonce`, `resource`, v.v.). Bản thân `request_uri` bị từ chối, vì việc xâu chuỗi PAR bị cấm theo §2.1 của đặc tả. Nếu body mang `client_id`, nó phải khớp với client đã xác thực. Giống token endpoint, route này từ chối request `http` văn bản thuần trừ khi `AuthagonalProtocolOptions.AllowInsecureHttp` được đặt.
 
-### Phản hồi
+Request được kiểm tra ngay lúc push, theo cùng cách mà `/connect/authorize` sẽ kiểm tra nó (`redirect_uri` đã đăng ký, scope được phép, PKCE, các giá trị `prompt`, v.v.). Một request không hợp lệ bị từ chối ngay với `400 invalid_request` và không có `request_uri` nào được cấp, nên lỗi lộ ra với client thay vì với người dùng cuối giữa chừng flow. `authorization_details` bị từ chối với `invalid_authorization_details` (rich authorization request thuộc về token endpoint, không phải ở đây).
+
+### Giới hạn {#limits}
+
+- Body bị giới hạn ở 32 KB, với tối đa 64 trường form, tên dài 256 ký tự và 8 KB cho mỗi giá trị. Bất cứ thứ gì lớn hơn bị từ chối với `413 invalid_request`.
+- Request bị giới hạn tần suất ở mức 60 mỗi phút cho mỗi client và địa chỉ nguồn, và tổng cộng 300 mỗi phút cho mỗi client, trả về `429 temporarily_unavailable`.
+
+### Response {#response}
 
 ```
 HTTP/1.1 201 Created
@@ -37,19 +44,21 @@ HTTP/1.1 201 Created
 }
 ```
 
-`request_uri` chỉ dùng một lần. Nó được xóa khỏi kho một khi yêu cầu `/connect/authorize` khớp tiêu thụ nó (hoặc khi cửa sổ 90 giây hết hạn, tùy cái nào đến sớm hơn).
+`request_uri` chỉ dùng một lần. Nó bị xóa khỏi store khi authorization code được cấp cho nó. Nếu không bao giờ được dùng, nó hết hạn sau 90 giây.
 
-### Bước ủy quyền
+### Bước authorize {#authorization-step}
 
 ```
 GET /connect/authorize?client_id=my-rp&request_uri=urn:ietf:params:oauth:request_uri:abc123...
 ```
 
-Khi `request_uri` hiện diện, tất cả các tham số khác được lấy từ payload đã đẩy: mọi thứ khác trên URL đều bị bỏ qua. `client_id` trên yêu cầu này phải khớp với client đã đẩy payload.
+Khi có `request_uri`, mọi tham số khác được lấy từ payload đã push, mọi thứ khác trên URL bị bỏ qua (ngoài `client_id`, vốn phải khớp với client đã push payload, và tham số `error` mà một vòng liên kết thất bại nối thêm vào). Một `request_uri` không xác định, đã hết hạn, đã bị tiêu thụ hoặc do một client khác push sẽ bị từ chối với `invalid_request`. Chỉ các URN mờ do chính PAR endpoint của server này cấp mới được chấp nhận: mọi giá trị `request_uri` khác bị từ chối với `request_uri_not_supported`, và tham số `request` của RFC 9101 bị từ chối với `request_not_supported`.
 
-## Yêu cầu PAR theo từng client
+Các giá trị `prompt` và `max_age` đã push được tuân thủ. Một PAR request mang `prompt=login` (hoặc một `max_age` mà phiên đã vượt quá) chỉ được thỏa mãn bởi một phiên có `auth_time` bằng hoặc sau thời điểm request được push, nên một phiên có sẵn từ trước sẽ bị đăng xuất và xác thực lại một lần, và lượt quay về từ đăng nhập sẽ cấp code thay vì lặp vô hạn.
 
-Đặt `RequirePushedAuthorizationRequests = true` trên một client để từ chối các yêu cầu `/connect/authorize` thuần túy từ nó. Bất kỳ nỗ lực ủy quyền không phải PAR nào cũng trả về `invalid_request` với mô tả "This client requires requests to be pushed via /connect/par".
+## Bắt buộc PAR theo từng client {#requiring-par-per-client}
+
+Đặt `RequirePushedAuthorizationRequests = true` trên một client để từ chối các request `/connect/authorize` thông thường từ client đó. Mọi lần authorize không qua PAR đều trả về `invalid_request` với mô tả "This client requires requests to be pushed via /connect/par".
 
 ```csharp
 new OAuthClient
@@ -60,15 +69,15 @@ new OAuthClient
 }
 ```
 
-Đây là tư thế được khuyến nghị cho các client xử lý các scope nhạy cảm: kết hợp với PKCE, nó loại bỏ thanh URL như một bề mặt tấn công.
+Đây là tư thế được khuyến nghị cho các client xử lý scope nhạy cảm; kết hợp với PKCE, nó loại bỏ thanh địa chỉ khỏi bề mặt tấn công.
 
-## Thời gian sống và lưu trữ
+## Thời hạn và lưu trữ {#lifetime-and-storage}
 
-Thời gian sống của `request_uri` do máy chủ đặt ở 90 giây, khớp với giá trị IdP tham chiếu điển hình. Các payload đã đẩy được lưu trữ qua cùng `IGrantStore` như mã ủy quyền và refresh token, nên chúng tự động kế thừa chiến lược lưu trữ bền vững và sao chép của host.
+`expires_in` trả về từ lần push là 90 giây, và khoảng thời gian đó bao trùm chặng từ lần push tới request `/connect/authorize` đầu tiên. Khi bản ghi được lấy ra lần đầu, nó được gia hạn (một lần) tới một hạn chót tuyệt đối là 15 phút kể từ lần push, để người dùng có thể hoàn tất đăng nhập, MFA và chấp thuận. Các giá trị 90 giây và 15 phút là hằng số, không phải cấu hình. Payload đã push được lưu qua cùng `IGrantStore` với authorization code và refresh token, nên chúng tự động kế thừa chiến lược lưu bền vững và nhân bản của host.
 
-## Khám phá
+## Discovery {#discovery}
 
-Endpoint PAR tự quảng bá trong `.well-known/openid-configuration` dưới dạng:
+PAR endpoint tự quảng bá trong `.well-known/openid-configuration` như sau:
 
 ```json
 {

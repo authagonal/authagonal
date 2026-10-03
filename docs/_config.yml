@@ -27,6 +27,10 @@ defaults:
     values:
       locale: "pt"
   - scope:
+      path: "ja"
+    values:
+      locale: "ja"
+  - scope:
       path: ""
     values:
       locale: "en"

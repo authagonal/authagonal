@@ -6,9 +6,9 @@ locale: zh-Hans
 
 # 本地化
 
-登录界面开箱即支持十种语言/区域设置：英语、简体中文 (`zh-Hans`)、德语 (`de`)、法语 (`fr`)、西班牙语 (`es`)、越南语 (`vi`)、葡萄牙语 (`pt`)、阿拉伯语 (`ar`)、南非荷兰语 (`af`) 和印地语 (`hi`)。服务器 API 响应对其中前七种进行本地化。本地化涵盖服务器 API 响应、登录界面以及本文档站点。
+登录界面开箱即带十一种语言区域：英语、简体中文（`zh-Hans`）、德语（`de`）、法语（`fr`）、西班牙语（`es`）、越南语（`vi`）、葡萄牙语（`pt`）、阿拉伯语（`ar`）、南非荷兰语（`af`）、印地语（`hi`）和日语（`ja`）。服务器 API 响应和服务器渲染的页面同样以这十一种语言提供本地化。本地化范围包括服务器 API 响应、登录界面以及本文档站点。
 
-## 支持的语言
+## 支持的语言 {#supported-languages}
 
 | 代码 | 语言 | 登录界面 | 服务器 API |
 |---|---|---|---|
@@ -19,32 +19,35 @@ locale: zh-Hans
 | `es` | 西班牙语 | ✓ | ✓ |
 | `vi` | 越南语 | ✓ | ✓ |
 | `pt` | 葡萄牙语 | ✓ | ✓ |
-| `ar` | 阿拉伯语（从右到左） | ✓ | — |
-| `af` | 南非荷兰语 | ✓ | — |
-| `hi` | 印地语 | ✓ | — |
+| `ar` | 阿拉伯语（从右到左） | ✓ | ✓ |
+| `af` | 南非荷兰语 | ✓ | ✓ |
+| `hi` | 印地语 | ✓ | ✓ |
+| `ja` | 日语 | ✓ | ✓ |
 
-## 服务器（API 响应）
+## 服务器（API 响应） {#server-api-responses}
 
-服务器使用 ASP.NET Core 内置的本地化功能，通过 `IStringLocalizer<T>` 和 `.resx` 资源文件实现。语言根据 `Accept-Language` HTTP 头进行选择。
+服务器使用 ASP.NET Core 内置的本地化机制，配合 `IStringLocalizer<T>` 和 `.resx` 资源文件。语言根据 `Accept-Language` HTTP 标头选择。
 
-### 已本地化的内容
+### 本地化的内容 {#what-is-localized}
 
-- 密码验证错误消息
-- 密码策略标签 (`GET /api/auth/password-policy`)
+- 密码校验错误消息
+- 密码策略标签（`GET /api/auth/password-policy`）
 - 密码重置流程消息（令牌错误、过期、成功）
-- 异常处理中间件的通用错误描述
+- 异常处理中间件返回的通用错误描述
 - 管理员用户管理消息（邮箱确认、验证等）
-- 结束会话确认消息
+- 结束会话的确认消息
+- 服务器渲染的页面（邮箱确认结果页、结束会话确认页和已注销页），包括 `<html lang>`，以及阿拉伯语的 `dir="rtl"`
+- 由库发送的邮件（`EmailService`：验证邮件、密码重置邮件和“账户已存在”通知），使用收件人保存的语言区域（`AuthUser.Locale`），没有则使用请求的区域性，再没有则使用英语
 
-### 未本地化的内容
+### 不本地化的内容 {#what-is-not-localized}
 
-- 机器可读的 `error` 代码（`"email_required"`、`"invalid_credentials"` 等）——这些是 API 契约，保持不变
-- OAuth/OIDC 错误代码以及令牌、授权和撤销端点上面向开发者的错误描述
+- 机器可读的 `error` 代码（`"email_required"`、`"invalid_credentials"` 等），它们属于 API 契约，保持不变
+- 令牌、授权和撤销端点上的 OAuth/OIDC 错误代码及面向开发者的错误描述
 - 内部日志消息和异常消息
 
-### 测试服务器本地化
+### 测试服务器本地化 {#testing-server-localization}
 
-向任何已本地化的端点发送 `Accept-Language` 头：
+向任意已本地化的端点发送 `Accept-Language` 标头：
 
 ```bash
 # English (default)
@@ -57,9 +60,9 @@ curl -H "Accept-Language: zh-Hans" https://auth.example.com/api/auth/password-po
 curl -H "Accept-Language: de" https://auth.example.com/api/auth/password-policy
 ```
 
-### 资源文件
+### 资源文件 {#resource-files}
 
-所有服务器翻译字符串位于 `src/Authagonal.Server/Resources/` 下的 `.resx` 文件中：
+所有服务器翻译字符串都位于 `src/Authagonal.Server/Resources/` 下的 `.resx` 文件中：
 
 ```
 Resources/
@@ -71,28 +74,32 @@ Resources/
   SharedMessages.es.resx
   SharedMessages.vi.resx
   SharedMessages.pt.resx
+  SharedMessages.ja.resx
+  SharedMessages.ar.resx
+  SharedMessages.af.resx
+  SharedMessages.hi.resx
 ```
 
-## 登录界面
+## 登录界面 {#login-ui}
 
-登录单页应用使用 [react-i18next](https://react.i18next.com/) 进行客户端本地化。语言根据浏览器的 `navigator.language` 设置自动检测。
+登录 SPA 使用 [react-i18next](https://react.i18next.com/) 进行客户端本地化。语言根据浏览器的 `navigator.language` 设置自动检测。
 
-已注册的语言/区域设置集中在 `login-app/src/i18n/index.ts` 中的单个 `LANGUAGES` 注册表内，它同时驱动 i18next 资源注册和每个语言选择器，因此两者不会出现偏差。目前所有已注册的区域设置都会出现在默认选择器中。`DEFAULT_LANGUAGES` 与 `LANGUAGES` 分开导出，以便将来某个受限区域设置可以在不改动调用点的情况下从选择器中排除，但目前没有任何一个被排除。租户也可以用同样的方式收窄选择器：`branding.json` 中的 `languages` 数组会完全替换默认列表（参见 [品牌定制](branding)）。
+已注册的语言区域集中在 `login-app/src/i18n/index.ts` 中的一个 `LANGUAGES` 注册表里，它同时驱动 i18next 资源注册和所有语言选择器，因此两者不会出现不一致。目前每个已注册的语言区域都会出现在默认选择器中。`DEFAULT_LANGUAGES` 与 `LANGUAGES` 分开导出，这样将来如有受限的语言区域，可以在不改动调用点的情况下将其从选择器中排除，但目前没有排除任何语言。租户也可以用同样的方式缩小选择器的范围：`branding.json` 中的 `languages` 数组会完全替换默认列表（参见[品牌定制](branding)）。
 
-当前语言会同步反映到 `<html lang>` 和 `<html dir>` 上，因此从右到左的语言（`ar`）会自动翻转认证卡片，包括通过选择器就地切换语言时。
+当前语言会同步到 `<html lang>` 和 `<html dir>` 上，因此从右到左的语言（`ar`）会自动翻转身份验证卡片，通过选择器就地切换语言时也是如此。
 
-### 语言检测
+### 语言检测 {#language-detection}
 
 检测顺序如下：
 
-1. **localStorage**：来自上次访问的持久化偏好
-2. **查询参数**：`?lng=de` 覆盖浏览器检测
+1. **localStorage**：上次访问时保存的偏好
+2. **查询参数**：`?lng=de` 会覆盖浏览器检测结果
 3. **浏览器语言**：`navigator.language`（自动）
-4. **回退**：英语 (`en`)
+4. **兜底**：英语（`en`）
 
-### 翻译文件
+### 翻译文件 {#translation-files}
 
-翻译 JSON 文件与应用一起打包，位于 `login-app/src/i18n/`：
+翻译 JSON 文件随应用一起打包，位于 `login-app/src/i18n/`：
 
 ```
 i18n/
@@ -107,15 +114,16 @@ i18n/
   ar.json         # Arabic
   af.json         # Afrikaans
   hi.json         # Hindi
+  ja.json         # Japanese
 ```
 
-### 密码策略标签
+### 密码策略标签 {#password-policy-labels}
 
-重置密码页面根据 `GET /api/auth/password-policy` 返回的 `rule` 键在客户端翻译其密码要求清单（对无法识别的规则回退到服务器提供的 `label`）。这确保要求遵循 UI 中所选的语言，即使浏览器的 `Accept-Language` 头不同。注册页面显示服务器提供的 `label` 值，这些值根据 `Accept-Language` 进行本地化。
+重置密码页面会根据 `GET /api/auth/password-policy` 返回的 `rule` 键，在客户端翻译其密码要求清单（遇到无法识别的规则时，退回使用服务器提供的 `label`）。这确保了要求清单跟随界面中所选的语言，即使浏览器的 `Accept-Language` 标头与之不同。注册页面显示的是服务器提供的 `label` 值，这些值依据 `Accept-Language` 进行本地化。
 
-### npm 包使用者
+### npm 包使用者 {#npm-package-consumers}
 
-如果你通过 `@authagonal/login` 使用登录应用，i18n 实例已导出：
+如果你通过 `@authagonal/login` 使用登录应用，i18n 实例是导出的：
 
 ```typescript
 import { i18n } from '@authagonal/login';
@@ -124,76 +132,76 @@ import { i18n } from '@authagonal/login';
 i18n.changeLanguage('de');
 ```
 
-## 文档
+## 文档 {#documentation}
 
-文档站点采用基于目录的方式。英语页面位于根目录，翻译版本位于语言子目录中（`/zh-Hans/`、`/de/`、`/fr/`、`/es/`、`/vi/`、`/pt/`）。侧边栏中的语言切换下拉菜单允许在不同语言之间切换。
+文档站点采用基于目录的方式。英文页面位于根目录，翻译位于各语言区域的子目录中（`/zh-Hans/`、`/de/`、`/fr/`、`/es/`、`/vi/`、`/pt/`、`/ja/`）。侧边栏中的语言切换下拉菜单可用于在语言之间切换。
 
-## 添加新语言
+## 添加新语言 {#adding-a-new-language}
 
-要添加新语言支持（例如日语 `ja`）：
+要添加对一种新语言的支持（例如意大利语 `it`）：
 
-### 1. 服务器
+### 1. 服务器 {#1-server}
 
-复制英语资源文件并翻译其中的值，创建新的 `.resx` 文件：
+复制英文 `.resx` 文件并翻译其中的值，创建新的 `.resx` 文件：
 
 ```
-src/Authagonal.Server/Resources/SharedMessages.ja.resx
+src/Authagonal.Server/Resources/SharedMessages.it.resx
 ```
 
-在 `AuthagonalExtensions.cs` 中将 `"ja"` 添加到支持的文化数组中：
+将 `"it"` 添加到 `src/Authagonal.Server/Services/SupportedLocales.cs` 中的 `SupportedLocales.All`，请求本地化中间件和服务器渲染的页面读取的都是这一个列表：
 
 ```csharp
-var supportedCultures = new[] { "en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja" };
+public static readonly string[] All = ["en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja", "ar", "af", "hi", "it"];
 ```
 
-### 2. 登录界面
+### 2. 登录界面 {#2-login-ui}
 
 复制 `en.json` 并翻译其中的值，创建新的翻译 JSON 文件：
 
 ```
-login-app/src/i18n/ja.json
+login-app/src/i18n/it.json
 ```
 
-在 `login-app/src/i18n/index.ts` 的 `LANGUAGES` 数组中注册。这一条目会注册 i18next 资源并将该语言添加到每个选择器：
+在 `login-app/src/i18n/index.ts` 的 `LANGUAGES` 数组中注册它。这一个条目既注册了 i18next 资源，也把该语言加入所有选择器：
 
 ```typescript
-import ja from './ja.json';
+import it from './it.json';
 
 // In the LANGUAGES array:
-{ code: 'ja', label: '日本語', resource: ja },
+{ code: 'it', label: 'Italiano', resource: it },
 ```
 
-### 3. 文档
+### 3. 文档 {#3-documentation}
 
-创建一个新目录，包含翻译后的 markdown 文件：
+创建一个新目录，放入翻译后的 markdown 文件：
 
 ```
-docs/ja/
+docs/it/
   index.md
   installation.md
   quickstart.md
   ...
 ```
 
-在 `docs/_config.yml` 中添加语言默认值：
+在 `docs/_config.yml` 中添加语言区域默认值：
 
 ```yaml
 defaults:
   - scope:
-      path: "ja"
+      path: "it"
     values:
-      locale: "ja"
+      locale: "it"
 ```
 
-在 `docs/_layouts/default.html` 中将该语言选项添加到语言切换器。
+在 `docs/_layouts/default.html` 的切换器中添加该语言选项。
 
-## 添加新字符串
+## 添加新字符串 {#adding-new-strings}
 
-### 服务器
+### 服务器 {#server}
 
-1. 将键和英语值添加到 `SharedMessages.resx`
-2. 将翻译值添加到每个语言的 `.resx` 文件中
-3. 使用 `IStringLocalizer<SharedMessages>` 访问字符串：
+1. 在 `SharedMessages.resx` 中添加键和英文值
+2. 在每个语言区域的 `.resx` 文件中添加翻译后的值
+3. 使用 `IStringLocalizer<SharedMessages>` 访问该字符串：
 
 ```csharp
 // Inject via parameter
@@ -206,10 +214,10 @@ localizer["MyNewKey"].Value
 string.Format(localizer["MyNewKey"].Value, param1)
 ```
 
-### 登录界面
+### 登录界面 {#login-ui-1}
 
-1. 将键和英语值添加到 `en.json`
-2. 将翻译值添加到每个语言的 JSON 文件中
+1. 在 `en.json` 中添加键和英文值
+2. 在每个语言区域的 JSON 文件中添加翻译后的值
 3. 在组件中使用 `t()` 函数：
 
 ```tsx

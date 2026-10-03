@@ -6,13 +6,13 @@ locale: de
 
 # Auth-API
 
-Diese Endpunkte betreiben die Login-SPA. Sie verwenden Cookie-Authentifizierung (`SameSite=Lax`, `HttpOnly`).
+Diese Endpunkte treiben die Login-SPA an. Sie verwenden Cookie-Authentifizierung (`SameSite=Lax`, `HttpOnly`).
 
-Wenn Sie eine benutzerdefinierte Login-Oberfläche erstellen, sind dies die Endpunkte, gegen die Sie implementieren müssen.
+Wenn Sie eine eigene Login-UI bauen, sind das die Endpunkte, gegen die Sie implementieren müssen.
 
-## Endpunkte
+## Endpunkte {#endpoints}
 
-### Anmelden
+### Anmelden {#login}
 
 ```
 POST /api/auth/login
@@ -24,7 +24,7 @@ Content-Type: application/json
 }
 ```
 
-**Erfolg (200):** Setzt ein Auth-Cookie und gibt zurück:
+**Erfolg (200):** Setzt ein Auth-Cookie und liefert:
 
 ```json
 {
@@ -35,9 +35,9 @@ Content-Type: application/json
 }
 ```
 
-`mfaAvailable` ist `true`, wenn die `MfaPolicy` des Clients auf `Enabled` steht, der Benutzer sich aber noch nicht registriert hat (die Oberfläche kann dann die Einrichtung anbieten); in diesem Fall wird zusätzlich ein Feld `clientId` mitgeliefert.
+`mfaAvailable` ist `true`, wenn die `MfaPolicy` des Clients `Enabled` ist, der Benutzer MFA aber noch nicht eingerichtet hat (die UI kann die Einrichtung anbieten); in diesem Fall wird zusätzlich ein Feld `clientId` mitgeliefert.
 
-**MFA erforderlich (200):** Wenn der Benutzer MFA registriert hat, wird er **immer** herausgefordert, unabhängig von der `MfaPolicy` des anfragenden Clients (MFA ist eine Eigenschaft des Benutzers/der Sitzung, nicht des Clients):
+**MFA erforderlich (200):** Hat der Benutzer MFA eingerichtet, wird er **immer** zur MFA aufgefordert, unabhängig von der `MfaPolicy` des anfragenden Clients (MFA ist eine Eigenschaft des Benutzers bzw. der Sitzung, nicht des Clients):
 
 ```json
 {
@@ -48,9 +48,9 @@ Content-Type: application/json
 }
 ```
 
-Der Client sollte zu einer MFA-Abfrageseite weiterleiten und `POST /api/auth/mfa/verify` aufrufen.
+Der Client sollte auf eine Seite für die MFA-Abfrage weiterleiten und `POST /api/auth/mfa/verify` aufrufen.
 
-**MFA-Einrichtung erforderlich (200):** Wenn `MfaPolicy` auf `Required` gesetzt ist und der Benutzer keine MFA registriert hat:
+**MFA-Einrichtung erforderlich (200):** Wenn die `MfaPolicy` `Required` ist und der Benutzer keine MFA eingerichtet hat:
 
 ```json
 {
@@ -59,22 +59,22 @@ Der Client sollte zu einer MFA-Abfrageseite weiterleiten und `POST /api/auth/mfa
 }
 ```
 
-Der Client sollte zu einer MFA-Einrichtungsseite weiterleiten. Das Setup-Token authentifiziert den Benutzer bei den MFA-Setup-Endpunkten über den `X-MFA-Setup-Token`-Header.
+Der Client sollte auf eine Seite zur MFA-Einrichtung weiterleiten. Das Setup-Token authentifiziert den Benutzer über den Header `X-MFA-Setup-Token` gegenüber den Endpunkten zur MFA-Einrichtung.
 
 **Fehlerantworten:**
 
 | `error` | Status | Beschreibung |
 |---|---|---|
-| `invalid_credentials` | 401 | Falsche E-Mail-Adresse oder falsches Passwort. Bei unbekannten E-Mail-Adressen absichtlich identisch (Anti-Enumeration). |
+| `invalid_credentials` | 401 | Falsche E-Mail-Adresse oder falsches Passwort. Bei unbekannten E-Mail-Adressen bewusst identisch (Schutz vor Aufzählung). |
 | `locked_out` | 423 | Zu viele fehlgeschlagene Versuche. `retryAfter` (Sekunden) ist enthalten. |
-| `account_disabled` | 403 | Konto ist deaktiviert (wird erst nach einem korrekten Passwort sichtbar) |
-| `email_not_confirmed` | 403 | E-Mail noch nicht bestätigt (wird erst nach einem korrekten Passwort sichtbar) |
-| `sso_required` | 409 | Domäne erfordert SSO. `redirectUrl` verweist auf die SSO-Anmeldung. |
-| `captcha_failed` | 400 | Turnstile-Verifizierung fehlgeschlagen (nur wenn Turnstile konfiguriert ist; Anfragen benötigen dann ein Feld `turnstileToken`) |
-| `email_required` | 400 | E-Mail-Feld ist leer |
-| `password_required` | 400 | Passwort-Feld ist leer |
+| `account_disabled` | 403 | Das Konto ist deaktiviert (wird nur nach einem korrekten Passwort gemeldet) |
+| `email_not_confirmed` | 403 | Die E-Mail-Adresse ist noch nicht verifiziert (wird nur nach einem korrekten Passwort gemeldet) |
+| `sso_required` | 409 | Die Domain erfordert SSO. `redirectUrl` verweist auf die SSO-Anmeldung. |
+| `captcha_failed` | 400 | Die Turnstile-Verifizierung ist fehlgeschlagen (nur wenn Turnstile konfiguriert ist; Anfragen benötigen dann ein Feld `turnstileToken`) |
+| `email_required` | 400 | Das E-Mail-Feld ist leer |
+| `password_required` | 400 | Das Passwortfeld ist leer |
 
-### Registrieren
+### Registrieren {#register}
 
 ```
 POST /api/auth/register
@@ -88,26 +88,26 @@ Content-Type: application/json
 }
 ```
 
-Erstellt ein neues Benutzerkonto und sendet eine Bestätigungs-E-Mail. Gibt `201 { "success": true, "userId": "..." }` zurück. Optionale Felder: `locale` (ein BCP-47-Tag, der beim Benutzer gespeichert wird) und `customAttributes` (eine String-Map).
+Legt ein neues Benutzerkonto an und sendet eine Verifizierungs-E-Mail. Liefert `201 { "success": true, "userId": "..." }`. Optionale Felder: `locale` (BCP-47-Tag, das am Benutzer gespeichert wird) und `customAttributes` (eine String-Map).
 
-Die Registrierung ist absichtlich **enumerationsneutral**: Wenn die E-Mail-Adresse bereits registriert ist, ist die Antwort dieselbe neutrale `201` (mit einer Wegwerf-`userId`), und der tatsächliche Inhaber erhält stattdessen eine Anmelde-/Zurücksetzen-Benachrichtigung per E-Mail. Die Registrierung ist außerdem pro IP ratenbegrenzt: `429 rate_limited`, wenn das Limit überschritten wird (Zeitfenster und Obergrenze konfigurierbar über `Auth:MaxRegistrationsPerIp` / `Auth:RegistrationWindowMinutes`).
+Die Registrierung ist bewusst **neutral gegenüber Aufzählung**: Ist die E-Mail-Adresse bereits registriert, ist die Antwort dasselbe neutrale `201` (mit einer Wegwerf-`userId`), und der tatsächliche Inhaber erhält stattdessen per E-Mail einen Hinweis zur Anmeldung bzw. zum Zurücksetzen. Die Registrierung ist außerdem pro IP ratenbegrenzt, bei Überschreitung kommt `429 rate_limited` (Zeitfenster und Obergrenze konfigurierbar über `Auth:MaxRegistrationsPerIp` / `Auth:RegistrationWindowMinutes`).
 
-### E-Mail bestätigen
+### E-Mail-Adresse bestätigen {#confirm-email}
 
 ```
 GET  /api/auth/confirm-email?token={token}
 POST /api/auth/confirm-email?token={token}
 ```
 
-Bestätigt die E-Mail-Adresse des Benutzers mit dem Token aus der Bestätigungs-E-Mail. `GET` ist der anklickbare Link in der E-Mail; er leitet auf `/login?email_confirmed=1` weiter (plus einen Parameter `continue_client`, wenn die Registrierung aus einem OAuth-Ablauf stammte). `POST` ist der programmatische Weg und gibt JSON zurück (das Token kann auch in einem JSON-Body als `{ "token": "..." }` übergeben werden); die Antwort enthält optional ein Feld `appLink` (Ziel für "weiter zur App").
+Bestätigt die E-Mail-Adresse des Benutzers mit dem Token aus der Verifizierungs-E-Mail. `GET` ist der anklickbare Link in der E-Mail; er leitet auf `/login?email_confirmed=1` weiter (zuzüglich eines Parameters `continue_client`, wenn die Registrierung aus einem OAuth-Ablauf stammt). `POST` ist der programmatische Weg und liefert JSON (das Token kann auch in einem JSON-Body als `{ "token": "..." }` übergeben werden); die Antwort enthält einen optionalen `appLink` (Ziel für „Weiter zur App“).
 
-### Anbieter
+### Provider {#providers}
 
 ```
 GET /api/auth/providers
 ```
 
-Gibt die Liste der konfigurierten externen Identitätsanbieter zurück (zum Rendern von SSO-Schaltflächen):
+Liefert die Liste der konfigurierten externen Identity Provider (zum Rendern von SSO-Schaltflächen):
 
 ```json
 {
@@ -118,17 +118,26 @@ Gibt die Liste der konfigurierten externen Identitätsanbieter zurück (zum Rend
 }
 ```
 
-Verbindungen mit konfigurierten `AllowedDomains` werden **ausgeschlossen**; diese werden stattdessen E-Mail-first über `/api/auth/sso-check` erreicht statt über eine Schaltfläche. `turnstileSiteKey` ist gesetzt, wenn Cloudflare Turnstile konfiguriert ist (die Login-Oberfläche muss dann bei Anmelde-/Registrierungs-/Passwort-Anfragen ein `turnstileToken` mitsenden).
+Verbindungen mit konfigurierten `AllowedDomains` werden **ausgeschlossen**: Diese werden statt über eine Schaltfläche über die E-Mail-Adresse zuerst via `/api/auth/sso-check` erreicht. `turnstileSiteKey` ist gesetzt, wenn Cloudflare Turnstile konfiguriert ist (die Login-UI muss dann bei Anmelde-, Registrierungs- und Passwortanfragen ein `turnstileToken` senden).
 
-### Abmelden
+### Abmelden {#logout}
 
 ```
 POST /api/auth/logout
 ```
 
-Löscht das Auth-Cookie. Gibt `200 { success: true }` zurück.
+Beendet die Sitzung des Aufrufers auf dieselbe Weise wie `/connect/endsession`: Back-Channel-Logout-Tokens werden an die Relying Parties gesendet, die eine URI registriert haben, die für diese Sitzung ausgestellten Grants werden widerrufen, und das Auth-Cookie wird gelöscht. Erfordert Cookie-Authentifizierung und eine Anfrage vom selben Origin. Liefert `200`:
 
-### Passwort vergessen
+```json
+{
+  "success": true,
+  "frontchannel_logout_uris": ["https://myapp.example.com/oidc/frontchannel"]
+}
+```
+
+`frontchannel_logout_uris` listet die Front-Channel-Logout-URLs auf, die der Aufrufer laden sollte (in versteckten iframes), um die Abmeldung im Browser abzuschließen; die Liste ist leer, wenn kein Client eine registriert hat. Siehe [Front-Channel-Logout](front-channel-logout).
+
+### Passwort vergessen {#forgot-password}
 
 ```
 POST /api/auth/forgot-password
@@ -139,9 +148,9 @@ Content-Type: application/json
 }
 ```
 
-Gibt immer `200` zurück (Anti-Enumeration). Wenn der Benutzer existiert, wird eine Zurücksetzungs-E-Mail gesendet.
+Liefert immer `200` (Schutz vor Aufzählung). Existiert der Benutzer, wird eine E-Mail zum Zurücksetzen gesendet.
 
-### Passwort zurücksetzen
+### Passwort zurücksetzen {#reset-password}
 
 ```
 POST /api/auth/reset-password
@@ -155,17 +164,17 @@ Content-Type: application/json
 
 | `error` | Beschreibung |
 |---|---|
-| `weak_password` | Erfüllt nicht die Stärkeanforderungen |
-| `invalid_token` | Token ist fehlerhaft |
-| `token_expired` | Token ist abgelaufen (standardmäßig 60 Minuten Gültigkeit, konfigurierbar über `Auth:PasswordResetExpiryMinutes`) |
+| `weak_password` | Erfüllt die Anforderungen an die Passwortstärke nicht |
+| `invalid_token` | Das Token ist fehlerhaft |
+| `token_expired` | Das Token ist abgelaufen (standardmäßig 60 Minuten gültig, konfigurierbar über `Auth:PasswordResetExpiryMinutes`) |
 
-### Sitzung
+### Sitzung {#session}
 
 ```
 GET /api/auth/session
 ```
 
-Gibt aktuelle Sitzungsinformationen zurück, wenn authentifiziert:
+Liefert Informationen zur aktuellen Sitzung, wenn der Aufrufer authentifiziert ist:
 
 ```json
 {
@@ -176,32 +185,62 @@ Gibt aktuelle Sitzungsinformationen zurück, wenn authentifiziert:
 }
 ```
 
-Gibt `401` zurück, wenn nicht authentifiziert.
+Liefert `401`, wenn er nicht authentifiziert ist.
 
-### Apps
+### Apps {#apps}
 
 ```
 GET /api/auth/apps
 ```
 
-Gibt die Anwendungslinks des Mandanten für den "Zurück zur App"-Starter der Kontoseite zurück: aktivierte Clients, die eine Home-URI besitzen (`initiateLoginUri` wird gegenüber `clientUri` bevorzugt). Jeder Eintrag hat die Form `{ clientId, clientName, homeUri, logoUri, isDefault }`; genau eine App ist als Standard markiert (der markierte Client, oder der einzige Client mit einer Home-URI). Erfordert Cookie-Authentifizierung.
+Liefert die Anwendungslinks des Mandanten für den Starter „Zurück zur App“ auf der Kontoseite: aktivierte Clients, die eine Home-URI haben (`initiateLoginUri` hat Vorrang vor `clientUri`). Jeder Eintrag ist `{ clientId, clientName, homeUri, logoUri, isDefault }`; genau eine App ist als Standard markiert (der gekennzeichnete Client oder der einzige Client mit einer Home-URI). Erfordert Cookie-Authentifizierung.
 
-### Profil (Self-Service)
+### Profil (Self-Service) {#profile-self-service}
 
 ```
 GET   /api/auth/profile
 PATCH /api/auth/profile
 ```
 
-Der authentifizierte Benutzer liest/aktualisiert seine eigenen, nicht sensiblen Profilfelder: `firstName`, `lastName`, `companyName`, `phone`, `locale`. Leere (null) Felder bleiben unverändert; E-Mail, Passwort, Rollen, Aktivstatus und Organisation sind hier **nicht** bearbeitbar. Beide geben das Profil zurück: `{ email, emailConfirmed, firstName, lastName, companyName, phone, locale }`.
+Der authentifizierte Benutzer liest bzw. aktualisiert seine eigenen, nicht sensiblen Profilfelder: `firstName`, `lastName`, `companyName`, `phone`, `locale`. Felder mit null bleiben unverändert; E-Mail-Adresse, Passwort, Rollen, Aktivstatus und Organisation sind hier **nicht** bearbeitbar. Beide liefern das Profil `{ email, emailConfirmed, firstName, lastName, companyName, phone, locale }`.
 
-### SSO-Prüfung
+### Sitzungen (Self-Service) {#sessions-self-service}
+
+```
+GET    /api/auth/sessions
+DELETE /api/auth/sessions/{sessionId}
+POST   /api/auth/sessions/revoke-others
+```
+
+Listet die eigenen SSO-Sitzungen des authentifizierten Benutzers auf und beendet sie. Dafür sind serverseitige Sitzungen nötig, die Opt-in sind: Rufen Sie `AddAuthagonalServerSideSessions(configuration)` nach `AddAuthagonal` auf (Azure Table Storage, liest `Storage:ConnectionString` oder `Storage:TableServiceUri`), oder registrieren Sie Ihr eigenes `ITicketStore` und `IUserSessionRegistry`. Ohne Registry liefert `GET` eine leere Liste, `revoke-others` liefert `{ "revoked": 0 }`, und `DELETE` liefert `404 not_supported`. Die Routen `DELETE` und `POST` erfordern eine Anfrage vom selben Origin.
+
+`GET` liefert die Sitzungen, die mit der jüngsten Aktivität zuerst:
+
+```json
+{
+  "sessions": [
+    {
+      "sessionId": "...",
+      "current": true,
+      "createdAt": "2026-10-01T02:11:40+00:00",
+      "lastSeenAt": "2026-10-04T05:30:12+00:00",
+      "expiresAt": "2026-10-08T02:11:40+00:00",
+      "ip": "203.0.113.7",
+      "userAgent": "Mozilla/5.0 ..."
+    }
+  ]
+}
+```
+
+`DELETE` beendet eine Sitzung und liefert `{ "revoked": 1 }` oder `404 session_not_found`. `POST /revoke-others` beendet jede Sitzung außer der des Aufrufers und liefert `{ "revoked": <count> }`. Beide benachrichtigen außerdem die Relying Parties jeder beendeten Sitzung (Back-Channel- und Front-Channel-Logout) und widerrufen die daran gebundenen Grants, sodass auf diesem Gerät gehaltene Refresh Tokens nicht mehr funktionieren. Die Kontoseite der Login-UI zeigt diese Liste an, wenn eine Registry registriert ist.
+
+### SSO-Prüfung {#sso-check}
 
 ```
 GET /api/auth/sso-check?email=user@acme.com
 ```
 
-Prüft, ob die E-Mail-Domäne SSO erfordert:
+Prüft, ob die Domain der E-Mail-Adresse SSO erfordert:
 
 ```json
 {
@@ -220,13 +259,13 @@ Wenn SSO nicht erforderlich ist:
 }
 ```
 
-### Passwortrichtlinie
+### Passwortrichtlinie {#password-policy}
 
 ```
 GET /api/auth/password-policy
 ```
 
-Gibt die Passwortanforderungen des Servers zurück (konfiguriert über `PasswordPolicy` in den Einstellungen):
+Liefert die Passwortanforderungen des Servers (konfiguriert über `PasswordPolicy` in den Einstellungen):
 
 ```json
 {
@@ -240,24 +279,24 @@ Gibt die Passwortanforderungen des Servers zurück (konfiguriert über `Password
 }
 ```
 
-Die Standard-Login-Oberfläche ruft diesen Endpunkt auf der Seite zum Zurücksetzen des Passworts ab, um die Anforderungen dynamisch anzuzeigen.
+Die Standard-Login-UI ruft diesen Endpunkt auf der Seite zum Zurücksetzen des Passworts ab, um die Anforderungen dynamisch anzuzeigen.
 
-## Standard-Passwortanforderungen
+## Standardanforderungen an Passwörter {#default-password-requirements}
 
-Bei Standardkonfiguration müssen Passwörter alle folgenden Kriterien erfüllen:
+Mit der Standardkonfiguration müssen Passwörter alle folgenden Anforderungen erfüllen:
 
 - Mindestens 8 Zeichen
 - Mindestens ein Großbuchstabe
 - Mindestens ein Kleinbuchstabe
 - Mindestens eine Ziffer
-- Mindestens ein nicht-alphanumerisches Zeichen
-- Mindestens 2 unterschiedliche Zeichen
+- Mindestens ein nicht alphanumerisches Zeichen
+- Mindestens 2 verschiedene Zeichen
 
-Diese können über den Konfigurationsabschnitt `PasswordPolicy` angepasst werden, siehe [Konfiguration](configuration).
+Diese lassen sich über den Konfigurationsabschnitt `PasswordPolicy` anpassen, siehe [Konfiguration](configuration).
 
-## MFA-Endpunkte
+## MFA-Endpunkte {#mfa-endpoints}
 
-### MFA verifizieren
+### MFA-Verifizierung {#mfa-verify}
 
 ```
 POST /api/auth/mfa/verify
@@ -270,7 +309,7 @@ Content-Type: application/json
 }
 ```
 
-Verifiziert eine MFA-Abfrage. Bei Erfolg wird das Auth-Cookie gesetzt und Benutzerinformationen werden zurückgegeben.
+Verifiziert eine MFA-Abfrage. Bei Erfolg wird das Auth-Cookie gesetzt, und die Benutzerinformationen werden zurückgegeben.
 
 **Methoden:**
 
@@ -278,17 +317,17 @@ Verifiziert eine MFA-Abfrage. Bei Erfolg wird das Auth-Cookie gesetzt und Benutz
 |---|---|---|
 | `totp` | `code` (6 Ziffern) | Zeitbasiertes Einmalpasswort aus einer Authenticator-App |
 | `webauthn` | `assertion` (JSON-String) | WebAuthn-Assertion-Antwort von `navigator.credentials.get()` |
-| `recovery` | `code` (`XXXX-XXXX`) | Einmal-Wiederherstellungscode (wird bei Verwendung verbraucht) |
+| `recovery` | `code` (`XXXX-XXXX`) | Einmaliger Wiederherstellungscode (wird bei Verwendung verbraucht) |
 
-**Wiederholungssemantik:** Ein falscher Code verbraucht die Abfrage **nicht**; der Code wird zuerst validiert, und die Abfrage wird erst bei Erfolg verbraucht, sodass der Benutzer dieselbe `challengeId` nach einer vertippten Ziffer erneut versuchen kann (`401 invalid_code` / `assertion_failed`). Jede Abfrage toleriert **5 fehlgeschlagene Versuche**; der 5. Fehlversuch verbraucht sie und gibt `401 too_many_attempts` zurück, was eine erneute Anmeldung erzwingt (dies begrenzt TOTP-Brute-Force auf 5 Versuche pro Abfrage). Abfragen laufen außerdem ab (standardmäßig 5 Minuten, `Auth:MfaChallengeExpiryMinutes`); eine abgelaufene, unbekannte oder bereits verbrauchte `challengeId` gibt `invalid_challenge` zurück. TOTP-Codes sind zusätzlich replay-geschützt: Ein Code aus einem bereits verwendeten Zeitschritt wird abgelehnt.
+**Semantik von Wiederholungen:** Ein falscher Code verbraucht die Abfrage **nicht**; der Code wird zuerst geprüft, und die Abfrage wird erst bei Erfolg verbraucht, sodass der Benutzer es nach einer vertippten Ziffer mit derselben `challengeId` erneut versuchen kann (`401 invalid_code` / `assertion_failed`). Jede Abfrage toleriert **5 Fehlversuche**; der 5. Fehlschlag verbraucht sie und liefert `401 too_many_attempts`, was eine neue Anmeldung erzwingt (damit ist ein Brute-Force-Angriff auf TOTP auf 5 Versuche pro Abfrage begrenzt). Abfragen laufen außerdem ab (standardmäßig nach 5 Minuten, `Auth:MfaChallengeExpiryMinutes`); eine abgelaufene, unbekannte oder bereits verbrauchte `challengeId` liefert `invalid_challenge`. TOTP-Codes sind zusätzlich gegen Wiederverwendung geschützt: Ein Code aus einem bereits genutzten Zeitschritt wird abgelehnt.
 
-### MFA-Status
+### MFA-Status {#mfa-status}
 
 ```
 GET /api/auth/mfa/status
 ```
 
-Gibt die registrierten MFA-Methoden des Benutzers zurück. Erfordert Cookie-Authentifizierung oder den Header `X-MFA-Setup-Token`.
+Liefert die eingerichteten MFA-Methoden des Benutzers. Erfordert Cookie-Authentifizierung oder den Header `X-MFA-Setup-Token`.
 
 ```json
 {
@@ -300,9 +339,9 @@ Gibt die registrierten MFA-Methoden des Benutzers zurück. Erfordert Cookie-Auth
 }
 ```
 
-`offered` ist `false`, wenn die `MfaPolicy` jedes Clients `Disabled` ist; der Mandant hat MFA also deaktiviert, sodass die Einrichtungsoberfläche sich selbst ausblenden kann. Wiederherstellungscode-Einträge tragen zusätzlich `isConsumed`.
+`offered` ist `false`, wenn die `MfaPolicy` jedes Clients `Disabled` ist; MFA ist für den Mandanten dann ausgeschaltet, und die Einrichtungs-UI kann sich ausblenden. Einträge für Wiederherstellungscodes tragen zusätzlich `isConsumed`.
 
-### TOTP-Einrichtung
+### TOTP-Einrichtung {#totp-setup}
 
 ```
 POST /api/auth/mfa/totp/setup
@@ -313,7 +352,7 @@ POST /api/auth/mfa/totp/confirm
 → { "success": true }
 ```
 
-### WebAuthn-/Passkey-Einrichtung
+### Einrichtung von WebAuthn / Passkeys {#webauthn--passkey-setup}
 
 ```
 POST /api/auth/mfa/webauthn/setup
@@ -324,27 +363,27 @@ POST /api/auth/mfa/webauthn/confirm
 → { "success": true, "credentialId": "..." }
 ```
 
-Die Passkey-Registrierung erfordert **zuerst eine bestätigte TOTP-Anmeldeinformation** (`400 totp_required_first`); Passkeys sind eine geräteweise Komfortschicht über einem portablen Basisfaktor, sodass ein Konto niemals nur-Passkey und an ein Gerät gebunden enden kann. Benutzer, deren E-Mail-Domäne SSO-geroutet ist, können keinen lokalen Passkey registrieren (`400 sso_managed`); das würde den IdP des Mandanten umgehen. Eine Anmeldeinformations-ID, die bereits bei einem anderen Benutzer registriert ist, wird mit `409 credential_already_registered` abgelehnt.
+Die Einrichtung eines Passkeys erfordert **zuerst einen bestätigten TOTP-Berechtigungsnachweis** (`400 totp_required_first`). Passkeys sind eine gerätebezogene Komfortfunktion, die auf einem portablen Basisfaktor aufsetzt; ein Konto kann daher nie nur noch einen Passkey haben und an ein Gerät gebunden sein. Benutzer, deren E-Mail-Domain über SSO geleitet wird, können keinen lokalen Passkey einrichten (`400 sso_managed`), da dieser den IdP des Mandanten umgehen würde. Eine Credential-ID, die bereits für **irgendein** Konto registriert ist, auch für das des einrichtenden Benutzers selbst, wird mit `409 credential_already_registered` abgelehnt, denn ein Duplikat würde den Signaturzähler dieses Berechtigungsnachweises neu starten und einen Suchindexeintrag zwischen zwei Zeilen teilen.
 
-### Wiederherstellungscodes
+### Wiederherstellungscodes {#recovery-codes}
 
 ```
 POST /api/auth/mfa/recovery/generate
 → { "codes": ["ABCD-1234", "EFGH-5678", ...] }
 ```
 
-Generiert 10 Einmal-Wiederherstellungscodes. Erfordert, dass mindestens eine primäre Methode (TOTP oder WebAuthn) registriert ist. Eine Neugenerierung ersetzt alle bestehenden Wiederherstellungscodes.
+Erzeugt 10 einmalige Wiederherstellungscodes. Erfordert, dass mindestens eine primäre Methode (TOTP oder WebAuthn) eingerichtet ist. Eine erneute Erzeugung ersetzt alle bestehenden Wiederherstellungscodes.
 
-### MFA-Anmeldeinformation entfernen
+### MFA-Berechtigungsnachweis entfernen {#remove-mfa-credential}
 
 ```
 DELETE /api/auth/mfa/credentials/{credentialId}
 → { "success": true }
 ```
 
-Entfernt eine bestimmte MFA-Anmeldeinformation. Wenn die letzte primäre Methode entfernt wird, wird MFA für den Benutzer deaktiviert. Erfordert eine echte Cookie-Sitzung; ein Setup-Token wird mit `403 session_required` abgelehnt (Setup-Token existieren nur, um einen ersten Faktor hinzuzufügen, niemals um MFA herabzustufen).
+Entfernt einen bestimmten MFA-Berechtigungsnachweis. Wird die letzte primäre Methode entfernt, wird MFA für den Benutzer deaktiviert. Erfordert eine echte Cookie-Sitzung; ein Setup-Token wird mit `403 session_required` abgelehnt (Setup-Tokens dienen nur dazu, einen ersten Faktor hinzuzufügen, niemals dazu, MFA abzuschwächen).
 
-### Passwortlose Passkey-Anmeldung
+### Passwortlose Anmeldung per Passkey {#passwordless-passkey-login}
 
 ```
 POST /api/auth/mfa/passwordless/begin
@@ -355,11 +394,11 @@ POST /api/auth/mfa/passwordless/complete
 → { "userId": "...", "email": "...", "name": "..." }
 ```
 
-Anmeldung per erkennbarer Anmeldeinformation (residenter Passkey) ohne vorherigen Benutzerkontext: `begin` stellt eine Assertion-Abfrage mit einer leeren `allowCredentials`-Liste aus, und `complete` löst den Benutzer **aus** dem gewählten Passkey auf, verifiziert die Assertion und meldet ihn an (die Sitzung trägt den MFA-Marker, da ein Passkey ein phishing-resistenter starker Faktor ist). Wenn die E-Mail-Domäne des aufgelösten Benutzers SSO-geroutet ist, wird die Anmeldung mit `409 sso_required` + `redirectUrl` abgelehnt, damit ein lokaler Passkey einen erzwungenen IdP nicht umgehen kann.
+Anmeldung mit auffindbaren Berechtigungsnachweisen (residente Passkeys) ohne vorherigen Benutzerkontext: `begin` stellt eine Assertion-Abfrage mit leerer `allowCredentials`-Liste aus, und `complete` ermittelt den Benutzer **anhand** des gewählten Passkeys, prüft die Assertion und meldet ihn an (die Sitzung trägt die MFA-Markierung, denn ein Passkey ist eine phishingresistente starke Authentifizierung). Weil vor dem Ablauf kein Benutzer identifiziert wurde, macht WebAuthn §7.2 Schritt 6 das User Handle des Authenticators hier verpflichtend: Eine Assertion ohne User Handle wird mit `401 user_handle_required` abgelehnt, und eine, die ein anderes Konto als den Besitzer des Berechtigungsnachweises nennt, mit `401 credential_not_found`. Wird die E-Mail-Domain des ermittelten Benutzers über SSO geleitet, wird die Anmeldung mit `409 sso_required` + `redirectUrl` abgelehnt, damit ein lokaler Passkey einen erzwungenen IdP nicht umgehen kann.
 
-## Geräteautorisierung (RFC 8628)
+## Geräteautorisierung (RFC 8628) {#device-authorization-rfc-8628}
 
-### Gerätecode anfordern
+### Gerätecode anfordern {#request-device-code}
 
 ```
 POST /connect/deviceauthorization
@@ -368,7 +407,7 @@ Content-Type: application/x-www-form-urlencoded
 client_id=my-cli&scope=openid+profile
 ```
 
-Gibt einen Gerätecode, einen Benutzercode und eine Verifizierungs-URI zurück:
+Liefert einen Gerätecode, einen Benutzercode und eine Verifizierungs-URI:
 
 ```json
 {
@@ -381,24 +420,62 @@ Gibt einen Gerätecode, einen Benutzercode und eine Verifizierungs-URI zurück:
 }
 ```
 
-`expires_in` stammt aus `DeviceCodeLifetimeSeconds` des Clients (Standard 300). Das Gerät zeigt dem Benutzer die `verification_uri` und den `user_code` an und fragt den Token-Endpunkt dann mit dem `device_code` ab, nicht schneller als im Abstand von `interval` Sekunden, sonst antwortet der Token-Endpunkt mit `slow_down` (RFC 8628 §3.5). Solange der Benutzer noch nicht zugestimmt hat, gibt der Token-Endpunkt `authorization_pending` zurück. Der Benutzer ruft die Verifizierungs-URI auf, meldet sich an und gibt den Benutzercode ein, um zuzustimmen.
+`expires_in` stammt aus dem `DeviceCodeLifetimeSeconds` des Clients (Standard 300). Das Gerät zeigt dem Benutzer die `verification_uri` und den `user_code` an und fragt dann den Token-Endpunkt mit dem `device_code` ab, nicht häufiger als im Abstand von `interval` Sekunden, sonst antwortet der Token-Endpunkt mit `slow_down` (RFC 8628 §3.5). Solange der Benutzer noch nicht zugestimmt hat, liefert der Token-Endpunkt `authorization_pending`. Der Benutzer ruft die Verifizierungs-URI auf, meldet sich an und gibt den Benutzercode ein, um zuzustimmen.
 
-### Gerät genehmigen
+### Die Anfrage vor der Zustimmung anzeigen {#show-the-request-before-approving}
 
 ```
-POST /api/auth/device/approve
-Content-Type: application/json
+GET /api/auth/device/info?user_code=ABCD-EFGH
+```
 
+Erfordert Cookie-Authentifizierung. Beschreibt, was der Code gewähren würde, sodass der Zustimmungsbildschirm dem Benutzer vor der Zustimmung zeigen kann, welche Anwendung anfragt (ein von einem Angreifer gestarteter Device Flow, dem bei einer undurchsichtigen Abfrage zugestimmt wird, ist das Muster der erschlichenen Zustimmung, vor dem RFC 8628 §5.4 warnt):
+
+```json
 {
-  "userCode": "ABCD-EFGH"
+  "clientId": "my-cli",
+  "clientName": "My CLI",
+  "clientUri": "https://example.com",
+  "logoUri": null,
+  "scopes": ["openid", "profile"]
 }
 ```
 
-Erfordert Cookie-Authentifizierung. Genehmigt den Gerätecode für den aktuellen Benutzer. Das Gerät kann den Gerätecode dann über den Token-Endpunkt mit dem Grant-Typ `urn:ietf:params:oauth:grant-type:device_code` gegen Token eintauschen.
+`scopes` ist das, was tatsächlich gewährt würde, nach der benutzerbezogenen Rollenprüfung für rollenbeschränkte Scopes, nicht die rohe Anfrage. Fehler: `401 not_authenticated`, `400 user_code_required`, `400 invalid_user_code` (unbekannt, verbraucht oder abgelaufen), `400 expired`. Der Endpunkt teilt sich das Kontingent der Ratenbegrenzung mit der Zustimmung (siehe unten).
 
-Der übermittelte Code wird vor der Suche gemäß RFC 8628 §6.1 normalisiert: Er wird in Großbuchstaben umgewandelt, und jedes Zeichen außerhalb des 31-stelligen Code-Alphabets wird verworfen. `ABCD-EFGH`, `abcd-efgh`, `ABCDEFGH`, `ABCD EFGH` und ein Einfügen, bei dem aus dem Bindestrich ein Geviertstrich geworden ist, sind alle derselbe Code. Der Bindestrich existiert nur, damit sich der Code leichter vorlesen lässt. Die Eingabe ist auf zehn Versuche pro Minute und Subjekt begrenzt (RFC 8628 §5.1); der elfte gibt `429` zurück. Dieser Zähler gilt beim standardmäßigen In-Prozess-Rate-Limiter pro Knoten, ein Deployment mit mehreren Repliken sollte die Begrenzung daher zusätzlich am Edge durchsetzen.
+### Gerät zulassen {#approve-device}
 
-## Token-Introspektion (RFC 7662)
+```
+POST /api/auth/device/approve
+Content-Type: application/x-www-form-urlencoded
+
+user_code=ABCD-EFGH&scopes=openid+profile
+```
+
+Erfordert Cookie-Authentifizierung und eine Anfrage vom selben Origin. `scopes` ist optional (durch Leerzeichen getrennt): Es kann das, worauf der Benutzer Anspruch hat, nur einschränken, nie erweitern, und wird es weggelassen, wird alles gewährt, worauf Anspruch besteht. Lässt den Gerätecode für den aktuellen Benutzer zu und liefert `200 { "approved": true }`. Das Gerät kann den Gerätecode dann am Token-Endpunkt mit dem Grant-Typ `urn:ietf:params:oauth:grant-type:device_code` gegen Tokens eintauschen.
+
+Der übermittelte Code wird vor der Suche gemäß RFC 8628 §6.1 normalisiert: Er wird in Großbuchstaben umgewandelt, und jedes Zeichen außerhalb des 31 Zeichen umfassenden Code-Alphabets wird verworfen. `ABCD-EFGH`, `abcd-efgh`, `ABCDEFGH`, `ABCD EFGH` und eine Kopie, bei der der Bindestrich zu einem Geviertstrich geworden ist, sind alle derselbe Code. Der Bindestrich dient nur dazu, den Code leichter vorlesen zu können.
+
+| Status | `error` | Bedeutung |
+|---|---|---|
+| 400 | `user_code_required`, `invalid_user_code`, `expired` | Wie bei `info` |
+| 400 | `invalid_scope` | `scopes` wurde angegeben, enthält aber keinen Scope, auf den der Benutzer Anspruch hat |
+| 403 | `access_denied` | Der Benutzer hat auf keinen der angeforderten Scopes Anspruch (`Scope.AllowedRoles`) |
+| 403 | `mfa_enrolment_required` | Die wirksame MFA-Richtlinie des Clients ist `Required`, und der Benutzer hat keinen zweiten Faktor; richten Sie ihn ein und stimmen Sie dann erneut zu |
+
+Die Eingabe ist auf zehn Versuche pro Minute und Subjekt begrenzt (RFC 8628 §5.1), gemeinsam für `info`, `approve` und `deny`; der elfte liefert `429`. Dieser Zähler gilt mit dem standardmäßigen prozessinternen Ratenbegrenzer pro Knoten; ein Deployment mit mehreren Replikaten sollte die Begrenzung daher zusätzlich am Edge durchsetzen.
+
+### Gerät ablehnen {#deny-device}
+
+```
+POST /api/auth/device/deny
+Content-Type: application/x-www-form-urlencoded
+
+user_code=ABCD-EFGH
+```
+
+Erfordert Cookie-Authentifizierung und eine Anfrage vom selben Origin. Hält die Ablehnung des Benutzers fest und liefert `200 { "success": true }`. Die nächste Abfrage des Token-Endpunkts durch das Gerät erhält bis zum Ablauf des Codes `access_denied` (RFC 8628 §3.5) statt `authorization_pending`. Dieselben Fehler und dasselbe Kontingent der Ratenbegrenzung wie bei `info`.
+
+## Token-Introspection (RFC 7662) {#token-introspection-rfc-7662}
 
 ```
 POST /connect/introspect
@@ -408,7 +485,7 @@ Authorization: Basic base64(client_id:client_secret)
 token=eyJhbGci...
 ```
 
-Oder mit formularcodierten Anmeldedaten:
+Oder mit formularkodierten Anmeldedaten:
 
 ```
 POST /connect/introspect
@@ -417,7 +494,7 @@ Content-Type: application/x-www-form-urlencoded
 token=eyJhbGci...&client_id=my-app&client_secret=secret
 ```
 
-Gibt Token-Metadaten zurück:
+Liefert die Metadaten des Tokens:
 
 ```json
 {
@@ -432,17 +509,17 @@ Gibt Token-Metadaten zurück:
 }
 ```
 
-Inaktive oder ungültige Token geben `{ "active": false }` zurück. Unterstützt sowohl JWT-Access-Token als auch opake Refresh-Token.
+Inaktive oder ungültige Tokens liefern `{ "active": false }`. Unterstützt werden sowohl JWT-Access-Tokens als auch opake Refresh Tokens.
 
-## Consent-Endpunkte
+## Endpunkte für die Zustimmung {#consent-endpoints}
 
-### Consent-Informationen
+### Informationen zur Zustimmung {#consent-info}
 
 ```
-GET /consent/info?client_id=my-app&scope=openid%20profile%20email
+GET /consent/info?client_id=my-app
 ```
 
-Gibt Client-Details und die angeforderten Scopes für die Consent-Seite zurück (`scope` ist standardmäßig `openid`, wenn nicht angegeben):
+Erfordert Cookie-Authentifizierung. Liefert die Details des Clients und die angeforderten Scopes für die Zustimmungsseite. Die Scopes werden nicht aus dem Query-String übernommen: Sie sind das Angebot, das der Autorisierungsendpunkt für diesen Benutzer und Client festgehalten hat (nach der Filterung nach Rollenberechtigung), sodass ein manipulierter Link den Namen eines vertrauenswürdigen Clients nicht über eine vom Aufrufer gewählte Berechtigungsliste setzen kann.
 
 ```json
 {
@@ -451,13 +528,37 @@ Gibt Client-Details und die angeforderten Scopes für die Consent-Seite zurück 
   "description": null,
   "clientUri": null,
   "logoUri": null,
-  "scopes": ["openid", "profile", "email"]
+  "scopes": ["openid", "profile", "email"],
+  "scopeDetails": [
+    { "name": "openid", "displayName": null, "description": null, "emphasize": false, "required": false, "group": null },
+    { "name": "profile", "displayName": null, "description": null, "emphasize": false, "required": false, "group": null },
+    { "name": "email", "displayName": null, "description": null, "emphasize": false, "required": false, "group": null }
+  ]
 }
 ```
 
-Gibt `404 client_not_found` für einen unbekannten Client zurück.
+`scopeDetails` verläuft parallel zu `scopes` (gleiche Reihenfolge, ein Eintrag pro Scope), sodass eine Login-App, die nur `scopes` liest, weiter funktioniert. Jeder Eintrag trägt die für diesen Scope registrierte Darstellung:
 
-### Zustimmung übermitteln
+| Feld | Bedeutung |
+|---|---|
+| `name` | Der Name des Scopes, wie in `scopes`. |
+| `displayName` | Der registrierte Anzeigename oder `null`, wenn der Scope nicht registriert ist. |
+| `description` | Die registrierte Beschreibung oder `null`. |
+| `emphasize` | `true`, wenn der Scope als folgenreich registriert ist, sodass der Bildschirm die Aufmerksamkeit darauf lenken darf. Standardmäßig `false`. |
+| `required` | `true`, wenn der Scope als nicht ablehnbar registriert ist: Der Bildschirm zeigt ihn angehakt und gesperrt. Standardmäßig `false`. |
+| `group` | Die Überschrift, unter der der Scope einzuordnen ist, oder `null`, um ihn für sich allein anzuzeigen. |
+
+Ein nicht registrierter Scope ergibt `null` für `displayName`, `description` und `group` sowie `false` für die beiden Flags, und die Login-App greift auf ihre eigenen Formulierungen zurück. Wie Sie die Formulierungen registrieren, steht unter [Scopes](scopes).
+
+Fehler:
+
+| Status | Body | Wann |
+|---|---|---|
+| `401` | keiner | Kein angemeldeter Benutzer. |
+| `404` | `{ "error": "client_not_found" }` | Unbekannte `client_id`. |
+| `400` | `{ "error": "no_pending_consent_request" }` | Für diesen Benutzer und Client gibt es kein gültiges Zustimmungsangebot (es wurde keines festgehalten, oder es ist abgelaufen). |
+
+### Zustimmung übermitteln {#submit-consent}
 
 ```
 POST /consent
@@ -471,15 +572,15 @@ Content-Type: application/json
 }
 ```
 
-Zeichnet die Zustimmungsentscheidung des Benutzers auf (erfordert Cookie-Authentifizierung) und gibt `{ "redirect": "..." }` zurück, wohin die SPA navigieren soll. Bei Zustimmung werden die gewährten Scopes gespeichert (gefiltert auf die `AllowedScopes` des Clients; ein manipulierter Body kann keine Scopes aufzeichnen, die der Client gar nicht anfordern durfte), und die Weiterleitung führt zurück in den Autorisierungsablauf. Bei `"decision": "deny"` führt die Weiterleitung zur `redirect_uri` des Clients mit einem Fehler `access_denied`.
+Hält die Zustimmungsentscheidung des Benutzers fest (erfordert Cookie-Authentifizierung) und liefert `{ "redirect": "..." }`, wohin die SPA navigieren soll. Bei einer Zustimmung werden die gewährten Scopes gespeichert (gefiltert auf die `AllowedScopes` des Clients, sodass ein manipulierter Body keine Scopes festhalten kann, die der Client nicht anfordern könnte), und die Weiterleitung führt zurück in den Autorisierungsablauf. Bei `"decision": "deny"` führt die Weiterleitung zur `redirect_uri` des Clients mit dem Fehler `access_denied`.
 
-### Bewilligungen auflisten
+### Grants auflisten {#list-grants}
 
 ```
 GET /consent/grants
 ```
 
-Gibt alle Anwendungen zurück, die der Benutzer autorisiert hat:
+Liefert alle Anwendungen, die der Benutzer autorisiert hat:
 
 ```json
 [
@@ -492,24 +593,61 @@ Gibt alle Anwendungen zurück, die der Benutzer autorisiert hat:
 ]
 ```
 
-### Bewilligung widerrufen
+### Grant widerrufen {#revoke-grant}
 
 ```
 DELETE /consent/grants/{clientId}
 ```
 
-Widerruft die Zustimmung für eine bestimmte Anwendung. Der Benutzer wird bei seiner nächsten Anmeldung zur erneuten Zustimmung aufgefordert.
+Widerruft die Zustimmung für eine bestimmte Anwendung. Der Benutzer wird bei seiner nächsten Anmeldung erneut um Zustimmung gebeten.
 
-## Eine benutzerdefinierte Login-Oberfläche erstellen
+## Discovery und Signaturschlüssel (JWKS) {#discovery-and-signing-keys-jwks}
 
-Die Standard-SPA (`login-app/`) ist eine Implementierung dieser API. Um Ihre eigene zu erstellen:
+Beide sind öffentlich und anonym zugänglich. Ein Resource Server verwendet sie, um die Tokens zu validieren, die dieser Server ausstellt.
 
-1. Stellen Sie Ihre Oberfläche unter den Pfaden `/login`, `/forgot-password`, `/reset-password`, `/consent`, `/device` bereit
-2. Der Autorisierungsendpunkt leitet nicht authentifizierte Benutzer zu `/login?returnUrl={encoded-authorize-url}` weiter
-3. Nach erfolgreicher Anmeldung (Cookie gesetzt) leiten Sie den Benutzer zur `returnUrl` weiter
-4. Links zum Zurücksetzen des Passworts verwenden `{Issuer}/login/reset-password?p={token}` (die Login-SPA ist unter `/login` eingebunden)
+```
+GET /.well-known/openid-configuration
+GET /.well-known/oauth-authorization-server
+GET /.well-known/openid-configuration/jwks
+```
 
-Ihre Oberfläche muss vom **selben Origin** wie die API bereitgestellt werden, weil:
-- Die Cookie-Authentifizierung `SameSite=Lax` + `HttpOnly` verwendet
-- Der Autorisierungsendpunkt zu `/login` weiterleitet (relativ)
-- Zurücksetzungslinks `{Issuer}/login/reset-password` verwenden
+- Die beiden Metadatenpfade liefern dasselbe Discovery-Dokument; dessen `jwks_uri` ist `{issuer}/.well-known/openid-configuration/jwks`.
+- Das JWKS listet jeden nicht abgelaufenen Signaturschlüssel auf (`kty`, `use`, `kid`, `alg` sowie `crv`/`x`/`y` für die EC-Schlüssel). Bei der Rotation wird der nächste Schlüssel Tage im Voraus veröffentlicht, sodass einer zwischengespeicherten Kopie nie der Schlüssel fehlt, mit dem ein Token signiert wurde.
+- Antworten tragen `Cache-Control: public, max-age=3600`.
+- Signiert wird ausschließlich mit ES256; die Discovery gibt `id_token_signing_alg_values_supported: ["ES256"]` an.
+- Der Issuer stammt aus `ITenantContext`, die Schlüssel aus `IKeyManager`; ein mandantenfähiger Host mit einem Key Manager pro Mandant liefert daher Schlüssel pro Mandant aus.
+
+## Verhalten des Autorisierungsendpunkts {#authorization-endpoint-behaviour}
+
+`GET /connect/authorize` ist der Einstiegspunkt für den Authorization Code Flow. Zwei Verhaltensweisen sind für jeden wichtig, der dagegen einen Client oder eine Login-UI baut.
+
+### Issuer in der Antwort (RFC 9207) {#issuer-in-the-response-rfc-9207}
+
+Jede Weiterleitung zurück an die `redirect_uri` des Clients trägt einen Query-Parameter `iss` mit dem Issuer, sowohl bei Erfolg (neben `code` und `state`) als auch bei einem Fehler (neben `error`, `error_description` und `state`). Dasselbe gilt für die Fehlerweiterleitung, wenn ein Benutzer die Zustimmung unter `/consent` verweigert. Das Discovery-Dokument gibt dies mit `authorization_response_iss_parameter_supported: true` an. Ein Client, der mit mehreren Autorisierungsservern spricht, sollte `iss` mit dem Issuer vergleichen, bei dem er den Ablauf begonnen hat; genau das vereitelt den Mix-up-Angriff. Clients, die den Parameter ignorieren, sind nicht betroffen. Fehler, die auftreten, bevor eine vertrauenswürdige `redirect_uri` bekannt ist (unbekannte `client_id`, eine nicht registrierte Redirect-URI), werden als JSON-Fehlerbody statt als Weiterleitung zurückgegeben; dort gibt es also kein `iss`.
+
+### `prompt` und `max_age` {#prompt-and-max_age}
+
+| Anfrage | Verhalten |
+|---|---|
+| `prompt=login` | Eine bestehende Sitzung wird abgemeldet, und der Benutzer wird zur erneuten Authentifizierung zu `/login` geschickt. Der `prompt` wird aus der `returnUrl` entfernt, damit die neue Anmeldung nicht in einer Schleife eine erneute Authentifizierung erzwingt. Bei einer [übertragenen Anfrage](par) reist der Prompt in der gespeicherten Nutzlast mit, und die Schleife wird aufgelöst, indem verlangt wird, dass die `auth_time` der Sitzung zum Zeitpunkt der Übertragung der Anfrage oder danach liegt |
+| `prompt=select_account` | Wird wie `prompt=login` behandelt: Der Server hält eine Sitzung pro Browser, die Kontoauswahl ist also der Anmeldebildschirm |
+| `prompt=create` | Ein nicht authentifizierter Benutzer wird statt zum Anmeldeformular zu `/login/register` geschickt. Eine bestehende Sitzung fährt einfach fort |
+| `prompt=consent` | Der Zustimmungsbildschirm wird auch dann angezeigt, wenn ein gespeicherter Grant die Anfrage erfüllen würde, einmal pro Anfrage (die Markierung für die erfüllte Zustimmung ist nur einmal verwendbar) |
+| `prompt=none` | Es wird nie eine UI angezeigt. Der Server antwortet mit einer Weiterleitung, die `login_required` (keine Sitzung), `interaction_required` (MFA-Step-up oder -Einrichtung nötig) oder `consent_required` (Zustimmung nötig) trägt |
+| `max_age=N` | Ist die `auth_time` der Sitzung älter als `N` Sekunden oder fehlt sie, wird der Benutzer genau wie bei `prompt=login` erneut authentifiziert. `max_age=0` authentifiziert immer erneut |
+
+`prompt=none` in Kombination mit einem anderen Wert wird mit `invalid_request` abgelehnt, ebenso jeder Wert außer `none`, `login`, `consent`, `select_account` und `create`. Der einbettbare `Authagonal.Protocol`-Host berücksichtigt `prompt=login`, `select_account`, `none` und `max_age` auf dieselbe Weise, hat aber keine Zustimmungsoberfläche und antwortet daher auf `prompt=consent` mit `consent_required`.
+
+## Eine eigene Login-UI bauen {#building-a-custom-login-ui}
+
+Die Standard-SPA (`login-app/`) ist eine Implementierung dieser API. So bauen Sie Ihre eigene:
+
+1. Stellen Sie Ihre UI unter den Pfaden `/login`, `/forgot-password`, `/reset-password`, `/consent`, `/device` bereit
+2. Der Autorisierungsendpunkt leitet nicht authentifizierte Benutzer auf `/login?returnUrl={encoded-authorize-url}` weiter
+3. Leiten Sie den Benutzer nach erfolgreicher Anmeldung (Cookie gesetzt) zur `returnUrl` weiter
+4. Links zum Zurücksetzen des Passworts verwenden `{Issuer}/login/reset-password?p={token}` (die Login-SPA ist unter `/login` eingehängt)
+
+Ihre UI muss vom **selben Origin** wie die API ausgeliefert werden, weil:
+- die Cookie-Authentifizierung `SameSite=Lax` + `HttpOnly` verwendet
+- der Autorisierungsendpunkt auf `/login` (relativ) weiterleitet
+- Links zum Zurücksetzen `{Issuer}/login/reset-password` verwenden

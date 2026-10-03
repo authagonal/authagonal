@@ -25,8 +25,8 @@ dotnet run --project tools/Authagonal.Backup -- \
 | `--tables <t1,t2,...>` | Comma-separated list of tables (default: all Authagonal tables) |
 | `--prefix <prefix>` | Table name prefix (for multi-tenant storage) |
 | `--gzip` | Compress backup files with gzip (`.jsonl.gz`) |
-| `--encryption-key <base64>` | 32-byte AES-256 key-encryption key. Encrypts every data file. Keep it **outside** the backup target. Also reads `BACKUP_ENCRYPTION_KEY` — prefer that; see below. |
-| `--manifest-key <base64>` | ≥32-byte HMAC key. Signs the manifest so restore can prove the recorded hashes were not rewritten with the files. Keep it **outside** the backup target. Also reads `BACKUP_MANIFEST_KEY` — prefer that; see below. |
+| `--encryption-key <base64>` | 32-byte AES-256 key-encryption key. Encrypts every data file. Keep it **outside** the backup target. Also reads `BACKUP_ENCRYPTION_KEY` (prefer that; see below). |
+| `--manifest-key <base64>` | ≥32-byte HMAC key. Signs the manifest so restore can prove the recorded hashes were not rewritten with the files. Keep it **outside** the backup target. Also reads `BACKUP_MANIFEST_KEY` (prefer that; see below). |
 | `--dry-run` | Show what would be backed up without writing |
 
 ### Output format
@@ -49,7 +49,7 @@ backups/
 
 With `--prefix`, backups are nested one level deeper, under the prefix: `backups/acmecorp/20260329-120000/`.
 This is what keeps two tenants' full backups landing in the same `--output` directory in the same
-second from colliding — the backup id itself is still a bare `yyyyMMdd-HHmmss[-incr]` timestamp with
+second from colliding. The backup id itself is still a bare `yyyyMMdd-HHmmss[-incr]` timestamp with
 one-second resolution and no prefix in it, so without the nesting, two prefixes backed up within the
 same second would get the identical id and therefore the identical directory. Point `--input` at the
 nested directory to restore from it (`--input backups/acmecorp/20260329-120000`); unprefixed runs are
@@ -63,7 +63,7 @@ Entity values round-trip exactly: each backed-up row carries a `"@v"` format mar
 
 ### Integrity verification
 
-Each backup manifest includes a `FileHashes` dictionary mapping filenames to their SHA-256 hashes. During restore each file is verified against its recorded hash — from the same read the entities are applied from, so the bytes that were checked are the bytes that get written — before any of its data reaches a table. A file that fails the check, a data file absent from the manifest, or a manifest-listed file missing from the store all abort the restore. Backups written before integrity hashing existed (no `FileHashes`) cannot be verified and are refused unless `--allow-unverified`. Verification can be disabled programmatically via `RestoreOptions.VerifyIntegrity` (default `true`).
+Each backup manifest includes a `FileHashes` dictionary mapping filenames to their SHA-256 hashes. During restore each file is verified against its recorded hash (from the same read the entities are applied from, so the bytes that were checked are the bytes that get written) before any of its data reaches a table. A file that fails the check, a data file absent from the manifest, or a manifest-listed file missing from the store all abort the restore. Backups written before integrity hashing existed (no `FileHashes`) cannot be verified and are refused unless `--allow-unverified`. Verification can be disabled programmatically via `RestoreOptions.VerifyIntegrity` (default `true`).
 
 ### Pass the keys by environment variable, not on the command line
 
@@ -71,7 +71,7 @@ Both tools read `BACKUP_ENCRYPTION_KEY` and `BACKUP_MANIFEST_KEY`, and a schedul
 
 A flag becomes the process's command line. In Kubernetes that means the CronJob spec literally contains the
 base64 KEK and the HMAC key, so anyone with `get`/`list` on cronjobs or pods in that namespace can read both
-with `kubectl get cronjob -o yaml` — a far wider set of principals than the holders of the Secret, and one
+with `kubectl get cronjob -o yaml`, a far wider set of principals than the holders of the Secret, and one
 routinely granted to read-only dashboards and CI service accounts. The same values are visible in
 `/proc/<pid>/cmdline` to any process on the node, and in whatever shell history or CI log assembled the
 command. `--connection-string` has had an environment path for exactly this reason; the two keys that protect
@@ -87,7 +87,7 @@ env:
 
 A flag still wins if both are set, so an interactive one-off restore needs no change.
 
-Hashes establish that the archive matches the manifest, not that either is authentic: the manifest sits on the same target as the data, so whoever can rewrite `Clients.jsonl.gz` can rewrite the line recording its hash. `--manifest-key` closes that — the backup HMACs the manifest, the restore verifies it, and the key lives somewhere the backup writer cannot reach. **Restore fails closed**: with no `--manifest-key` it refuses rather than warning, and `--allow-unauthenticated-manifest` is the explicit opt-out for archives written before manifest signing.
+Hashes establish that the archive matches the manifest, not that either is authentic: the manifest sits on the same target as the data, so whoever can rewrite `Clients.jsonl.gz` can rewrite the line recording its hash. `--manifest-key` closes that: the backup HMACs the manifest, the restore verifies it, and the key lives somewhere the backup writer cannot reach. **Restore fails closed**: with no `--manifest-key` it refuses rather than warning, and `--allow-unauthenticated-manifest` is the explicit opt-out for archives written before manifest signing.
 
 ### Incremental backups
 
@@ -101,7 +101,9 @@ Every incremental `Timestamp` filter subtracts a small safety margin (`BackupDef
 
 The backup tool includes all Authagonal tables by default (`BackupDefaults.Tables`):
 
-`Users`, `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `Clients`, `Grants`, `GrantsBySubject`, `GrantsByExpiry`, `SigningKeys`, `SsoDomains`, `SamlProviders`, `OidcProviders`, `UserProvisions`, `MfaCredentials`, `MfaChallenges`, `MfaWebAuthnIndex`, `ScimTokens`, `ScimGroups`, `ScimGroupExternalIds`, `ScimGroupRoleMappings`, `Roles`, `Scopes`, `ProvisioningApps`
+`Users`, `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `UserOrganizations`, `Clients`, `Grants`, `GrantsBySubject`, `GrantsByExpiry`, `SigningKeys`, `SsoDomains`, `SamlProviders`, `OidcProviders`, `UpstreamRefreshTokens`, `UserProvisions`, `MfaCredentials`, `MfaChallenges`, `MfaWebAuthnIndex`, `ScimTokens`, `ScimGroups`, `ScimGroupExternalIds`, `ScimGroupRoleMappings`, `Roles`, `UserRoles`, `Scopes`, `AgentProfiles`, `ProvisioningApps`, `Organizations`, `OrganizationSlugs`, `OrganizationMembers`, `UserMemberships`
+
+`AgentProfiles`, `UserRoles` and `UpstreamRefreshTokens` are in the set deliberately: without them a restored deployment is quietly weaker than the one backed up (agent clients lose their ceiling and consent gates, roles are defined but nobody holds them, upstream refresh tokens vanish).
 
 Transient tables (`SamlReplayCache`, `OidcStateStore`, `RevokedTokens`) are excluded by default since their entries are bounded by token lifetimes; include them explicitly with `--tables` if needed. The `Tombstones` change-log table is handled separately by the backup engine and should not be listed.
 
@@ -113,8 +115,8 @@ The `SigningKeys` table is in the default table list but **filtered out of backu
 
 ### `--tables` names tables from the backup set
 
-Only tables in `BackupDefaults.Tables` may be named. A table outside it is refused up front rather than
-producing an archive the restore would reject — restore's allowlist is that same set, so an archive naming
+Only tables in the declared table set (`BackupDefaults.Tables`, or `KnownTables` below) may be named. A table outside it is refused up front rather than
+producing an archive the restore would reject. Restore's allowlist is that same set, so an archive naming
 anything else could be written, hashed and signed and then never restored. Transient tables (revoked-token
 entries, rate-limit counters) are excluded deliberately: they expire on their own, and restoring stale rows
 achieves nothing.
@@ -171,6 +173,13 @@ Rows written with the `"@v"` format marker carry explicit EDM type annotations, 
 | `1` | Error (missing arguments, invalid input) |
 | `2` | Partial success (some entities had errors) |
 
+### A host with its own tables: `KnownTables`
+
+`BackupOptions.KnownTables` and `RestoreOptions.KnownTables` (both `string[]?`, null means `BackupDefaults.Tables`) declare the set of tables it is legitimate for an archive of your deployment to name. A host that stores its own data beside Authagonal's and backs the two up as one archive sets it, otherwise every backup naming those tables is refused up front (`BackupService.cs:48`) and every restore refuses the archive (`RestoreService.cs:17,167`).
+
+- The host declares the set ahead of time. It is never derived from the archive, which is the point: an archive does not get to choose which tables a restore writes.
+- Pass the **same** set to both options. A backup taken with a wider set restores only through a restore declaring the same one.
+
 ## Using the library
 
 The `Authagonal.Backup` NuGet package exposes the same operations programmatically, for background services or custom orchestration:
@@ -200,7 +209,7 @@ With the change-log path enabled, an incremental backup enumerates a table's `Op
 
 | Preset | Contents |
 |---|---|
-| `BackupDefaults.ChangeLoggedTables` | The tables whose writes are fully change-log captured |
+| `BackupDefaults.ChangeLoggedTables` | The tables whose writes are fully change-log captured: `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `UserOrganizations`, `ScimGroupRoleMappings`, `ProvisioningApps`, `Organizations`, `OrganizationSlugs`, `OrganizationMembers`, `UserMemberships` |
 | `BackupDefaults.ChangeLoggedTablesWithUsers` | The same set plus `Users`. Users' login-state writes are deliberately not captured (hot path, low value), so this preset is **only safe when you also run the full-scan backstop below** |
 
 The manifest's `ChangeLogTables` property lists which tables a run read via the change-log; null or empty means the run had full scan coverage (a full backup, a plain scan incremental, or a backstop scan).

@@ -1,13 +1,14 @@
 ---
 layout: default
-title: Backup & Restore
+title: Sao lưu & khôi phục
+locale: vi
 ---
 
-# Sao lưu & Khôi phục
+# Sao lưu & khôi phục
 
-Authagonal cung cấp hai công cụ CLI để sao lưu và khôi phục dữ liệu Azure Table Storage. Cả hai đều là ứng dụng console .NET trong thư mục `tools/`, và cả hai đều là lớp bọc mỏng trên gói NuGet `Authagonal.Backup`. Các host cần sao lưu theo lịch, đa tenant, hoặc không dựa trên hệ thống tệp có thể sử dụng thư viện trực tiếp (xem [Sử dụng thư viện](#sử-dụng-thư-viện)).
+Authagonal cung cấp hai công cụ CLI để sao lưu và khôi phục dữ liệu Azure Table Storage. Cả hai đều là ứng dụng console .NET trong thư mục `tools/`, và cả hai đều là lớp bọc mỏng bên ngoài gói NuGet `Authagonal.Backup`. Các host cần sao lưu theo lịch, đa tenant, hoặc không dựa trên hệ thống tệp có thể dùng trực tiếp thư viện (xem [Dùng thư viện](#using-the-library)).
 
-## Sao lưu
+## Sao lưu {#backup}
 
 ```bash
 dotnet run --project tools/Authagonal.Backup -- \
@@ -15,69 +16,113 @@ dotnet run --project tools/Authagonal.Backup -- \
   --output ./backups
 ```
 
-### Tùy chọn
+### Tùy chọn {#options}
 
 | Tùy chọn | Mô tả |
 |---|---|
-| `--connection-string <conn>` | Chuỗi kết nối Azure Table Storage (hoặc đặt biến môi trường `STORAGE_CONNECTION_STRING`) |
+| `--connection-string <conn>` | Connection string của Azure Table Storage (hoặc đặt biến môi trường `STORAGE_CONNECTION_STRING`) |
 | `--output <dir>` | Thư mục đầu ra (mặc định: `./backups`) |
-| `--incremental` | Chỉ sao lưu các thực thể đã thay đổi kể từ lần sao lưu cuối |
-| `--tables <t1,t2,...>` | Danh sách bảng phân cách bằng dấu phẩy (mặc định: tất cả bảng Authagonal) |
+| `--incremental` | Chỉ sao lưu các entity đã thay đổi kể từ lần sao lưu trước |
+| `--tables <t1,t2,...>` | Danh sách bảng phân cách bằng dấu phẩy (mặc định: mọi bảng của Authagonal) |
 | `--prefix <prefix>` | Tiền tố tên bảng (cho lưu trữ đa tenant) |
 | `--gzip` | Nén các tệp sao lưu bằng gzip (`.jsonl.gz`) |
+| `--encryption-key <base64>` | Khóa mã hóa khóa (KEK) AES-256 dài 32 byte. Mã hóa mọi tệp dữ liệu. Hãy giữ nó **bên ngoài** đích sao lưu. Cũng đọc từ `BACKUP_ENCRYPTION_KEY` (nên dùng cách này; xem bên dưới). |
+| `--manifest-key <base64>` | Khóa HMAC dài ≥32 byte. Ký manifest để bước khôi phục chứng minh được rằng các hash đã ghi không bị viết lại cùng với các tệp. Hãy giữ nó **bên ngoài** đích sao lưu. Cũng đọc từ `BACKUP_MANIFEST_KEY` (nên dùng cách này; xem bên dưới). |
 | `--dry-run` | Hiển thị những gì sẽ được sao lưu mà không ghi |
 
-### Định dạng đầu ra
+### Định dạng đầu ra {#output-format}
 
-Mỗi bản sao lưu tạo một thư mục có dấu thời gian:
+Mỗi lần sao lưu tạo một thư mục gắn dấu thời gian:
 
 ```
 backups/
-  20260329-120000/          (sao lưu đầy đủ)
+  20260329-120000/          (full backup)
     Users.jsonl
     Clients.jsonl
     Grants.jsonl
     ...
     _manifest.json
-  20260329-180000-incr/     (gia tăng, nén)
+  20260329-180000-incr/     (incremental, compressed)
     Users.jsonl.gz
     _tombstones.jsonl.gz
     _manifest.json
 ```
 
-Mỗi tệp `.jsonl` chứa một đối tượng JSON trên mỗi dòng (một cho mỗi thực thể bảng). Với `--gzip`, các tệp được nén thành `.jsonl.gz`. `_manifest.json` ghi lại id sao lưu, dấu thời gian, chế độ (`full` hoặc `incremental`), nén, mốc nước gia tăng, số lượng thực thể trên mỗi bảng, số lượng tombstone, những bảng nào (nếu có) được đọc qua nhật ký thay đổi (`ChangeLogTables`, null nghĩa là quét đầy đủ toàn bộ), và các hash tệp SHA-256 để xác minh tính toàn vẹn.
+Với `--prefix`, các bản sao lưu được lồng sâu thêm một cấp, dưới tiền tố: `backups/acmecorp/20260329-120000/`.
+Chính điều này giúp bản sao lưu đầy đủ của hai tenant cùng rơi vào một thư mục `--output` trong cùng
+một giây không bị đụng nhau. Bản thân backup id vẫn chỉ là một dấu thời gian `yyyyMMdd-HHmmss[-incr]` trần với
+độ phân giải một giây và không chứa tiền tố, nên nếu không lồng thư mục, hai tiền tố được sao lưu trong
+cùng một giây sẽ nhận id giống hệt nhau và do đó cùng một thư mục. Trỏ `--input` vào
+thư mục lồng đó để khôi phục từ nó (`--input backups/acmecorp/20260329-120000`); các lần chạy không có tiền tố
+không bị ảnh hưởng và giữ bố cục phẳng như trên.
 
-Các bản sao lưu gia tăng cũng ghi một tệp `_tombstones.jsonl(.gz)` ghi lại các lần xóa kể từ mốc nước: mỗi dòng cho một hàng đã xóa với `Table`, `PartitionKey`, `RowKey`, và `DeletedAt`. Việc khôi phục sẽ phát lại những mục này để các hàng đã xóa không bị dựng lại (xem [Phát lại tombstone](#phát-lại-tombstone)).
+Mỗi tệp `.jsonl` chứa một đối tượng JSON trên mỗi dòng (mỗi đối tượng ứng với một entity trong bảng). Với `--gzip`, các tệp được nén thành `.jsonl.gz`. `_manifest.json` ghi lại backup id, dấu thời gian, chế độ (`full` hoặc `incremental`), kiểu nén, watermark tăng dần, số entity theo từng bảng, số tombstone, những bảng nào (nếu có) được đọc qua change-log (`ChangeLogTables`, null nghĩa là có độ phủ quét toàn bộ), và hash SHA-256 của các tệp để kiểm tra tính toàn vẹn.
 
-Giá trị thực thể được bảo toàn chính xác qua khứ hồi: mỗi hàng được sao lưu mang một dấu định dạng `"@v"` và một chú thích `"{column}@odata.type"` tường minh (`Edm.Guid`, `Edm.DateTime`, `Edm.Binary`, `Edm.Int64`, `Edm.Double`) cho mọi cột mà JSON không thể biểu diễn một cách rõ ràng, nên việc khôi phục ghi lại đúng các kiểu gốc thay vì các giá trị đã bị chuyển thành chuỗi hoặc suy luận lại.
+Bản sao lưu tăng dần cũng ghi một tệp `_tombstones.jsonl(.gz)` ghi lại các thao tác xóa kể từ watermark: mỗi dòng ứng với một hàng bị xóa, gồm `Table`, `PartitionKey`, `RowKey` và `DeletedAt`. Bước khôi phục phát lại các dòng này để hàng đã xóa không bị sống lại (xem [Phát lại tombstone](#tombstone-replay)).
 
-### Xác minh tính toàn vẹn
+Giá trị entity được giữ nguyên chính xác qua vòng sao lưu và khôi phục: mỗi hàng được sao lưu mang một dấu định dạng `"@v"` và một chú thích `"{column}@odata.type"` tường minh (`Edm.Guid`, `Edm.DateTime`, `Edm.Binary`, `Edm.Int64`, `Edm.Double`) cho mọi cột mà JSON không thể biểu diễn một cách không mơ hồ, nên bước khôi phục ghi lại đúng kiểu gốc thay vì giá trị bị chuyển thành chuỗi hoặc bị suy luận lại.
 
-Mỗi manifest sao lưu bao gồm một từ điển `FileHashes` ánh xạ tên tệp tới các hash SHA-256 của chúng. Trong quá trình khôi phục, tính toàn vẹn của mỗi tệp được xác minh dựa trên các hash này trước khi bất kỳ dữ liệu nào của nó được ghi; một tệp không vượt qua kiểm tra, hoặc một tệp dữ liệu vắng mặt trong manifest, sẽ hủy bỏ việc khôi phục với một lỗi. Các bản sao lưu được ghi trước khi có băm toàn vẹn (không có `FileHashes` trong manifest) không thể xác minh và được khôi phục kèm một cảnh báo lớn thay vào đó. Việc xác minh có thể tắt bằng cách lập trình qua `RestoreOptions.VerifyIntegrity` (mặc định `true`).
+### Kiểm tra tính toàn vẹn {#integrity-verification}
 
-### Sao lưu gia tăng
+Mỗi manifest sao lưu có một từ điển `FileHashes` ánh xạ tên tệp tới hash SHA-256 của chúng. Trong khi khôi phục, mỗi tệp được kiểm tra với hash đã ghi (dựa trên chính lượt đọc mà các entity được áp dụng từ đó, nên những byte được kiểm tra chính là những byte được ghi) trước khi bất kỳ dữ liệu nào của nó tới được bảng. Một tệp không qua được bước kiểm tra, một tệp dữ liệu không có trong manifest, hay một tệp có trong manifest nhưng thiếu trong kho đều làm hủy bước khôi phục. Các bản sao lưu được ghi trước khi có tính năng hash toàn vẹn (không có `FileHashes`) không thể được kiểm tra và bị từ chối trừ khi có `--allow-unverified`. Có thể tắt việc kiểm tra bằng code qua `RestoreOptions.VerifyIntegrity` (mặc định `true`).
 
-Sử dụng `--incremental` để chỉ sao lưu các thực thể đã được sửa đổi kể từ lần sao lưu thành công cuối cùng. Công cụ sử dụng thuộc tính `Timestamp` tích hợp của Azure Table Storage để lọc và theo dõi mốc nước cao trong tệp `.lastbackup` trong thư mục đầu ra.
+### Truyền khóa qua biến môi trường, không qua dòng lệnh {#pass-the-keys-by-environment-variable-not-on-the-command-line}
 
-Nếu không có tệp `.lastbackup`, lần chạy gia tăng đầu tiên sẽ thực hiện sao lưu đầy đủ.
+Cả hai công cụ đều đọc `BACKUP_ENCRYPTION_KEY` và `BACKUP_MANIFEST_KEY`, và một bản sao lưu theo lịch nên dùng chúng.
 
-Mỗi bộ lọc `Timestamp` gia tăng trừ đi một biên độ an toàn nhỏ (`BackupDefaults.WatermarkSkewMargin`, 5 phút) trước khi lọc. Mốc nước đến từ đồng hồ của bên gọi trong khi dấu thời gian của hàng được đóng bởi dịch vụ lưu trữ, nên một thay đổi được commit trong khoảng lệch đồng hồ nếu không sẽ bị bỏ sót bởi lần chạy này và mọi lần chạy sau đó. Việc đọc lại biên độ tốn một vài hàng trùng lặp mỗi lần chạy, mà ngữ nghĩa upsert của khôi phục sẽ khử trùng lặp.
+Một cờ sẽ trở thành một phần dòng lệnh của tiến trình. Trong Kubernetes, điều đó có nghĩa là đặc tả CronJob chứa nguyên văn
+KEK dạng base64 và khóa HMAC, nên bất kỳ ai có quyền `get`/`list` trên cronjob hoặc pod trong namespace đó đều đọc được cả hai
+bằng `kubectl get cronjob -o yaml`, một tập chủ thể rộng hơn nhiều so với những ai nắm giữ Secret, và là quyền
+thường được cấp cho dashboard chỉ đọc và service account của CI. Các giá trị đó cũng hiển thị trong
+`/proc/<pid>/cmdline` với mọi tiến trình trên node, và trong bất kỳ lịch sử shell hay log CI nào đã ghép nên
+lệnh. `--connection-string` đã có đường truyền qua biến môi trường chính vì lý do này; hai khóa bảo vệ
+kho lưu trữ thì trước đây chưa có.
 
-### Bảng mặc định
+```yaml
+env:
+  - name: BACKUP_ENCRYPTION_KEY
+    valueFrom: { secretKeyRef: { name: authagonal-backup, key: encryption-key } }
+  - name: BACKUP_MANIFEST_KEY
+    valueFrom: { secretKeyRef: { name: authagonal-backup, key: manifest-key } }
+```
 
-Công cụ sao lưu bao gồm tất cả các bảng Authagonal theo mặc định (`BackupDefaults.Tables`):
+Nếu đặt cả hai thì cờ vẫn được ưu tiên, nên một lần khôi phục thủ công tương tác không cần thay đổi gì.
 
-`Users`, `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `Clients`, `Grants`, `GrantsBySubject`, `GrantsByExpiry`, `SigningKeys`, `SsoDomains`, `SamlProviders`, `OidcProviders`, `UserProvisions`, `MfaCredentials`, `MfaChallenges`, `MfaWebAuthnIndex`, `ScimTokens`, `ScimGroups`, `ScimGroupExternalIds`, `ScimGroupRoleMappings`, `Roles`, `Scopes`, `ProvisioningApps`
+Hash xác lập rằng kho lưu trữ khớp với manifest, chứ không chứng minh cái nào là xác thực: manifest nằm trên cùng đích với dữ liệu, nên ai có thể viết lại `Clients.jsonl.gz` cũng có thể viết lại dòng ghi hash của nó. `--manifest-key` bịt lỗ hổng đó: bản sao lưu tính HMAC cho manifest, bước khôi phục kiểm tra nó, và khóa nằm ở nơi mà bên ghi bản sao lưu không với tới được. **Khôi phục đóng khi lỗi**: không có `--manifest-key` thì nó từ chối thay vì chỉ cảnh báo, và `--allow-unauthenticated-manifest` là lựa chọn tường minh để bỏ qua cho các kho lưu trữ được ghi trước khi có tính năng ký manifest.
 
-Các bảng tạm thời (`SamlReplayCache`, `OidcStateStore`, `RevokedTokens`) bị loại trừ theo mặc định vì các mục của chúng bị giới hạn bởi thời gian sống của token; thêm chúng rõ ràng với `--tables` nếu cần. Bảng nhật ký thay đổi `Tombstones` được engine sao lưu xử lý riêng và không nên được liệt kê.
+### Sao lưu tăng dần {#incremental-backups}
 
-### Khóa ký bị loại trừ theo mặc định
+Truyền `--incremental` để chỉ sao lưu các entity bị sửa đổi kể từ lần sao lưu thành công gần nhất. Công cụ dùng thuộc tính `Timestamp` dựng sẵn của Azure Table Storage để lọc và theo dõi watermark cao nhất trong một tệp `.lastbackup` ở thư mục đầu ra.
 
-Bảng `SigningKeys` nằm trong danh sách bảng mặc định nhưng **bị lọc ra khỏi các bản sao lưu theo mặc định** (`BackupOptions.IncludeSigningKeys`, mặc định `false`; CLI không bao giờ bật nó). Đối với các host sử dụng nguồn khóa cục bộ (lưu trong bảng), bảng này chứa **khóa riêng** ký JWT, và ghi nó vào một tệp sao lưu văn bản thuần sẽ cho phép bất kỳ ai đọc được bản sao lưu giả mạo token. (Các host ký qua HashiCorp Vault Transit không giữ khóa riêng nào trong bảng, nên mối lo này không áp dụng cho chúng.)
+Nếu chưa có tệp `.lastbackup`, lần chạy tăng dần đầu tiên sẽ thực hiện sao lưu đầy đủ.
 
-> ⚠️ Chỉ tùy chọn bật qua `BackupOptions.IncludeSigningKeys` khi chính đích sao lưu được mã hóa khi lưu trữ và được kiểm soát truy cập. Điều tương tự áp dụng cho phần còn lại của bản sao lưu: với nhà cung cấp bí mật **văn bản thuần** mặc định, các bản sao lưu cũng chứa bí mật của client OIDC thượng nguồn và seed TOTP / MFA dưới dạng văn bản rõ. Xem [Cấu hình → Nhà cung cấp bí mật](configuration#nhà-cung-cấp-bí-mật).
+Mọi bộ lọc `Timestamp` tăng dần đều trừ đi một biên an toàn nhỏ (`BackupDefaults.WatermarkSkewMargin`, 5 phút) trước khi lọc. Watermark đến từ đồng hồ của bên gọi trong khi dấu thời gian của hàng do dịch vụ lưu trữ đóng, nên nếu không có biên này, một thay đổi được commit trong khoảng lệch đồng hồ sẽ bị lần chạy này và mọi lần chạy sau bỏ sót. Việc đọc lại phần biên chỉ tốn vài hàng trùng lặp mỗi lần chạy, và ngữ nghĩa upsert của bước khôi phục sẽ loại trùng.
 
-## Khôi phục
+### Bảng mặc định {#default-tables}
+
+Công cụ sao lưu mặc định bao gồm mọi bảng của Authagonal (`BackupDefaults.Tables`):
+
+`Users`, `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `UserOrganizations`, `Clients`, `Grants`, `GrantsBySubject`, `GrantsByExpiry`, `SigningKeys`, `SsoDomains`, `SamlProviders`, `OidcProviders`, `UpstreamRefreshTokens`, `UserProvisions`, `MfaCredentials`, `MfaChallenges`, `MfaWebAuthnIndex`, `ScimTokens`, `ScimGroups`, `ScimGroupExternalIds`, `ScimGroupRoleMappings`, `Roles`, `UserRoles`, `Scopes`, `AgentProfiles`, `ProvisioningApps`, `Organizations`, `OrganizationSlugs`, `OrganizationMembers`, `UserMemberships`
+
+`AgentProfiles`, `UserRoles` và `UpstreamRefreshTokens` được đưa vào tập này có chủ đích: thiếu chúng, một bản triển khai được khôi phục sẽ âm thầm yếu hơn bản đã được sao lưu (agent client mất giới hạn trần và các cổng chấp thuận, vai trò được định nghĩa nhưng không ai nắm giữ, refresh token phía trên biến mất).
+
+Các bảng tạm thời (`SamlReplayCache`, `OidcStateStore`, `RevokedTokens`) mặc định bị loại trừ vì các mục trong đó bị giới hạn bởi thời gian sống của token; hãy đưa chúng vào một cách tường minh bằng `--tables` nếu cần. Bảng change-log `Tombstones` được engine sao lưu xử lý riêng và không nên được liệt kê.
+
+### Khóa ký mặc định bị loại trừ {#signing-keys-are-excluded-by-default}
+
+Bảng `SigningKeys` có trong danh sách bảng mặc định nhưng **mặc định bị lọc khỏi bản sao lưu** (`BackupOptions.IncludeSigningKeys`, mặc định `false`; CLI không bao giờ bật nó). Với các host dùng nguồn khóa cục bộ (lưu trong bảng), bảng này chứa **khóa riêng** dùng để ký JWT, và ghi nó vào một tệp sao lưu plaintext sẽ cho phép bất kỳ ai đọc được bản sao lưu giả mạo token. Điều này áp dụng cho **mọi** host: việc ký JWT không được ủy thác cho Vault Transit, nên không có cấu hình nào mà bảng `SigningKeys` không chứa khóa riêng.
+
+> ⚠️ Chỉ chọn bật qua `BackupOptions.IncludeSigningKeys` khi bản thân đích sao lưu đã được mã hóa khi lưu trữ và được kiểm soát truy cập. Điều tương tự áp dụng cho phần còn lại của bản sao lưu: với secret provider **plaintext** mặc định, bản sao lưu cũng chứa client secret OIDC phía upstream và seed TOTP / MFA dưới dạng văn bản rõ. Xem [Cấu hình → Secret Provider](configuration#secret-provider).
+
+### `--tables` chỉ định bảng thuộc tập sao lưu {#--tables-names-tables-from-the-backup-set}
+
+Chỉ những bảng trong tập bảng đã khai báo (`BackupDefaults.Tables`, hoặc `KnownTables` bên dưới) mới được chỉ định. Một bảng nằm ngoài tập đó bị từ chối ngay từ đầu thay vì
+tạo ra một kho lưu trữ mà bước khôi phục sẽ từ chối. Danh sách cho phép của bước khôi phục chính là tập đó, nên một kho lưu trữ chỉ định
+bất kỳ thứ gì khác có thể được ghi, tính hash và ký, rồi không bao giờ khôi phục được. Các bảng tạm thời (mục token
+bị thu hồi, bộ đếm giới hạn tốc độ) bị loại trừ có chủ đích: chúng tự hết hạn, và khôi phục các hàng cũ
+chẳng đạt được gì.
+
+## Khôi phục {#restore}
 
 ```bash
 dotnet run --project tools/Authagonal.Restore -- \
@@ -85,56 +130,70 @@ dotnet run --project tools/Authagonal.Restore -- \
   --input ./backups/20260329-120000
 ```
 
-### Tùy chọn
+### Tùy chọn {#options-1}
 
 | Tùy chọn | Mô tả |
 |---|---|
-| `--connection-string <conn>` | Chuỗi kết nối Azure Table Storage (hoặc đặt biến môi trường `STORAGE_CONNECTION_STRING`) |
-| `--input <dir>` | Thư mục sao lưu để khôi phục |
+| `--connection-string <conn>` | Connection string của Azure Table Storage (hoặc đặt biến môi trường `STORAGE_CONNECTION_STRING`) |
+| `--input <dir>` | Thư mục sao lưu để khôi phục từ đó |
 | `--mode <mode>` | Chế độ khôi phục: `upsert` (mặc định), `merge`, hoặc `clean` |
-| `--tables <t1,t2,...>` | Danh sách bảng để khôi phục (mặc định: tất cả tệp `.jsonl`/`.jsonl.gz` trong bản sao lưu) |
+| `--tables <t1,t2,...>` | Danh sách bảng cần khôi phục, phân cách bằng dấu phẩy (mặc định: mọi tệp `.jsonl`/`.jsonl.gz` trong bản sao lưu) |
 | `--prefix <prefix>` | Tiền tố tên bảng (cho lưu trữ đa tenant) |
+| `--clean-env <env>` | Với `--mode clean`, chỉ xóa các hàng của môi trường này (tiền tố PartitionKey `<env>|`) |
+| `--allow-clean-from-incremental` | Cho phép `--mode clean` với một bản sao lưu tăng dần |
+| `--allow-clean-all-envs` | Cho phép `--mode clean` không kèm `--clean-env`, làm trống toàn bộ bảng |
+| `--encryption-key <base64>` | Khóa mã hóa khóa dài 32 byte đã dùng khi ghi bản sao lưu. Bắt buộc với kho lưu trữ được mã hóa. Cũng đọc từ `BACKUP_ENCRYPTION_KEY`. |
+| `--manifest-key <base64>` | Khóa HMAC đã dùng để ký bản sao lưu. **Bắt buộc** trừ khi có `--allow-unauthenticated-manifest`. Cũng đọc từ `BACKUP_MANIFEST_KEY`. |
+| `--allow-unauthenticated-manifest` | Khôi phục mà không có `--manifest-key`, chấp nhận các hash chỉ phát hiện được hư hỏng chứ không phát hiện được giả mạo |
+| `--allow-unverified` | Khôi phục một bản sao lưu mà manifest hoàn toàn không có hash tệp nào |
 | `--dry-run` | Hiển thị những gì sẽ được khôi phục mà không ghi |
 
-### Chế độ khôi phục
+### Chế độ khôi phục {#restore-modes}
 
 | Chế độ | Hành vi |
 |---|---|
-| `upsert` | Chèn hoặc thay thế mỗi thực thể. Dữ liệu hiện có bị ghi đè. |
-| `merge` | Chèn hoặc hợp nhất. Các thuộc tính hiện có không có trong bản sao lưu được giữ lại. |
-| `clean` | Xóa tất cả dữ liệu hiện có trong mỗi bảng trước khi khôi phục. |
+| `upsert` | Chèn hoặc thay thế từng entity. Dữ liệu hiện có bị ghi đè. |
+| `merge` | Chèn hoặc hợp nhất. Các thuộc tính hiện có không nằm trong bản sao lưu được giữ lại. |
+| `clean` | Xóa mọi dữ liệu hiện có trong từng bảng trước khi khôi phục. |
 
-Các tệp sao lưu nén gzip (`.jsonl.gz`) được phát hiện và giải nén tự động; không cần cờ bổ sung.
+Các tệp sao lưu nén gzip (`.jsonl.gz`) được tự động phát hiện và giải nén; không cần thêm cờ nào.
 
-### Phát lại tombstone
+### Phát lại tombstone {#tombstone-replay}
 
-Sau các tệp dữ liệu, việc khôi phục áp dụng tệp `_tombstones` của bản sao lưu: mỗi khóa được ghi lại sẽ bị xóa khỏi các bảng đã khôi phục (`RestoreOptions.ApplyTombstones`, mặc định `true`). Các lần xóa của một bản gia tăng là một phần trạng thái của nó không kém gì các lần upsert; bỏ qua chúng sẽ dựng lại các hàng đã xóa, kể cả những hàng đã bị xóa theo GDPR, khi khôi phục một chuỗi bản đầy đủ cộng các bản gia tăng. Các bản sao lưu đầy đủ không mang tệp tombstone. Khi khôi phục một bản đầy đủ theo sau bởi các bản gia tăng, hãy áp dụng chúng theo thứ tự cũ nhất trước để một lần tạo lại sau này rơi vào sau một lần xóa trước đó. Hash của tệp tombstone được xác minh dựa trên manifest giống như các tệp dữ liệu.
+Sau các tệp dữ liệu, bước khôi phục áp dụng tệp `_tombstones` của bản sao lưu: mỗi khóa được ghi lại sẽ bị xóa khỏi các bảng đã khôi phục (`RestoreOptions.ApplyTombstones`, mặc định `true`). Các thao tác xóa của một bản tăng dần cũng là một phần trạng thái của nó không kém các thao tác upsert; bỏ qua chúng sẽ làm sống lại các hàng đã xóa, kể cả những hàng đã bị xóa theo GDPR, khi khôi phục một chuỗi gồm bản đầy đủ cộng các bản tăng dần. Bản sao lưu đầy đủ không mang tệp tombstone. Khi khôi phục một bản đầy đủ theo sau là các bản tăng dần, hãy áp dụng chúng từ cũ nhất tới mới nhất để một lần tạo lại về sau được ghi sau một lần xóa trước đó. Hash của tệp tombstone được kiểm tra với manifest giống như các tệp dữ liệu.
 
-### Bảo toàn kiểu dữ liệu chính xác
+### Giữ nguyên chính xác kiểu dữ liệu {#exact-type-round-trip}
 
-Các hàng được ghi với dấu định dạng `"@v"` mang các chú thích kiểu EDM tường minh, nên việc khôi phục tái tạo đúng các kiểu cột gốc (`Int64`, `Guid`, `Binary`, `DateTime`, `Double`); một chuỗi không có chú thích được khôi phục dưới dạng chuỗi. Các tệp sao lưu cũ không có dấu này sẽ dùng suy luận dựa trên hình dạng, chỉ được giữ lại để các bản sao lưu cũ vẫn khôi phục được (suy luận có thể gán sai kiểu cho các cột chuỗi có hình dạng GUID hoặc ngày tháng).
+Các hàng được ghi với dấu định dạng `"@v"` mang chú thích kiểu EDM tường minh, nên bước khôi phục tái tạo đúng kiểu cột gốc (`Int64`, `Guid`, `Binary`, `DateTime`, `Double`); một chuỗi không có chú thích được khôi phục thành chuỗi. Các tệp sao lưu kiểu cũ không có dấu này sẽ quay về cách suy luận dựa trên hình dạng giá trị, chỉ được giữ lại để các bản sao lưu cũ vẫn khôi phục được (suy luận có thể gán sai kiểu cho các cột chuỗi trông giống GUID hoặc ngày tháng).
 
-### Mã thoát
+### Mã thoát {#exit-codes}
 
 | Mã | Ý nghĩa |
 |---|---|
 | `0` | Thành công |
 | `1` | Lỗi (thiếu tham số, đầu vào không hợp lệ) |
-| `2` | Thành công một phần (một số thực thể có lỗi) |
+| `2` | Thành công một phần (một số entity gặp lỗi) |
 
-## Sử dụng thư viện
+### Host có bảng riêng: `KnownTables` {#a-host-with-its-own-tables-knowntables}
 
-Gói NuGet `Authagonal.Backup` cung cấp các thao tác tương tự theo cách lập trình, cho các dịch vụ nền hoặc điều phối tùy chỉnh:
+`BackupOptions.KnownTables` và `RestoreOptions.KnownTables` (đều là `string[]?`, null nghĩa là `BackupDefaults.Tables`) khai báo tập bảng mà một kho lưu trữ của bản triển khai của bạn được phép chỉ định một cách hợp lệ. Một host lưu dữ liệu riêng bên cạnh dữ liệu của Authagonal và sao lưu cả hai trong cùng một kho lưu trữ phải đặt giá trị này, nếu không mọi bản sao lưu chỉ định các bảng đó sẽ bị từ chối ngay từ đầu (`BackupService.cs:48`) và mọi lần khôi phục sẽ từ chối kho lưu trữ đó (`RestoreService.cs:17,167`).
+
+- Host khai báo tập này từ trước. Nó không bao giờ được suy ra từ kho lưu trữ, và đó chính là mục đích: kho lưu trữ không được quyền chọn những bảng mà bước khôi phục sẽ ghi.
+- Truyền **cùng một** tập cho cả hai tùy chọn. Một bản sao lưu được tạo với tập rộng hơn chỉ khôi phục được qua một lần khôi phục khai báo cùng tập đó.
+
+## Dùng thư viện {#using-the-library}
+
+Gói NuGet `Authagonal.Backup` cung cấp các thao tác tương tự để dùng bằng code, cho các background service hoặc điều phối tùy chỉnh:
 
 | Kiểu | Mục đích |
 |---|---|
-| `BackupService` | Chạy một bản sao lưu đầy đủ hoặc gia tăng đối với một `TableServiceClient`, ghi vào một `IBackupTarget` |
-| `RestoreService` | Xác minh các hash và ghi một bản sao lưu trở lại vào Table Storage |
-| `MergeService` | Truyền luồng một bản sao lưu đầy đủ cộng các bản gia tăng (và các tombstone của chúng) thành một khung nhìn trạng thái hiện tại |
-| `RollupService` | Gộp các bản gia tăng vào một bản sao lưu đầy đủ mới, tùy chọn xóa các đầu vào |
-| `BackupOptions` / `RestoreOptions` | Cấu hình theo từng lần chạy |
-| `BackupDefaults` | Danh sách bảng mặc định và các preset nhật ký thay đổi |
-| `IBackupSource` / `IBackupTarget` | Các lớp trừu tượng lưu trữ; `FileSystemBackupSource` / `FileSystemBackupTarget` là các hiện thực tích hợp sẵn. Hiện thực `IBackupTarget` để ghi vào blob storage hoặc nơi khác. |
+| `BackupService` | Chạy sao lưu đầy đủ hoặc tăng dần với một `TableServiceClient`, ghi vào một `IBackupTarget` |
+| `RestoreService` | Kiểm tra hash và ghi một bản sao lưu trở lại Table Storage |
+| `MergeService` | Đọc tuần tự một bản sao lưu đầy đủ cộng các bản tăng dần (và tombstone của chúng) thành một khung nhìn trạng thái hiện tại |
+| `RollupService` | Gộp các bản tăng dần thành một bản sao lưu đầy đủ mới, có thể xóa các bản đầu vào |
+| `BackupOptions` / `RestoreOptions` | Cấu hình cho từng lần chạy |
+| `BackupDefaults` | Danh sách bảng mặc định và các preset change-log |
+| `IBackupSource` / `IBackupTarget` | Lớp trừu tượng lưu trữ; `FileSystemBackupSource` / `FileSystemBackupTarget` là các hiện thực dựng sẵn. Hiện thực `IBackupTarget` để ghi vào blob storage hoặc nơi khác. |
 
 ```csharp
 var serviceClient = new TableServiceClient(connectionString);
@@ -143,34 +202,34 @@ var options = new BackupOptions { Incremental = true, Gzip = true };
 var manifest = await new BackupService(serviceClient, target, options).RunAsync(ct);
 ```
 
-### Sao lưu gia tăng dựa trên nhật ký thay đổi
+### Sao lưu tăng dần dựa trên change-log {#change-log-driven-incrementals}
 
-Azure Table Storage chỉ lập chỉ mục `PartitionKey` và `RowKey`, nên một bản sao lưu gia tăng lọc trên `Timestamp` vẫn là một lần quét đầy đủ mỗi bảng. Để tránh điều đó, các store của Authagonal ghi lại mọi thay đổi trong một nhật ký thay đổi qua seam `IChangeWriter` (`Authagonal.Core`), được hiện thực cho Azure bởi `TableChangeWriter` (`Authagonal.AzureProvider`). Đó là một bảng vật lý duy nhất, vẫn được đặt tên là `Tombstones`: PK = tên bảng logic, RK = `"{pk}|{rk}"`, một cột `Op` là `"U"` (upsert) hoặc `"D"` (xóa), và các cột `OrigPK`/`OrigRK` có thẩm quyền (một ký tự `|` bên trong PartitionKey gốc làm cho việc tách RowKey ghép trở nên mơ hồ, nên bộ đọc sao lưu tin vào các cột và chỉ quay lại việc tách cho các hàng cũ). Mỗi khóa giữ một hàng (upsert-replace), nên thao tác cuối cùng trong một cửa sổ sao lưu sẽ thắng.
+Azure Table Storage chỉ đánh chỉ mục `PartitionKey` và `RowKey`, nên một bản sao lưu tăng dần lọc theo `Timestamp` vẫn là một lượt quét toàn bộ từng bảng. Để tránh điều đó, các store của Authagonal ghi lại mọi thay đổi vào một change-log qua điểm mở rộng `IChangeWriter` (`Authagonal.Core`), được hiện thực cho Azure bởi `TableChangeWriter` (`Authagonal.AzureProvider`). Đó là một bảng vật lý duy nhất, vẫn mang tên `Tombstones`: PK = tên bảng logic, RK = `"{pk}|{rk}"`, một cột `Op` có giá trị `"U"` (upsert) hoặc `"D"` (xóa), cùng các cột `OrigPK`/`OrigRK` có thẩm quyền (một ký tự `|` bên trong PartitionKey gốc khiến việc tách RowKey ghép trở nên mơ hồ, nên bên đọc bản sao lưu tin vào các cột này và chỉ quay về cách tách chuỗi với các hàng kiểu cũ). Mỗi khóa giữ một hàng (upsert-replace), nên thao tác cuối cùng trong một cửa sổ sao lưu là thao tác được giữ lại.
 
-Với đường dẫn nhật ký thay đổi được bật, một bản sao lưu gia tăng liệt kê các mục nhật ký thay đổi `Op = "U"` của một bảng kể từ mốc nước và point-read từng hàng trực tiếp thay vì quét bảng. Tính năng này **là tùy chọn và tắt theo mặc định**: `BackupOptions.ChangeLoggedTables` null hoặc rỗng nghĩa là mọi bảng ở lại đường dẫn quét, nên cơ chế được xuất xưởng ở trạng thái trơ cho đến khi có một lần chuyển đổi có chủ đích (một lần triển khai không thể âm thầm bỏ sót các hàng bị thay đổi bởi mã tiền-thu-thập). Hai preset:
+Khi bật đường change-log, một bản sao lưu tăng dần liệt kê các mục change-log `Op = "U"` của một bảng kể từ watermark và đọc điểm từng hàng đang tồn tại thay vì quét bảng. Tính năng này **phải chủ động bật và mặc định tắt**: `BackupOptions.ChangeLoggedTables` null hoặc rỗng nghĩa là mọi bảng vẫn đi theo đường quét, nên cơ chế này được phát hành ở trạng thái chưa hoạt động cho tới khi có một lần bật có chủ đích (một lần triển khai không thể âm thầm bỏ sót các hàng bị thay đổi bởi code từ trước khi có cơ chế ghi nhận). Hai preset:
 
 | Preset | Nội dung |
 |---|---|
-| `BackupDefaults.ChangeLoggedTables` | Các bảng có các lượt ghi được nhật ký thay đổi thu thập đầy đủ |
-| `BackupDefaults.ChangeLoggedTablesWithUsers` | Cùng tập hợp cộng thêm `Users`. Các lượt ghi trạng thái đăng nhập của Users cố tình không được thu thập (đường dẫn nóng, giá trị thấp), nên preset này **chỉ an toàn khi bạn cũng chạy phương án dự phòng quét toàn bộ bên dưới** |
+| `BackupDefaults.ChangeLoggedTables` | Các bảng có mọi thao tác ghi đều được change-log ghi nhận đầy đủ: `UserEmails`, `UserFirstNames`, `UserLastNames`, `UserLogins`, `UserExternalIds`, `UserEmailDomains`, `UserEmailLocalPrefixes`, `UserOrganizations`, `ScimGroupRoleMappings`, `ProvisioningApps`, `Organizations`, `OrganizationSlugs`, `OrganizationMembers`, `UserMemberships` |
+| `BackupDefaults.ChangeLoggedTablesWithUsers` | Cùng tập đó cộng thêm `Users`. Các thao tác ghi trạng thái đăng nhập của Users cố ý không được ghi nhận (đường nóng, giá trị thấp), nên preset này **chỉ an toàn khi bạn cũng chạy lượt quét toàn bộ làm lưới an toàn bên dưới** |
 
-Thuộc tính `ChangeLogTables` của manifest liệt kê những bảng nào một lần chạy đã đọc qua nhật ký thay đổi; null hoặc rỗng nghĩa là lần chạy có phạm vi quét đầy đủ (một bản đầy đủ, một bản gia tăng quét thuần, hoặc một lần quét dự phòng).
+Thuộc tính `ChangeLogTables` của manifest liệt kê những bảng mà một lần chạy đã đọc qua change-log; null hoặc rỗng nghĩa là lần chạy có độ phủ quét toàn bộ (một bản sao lưu đầy đủ, một bản tăng dần quét thông thường, hoặc một lượt quét lưới an toàn).
 
-### Phương án dự phòng quét toàn bộ
+### Lượt quét toàn bộ làm lưới an toàn {#full-scan-backstop}
 
-Vì việc thu thập nhật ký thay đổi có thể bỏ sót các lượt ghi (các trường trạng thái đăng nhập, các bộ ghi không phải store, các pod chạy mã tiền-thu-thập trong một lần triển khai), hãy ghép các bản sao lưu gia tăng theo nhật ký thay đổi với một lần quét lại đầy đủ định kỳ. Đặt `BackupOptions.WatermarkOverride` thành dấu thời gian của lần quét phủ đầy đủ cuối cùng và để `ChangeLoggedTables` không đặt cho lần chạy đó: bản gia tăng khi đó lọc trên `Timestamp` trên toàn bộ cửa sổ kể từ lần quét đó, nhặt lên bất cứ thứ gì nhật ký thay đổi không bao giờ thu thập. Một phương án dự phòng hàng ngày bên cạnh các bản gia tăng theo nhật ký thay đổi hàng giờ là một nhịp độ hợp lý. Các lần xóa là lớp thay đổi duy nhất không có tự chữa lành (một lần quét hàng-trực-tiếp không thể thấy một hàng đã biến mất), đó là lý do các store ghi tombstone xóa **trước khi** xóa hàng dữ liệu.
+Vì việc ghi nhận qua change-log có thể bỏ sót thao tác ghi (các trường trạng thái đăng nhập, bên ghi không đi qua store, các pod chạy code từ trước khi có cơ chế ghi nhận trong lúc triển khai), hãy kết hợp các bản tăng dần dựa trên change-log với một lượt quét lại toàn bộ định kỳ. Đặt `BackupOptions.WatermarkOverride` thành dấu thời gian của lượt quét có độ phủ toàn bộ gần nhất và để trống `ChangeLoggedTables` cho lần chạy đó: khi đó bản tăng dần lọc theo `Timestamp` trên toàn bộ khoảng thời gian kể từ lượt quét đó, thu lại mọi thứ mà change-log chưa từng ghi nhận. Một lượt lưới an toàn hằng ngày song song với các bản tăng dần dựa trên change-log hằng giờ là nhịp độ hợp lý. Xóa là loại thay đổi duy nhất không tự phục hồi được (một lượt quét hàng đang tồn tại không thể thấy một hàng đã biến mất), và đó là lý do các store ghi tombstone xóa **trước** khi xóa hàng dữ liệu.
 
-Tất cả các bộ lọc gia tăng, kể cả phương án dự phòng, đều trừ đi `BackupDefaults.WatermarkSkewMargin` (5 phút) khỏi mốc nước; các bên gọi thanh lọc nhật ký thay đổi sau một bản sao lưu phải giới hạn việc thanh lọc bằng cùng biên độ đó nếu không họ xóa các hàng mà lần chạy tiếp theo vẫn cần.
+Mọi bộ lọc tăng dần, kể cả lưới an toàn, đều trừ `BackupDefaults.WatermarkSkewMargin` (5 phút) khỏi watermark; bên gọi nào dọn change-log sau một lần sao lưu phải giới hạn việc dọn theo cùng biên đó, nếu không họ sẽ xóa các hàng mà lần chạy kế tiếp vẫn cần.
 
-### Rollup
+### Rollup {#rollups}
 
-`RollupService.RollupAsync` hợp nhất một bản sao lưu đầy đủ và các bản gia tăng của nó thành một bản sao lưu đầy đủ mới; `RollupAndCleanAsync` bổ sung việc xóa các đầu vào sau đó. Tham số tùy chọn `newBackupId` đặt tên cho kết quả (null suy ra một id dấu thời gian); một ảnh chụp được giữ lại đặc biệt (ví dụ một rollup hàng tuần) phải truyền id của nó ở đây, vì việc lưu giữ dựa trên id liệt kê các id sao lưu vật lý, không phải các manifest.
+`RollupService.RollupAsync` hợp nhất một bản sao lưu đầy đủ và các bản tăng dần của nó thành một bản sao lưu đầy đủ mới; `RollupAndCleanAsync` còn xóa các bản đầu vào sau đó. Tham số tùy chọn `newBackupId` đặt tên cho kết quả (null thì suy ra một id dạng dấu thời gian); một snapshot được giữ lại đặc biệt (ví dụ rollup hằng tuần) phải truyền id của nó ở đây, vì cơ chế lưu giữ theo id liệt kê các backup id vật lý, không phải manifest.
 
-Trong một lần hợp nhất, các tombstone áp dụng theo thứ tự dấu thời gian: một lần xóa loại bỏ một hàng đã thu thập chỉ khi `Timestamp` của hàng không muộn hơn `DeletedAt` của tombstone. Một khóa bị xóa sớm trong cửa sổ và được tạo lại sau đó có cả một tombstone và một lần thu thập trực tiếp, và hàng được tạo lại sẽ sống sót qua rollup. Các tombstone cũ không có `DeletedAt` loại bỏ vô điều kiện.
+Trong khi hợp nhất, tombstone được áp dụng theo thứ tự thời gian: một thao tác xóa chỉ loại bỏ một hàng đã ghi nhận khi `Timestamp` của hàng không muộn hơn `DeletedAt` của tombstone. Một khóa bị xóa sớm trong cửa sổ và được tạo lại sau đó có cả một tombstone lẫn một bản ghi nhận đang tồn tại, và hàng được tạo lại sẽ tồn tại qua bước rollup. Các tombstone kiểu cũ không có `DeletedAt` sẽ xóa vô điều kiện.
 
-## Docker
+## Docker {#docker}
 
-Công cụ sao lưu đi kèm một Dockerfile (`tools/Authagonal.Backup/Dockerfile`) để chạy trong CI hoặc mà không cần cài đặt .NET SDK:
+Công cụ sao lưu có sẵn một Dockerfile (`tools/Authagonal.Backup/Dockerfile`) để chạy trong CI hoặc không cần cài .NET SDK:
 
 ```bash
 docker build -f tools/Authagonal.Backup/Dockerfile -t authagonal-backup .
@@ -180,18 +239,18 @@ docker run --rm -v $(pwd)/backups:/backups \
   authagonal-backup --output /backups
 ```
 
-Công cụ khôi phục không có image; hãy chạy nó với .NET SDK (`dotnet run --project tools/Authagonal.Restore`).
+Công cụ khôi phục không có image; hãy chạy nó bằng .NET SDK (`dotnet run --project tools/Authagonal.Restore`).
 
-## Lên lịch sao lưu
+## Lên lịch sao lưu {#scheduling-backups}
 
-Cho môi trường production, chạy công cụ sao lưu theo lịch (ví dụ: đầy đủ hàng ngày + gia tăng hàng giờ):
+Để dùng trong production, hãy chạy công cụ sao lưu theo lịch (ví dụ bản đầy đủ hằng ngày + bản tăng dần hằng giờ):
 
 ```bash
-# Sao lưu đầy đủ hàng ngày (nén)
+# Daily full backup (compressed)
 0 2 * * * authagonal-backup --connection-string "$CONN" --output /backups --gzip
 
-# Gia tăng hàng giờ (nén)
+# Hourly incremental (compressed)
 0 * * * * authagonal-backup --connection-string "$CONN" --output /backups --incremental --gzip
 ```
 
-Các host nhúng thư viện thường chạy các bản gia tăng hàng giờ với đường dẫn nhật ký thay đổi được bật, một phương án dự phòng quét toàn bộ hàng ngày, và các rollup định kỳ để giới hạn chuỗi gia tăng.
+Các host nhúng thư viện thường chạy bản tăng dần hằng giờ với đường change-log được bật, một lượt quét toàn bộ làm lưới an toàn hằng ngày, và các lần rollup định kỳ để giới hạn độ dài chuỗi tăng dần.

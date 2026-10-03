@@ -194,6 +194,7 @@
           <option value="es" {% if page.locale == 'es' %}selected{% endif %}>Español</option>
           <option value="vi" {% if page.locale == 'vi' %}selected{% endif %}>Tiếng Việt</option>
           <option value="pt" {% if page.locale == 'pt' %}selected{% endif %}>Português</option>
+          <option value="ja" {% if page.locale == 'ja' %}selected{% endif %}>日本語</option>
         </select>
       </div>
       {% assign locale = page.locale | default: 'en' %}
@@ -217,19 +218,29 @@
         <a href="{{ locale_prefix | append: 'extensibility' | relative_url }}" {% if pg == 'extensibility' %}class="active"{% endif %}>{{ t.extensibility }}</a>
         <a href="{{ locale_prefix | append: 'localization' | relative_url }}" {% if pg == 'localization' %}class="active"{% endif %}>{{ t.localization }}</a>
         <a href="{{ locale_prefix | append: 'provisioning' | relative_url }}" {% if pg == 'provisioning' %}class="active"{% endif %}>{{ t.provisioning }}</a>
+        <a href="{{ locale_prefix | append: 'organizations' | relative_url }}" {% if pg == 'organizations' %}class="active"{% endif %}>{{ t.organizations }}</a>
+        <a href="{{ locale_prefix | append: 'scopes' | relative_url }}" {% if pg == 'scopes' %}class="active"{% endif %}>{{ t.scopes }}</a>
 
         <div class="nav-section">{{ t.security }}</div>
         <a href="{{ locale_prefix | append: 'mfa' | relative_url }}" {% if pg == 'mfa' %}class="active"{% endif %}>{{ t.mfa }}</a>
         <a href="{{ locale_prefix | append: 'scim' | relative_url }}" {% if pg == 'scim' %}class="active"{% endif %}>{{ t.scim }}</a>
+        <a href="{{ locale_prefix | append: 'agentic-auth' | relative_url }}" {% if pg == 'agentic-auth' %}class="active"{% endif %}>{{ t.agentic_auth }}</a>
+        <a href="{{ locale_prefix | append: 'user-upgrade' | relative_url }}" {% if pg == 'user-upgrade' %}class="active"{% endif %}>{{ t.user_upgrade }}</a>
 
         <div class="nav-section">{{ t.identity_providers }}</div>
         <a href="{{ locale_prefix | append: 'saml' | relative_url }}" {% if pg == 'saml' %}class="active"{% endif %}>{{ t.saml }}</a>
         <a href="{{ locale_prefix | append: 'oidc-federation' | relative_url }}" {% if pg == 'oidc-federation' %}class="active"{% endif %}>{{ t.oidc_federation }}</a>
+        <a href="{{ locale_prefix | append: 'self-service-sso' | relative_url }}" {% if pg == 'self-service-sso' %}class="active"{% endif %}>{{ t.self_service_sso }}</a>
+        <a href="{{ locale_prefix | append: 'federated-sessions' | relative_url }}" {% if pg == 'federated-sessions' %}class="active"{% endif %}>{{ t.federated_sessions }}</a>
 
         <div class="nav-section">{{ t.api_reference }}</div>
         <a href="{{ locale_prefix | append: 'auth-api' | relative_url }}" {% if pg == 'auth-api' %}class="active"{% endif %}>{{ t.auth_api }}</a>
         <a href="{{ locale_prefix | append: 'admin-api' | relative_url }}" {% if pg == 'admin-api' %}class="active"{% endif %}>{{ t.admin_api }}</a>
         <a href="{{ locale_prefix | append: 'par' | relative_url }}" {% if pg == 'par' %}class="active"{% endif %}>{{ t.par }}</a>
+        <a href="{{ locale_prefix | append: 'client-registration' | relative_url }}" {% if pg == 'client-registration' %}class="active"{% endif %}>{{ t.client_registration }}</a>
+        <a href="{{ locale_prefix | append: 'front-channel-logout' | relative_url }}" {% if pg == 'front-channel-logout' %}class="active"{% endif %}>{{ t.front_channel_logout }}</a>
+        <a href="{{ locale_prefix | append: 'websocket-auth' | relative_url }}" {% if pg == 'websocket-auth' %}class="active"{% endif %}>{{ t.websocket_auth }}</a>
+        <a href="{{ locale_prefix | append: 'bff' | relative_url }}" {% if pg == 'bff' %}class="active"{% endif %}>{{ t.bff }}</a>
 
         <div class="nav-section">{{ t.operations }}</div>
         <a href="{{ locale_prefix | append: 'scaling' | relative_url }}" {% if pg == 'scaling' %}class="active"{% endif %}>{{ t.scaling }}</a>
@@ -246,7 +257,7 @@ function switchLang(lang) {
   var path = window.location.pathname;
   var base = '{{ "/" | relative_url }}'.replace(/\/$/, '');
   // Remove current locale prefix
-  var locales = ['zh-Hans', 'de', 'fr', 'es', 'vi', 'pt'];
+  var locales = ['zh-Hans', 'de', 'fr', 'es', 'vi', 'pt', 'ja'];
   var stripped = path.replace(base, '');
   for (var i = 0; i < locales.length; i++) {
     if (stripped.indexOf('/' + locales[i] + '/') === 0 || stripped === '/' + locales[i]) {

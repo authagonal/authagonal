@@ -8,9 +8,9 @@ title: Migration
 The `Authagonal.Migration` package performs a one-time migration from Duende IdentityServer + SQL
 Server into Authagonal's stores. The same engine is available two ways:
 
-- **Hosted runner** (recommended) — a background service inside your Authagonal host that runs the
+- **Hosted runner** (recommended): a background service inside your Authagonal host that runs the
   migration once on deploy, gated on cluster leadership, without blocking startup.
-- **CLI** — `tools/Authagonal.Migration.Cli`, for local/offline runs against a Table Storage target.
+- **CLI**: `tools/Authagonal.Migration.Cli`, for local/offline runs against a Table Storage target.
 
 SqlClient lives only in this package, so hosts that don't migrate never inherit it.
 
@@ -28,8 +28,8 @@ app.MapAuthagonalDuendeMigration();   // GET /admin/migration/status
 ```
 
 The second `Map` call is required and separate: this package references `Authagonal.Server`, so
-`MapAuthagonalEndpoints` cannot reach it. Without it `GET /admin/migration/status` answers 404 —
-indistinguishable from the `IdentityAdmin` policy refusing you — and the run logs a warning at startup
+`MapAuthagonalEndpoints` cannot reach it. Without it `GET /admin/migration/status` answers 404,
+indistinguishable from the `IdentityAdmin` policy refusing you, and the run logs a warning at startup
 saying so.
 
 Configure via the `Migration` section:
@@ -57,7 +57,7 @@ The runner:
 3. Waits up to `LeaseWaitMinutes` to become cluster leader (only one pod runs the migration).
 4. Writes a `Started` marker, runs the engine, then a `Completed`/`Failed` marker with the report.
 
-Losing leadership mid-run cancels the engine; the new leader re-runs — safe because every pass is
+Losing leadership mid-run cancels the engine; the new leader re-runs, safe because every pass is
 idempotent. Check progress at `GET /admin/migration/status` (gated by the `IdentityAdmin` policy).
 
 ## CLI
@@ -91,7 +91,7 @@ dotnet run --project tools/Authagonal.Migration.Cli -- \
 | `SamlProviderConfigurations` | SamlProviders + SsoDomains | `AllowedDomains` CSV split into SSO domain records |
 | `OidcProviderConfigurations` | OidcProviders + SsoDomains | Same domain splitting |
 | `AspNetUserTokens` (`AuthenticatorKey`, `RecoveryCodes`) | MfaCredentials | TOTP secret base32→protected (`duende-totp`); recovery codes hashed (`duende-rc-{n}`); user skipped if MFA already present |
-| Duende `PersistedGrants` (refresh tokens) | Grants | **Not possible against stock Duende** — see below. Requires `MigrateRefreshTokens` *and* `SourceGrantKeysAreUnhashed`; otherwise skipped with a warning and users re-login. |
+| Duende `PersistedGrants` (refresh tokens) | Grants | **Not possible against stock Duende**, see below. Requires `MigrateRefreshTokens` *and* `SourceGrantKeysAreUnhashed`; otherwise skipped with a warning and users re-login. |
 
 ## Options
 
@@ -100,10 +100,14 @@ dotnet run --project tools/Authagonal.Migration.Cli -- \
 | `Enabled` | `false` | Master switch for the hosted runner |
 | `DryRun` | `false` | Walk the source and produce the full validation report (id charset/length, duplicate emails, table/column inventory, per-pass counts) without writing |
 | `Version` | `"1"` | Run marker. Bump to re-run a delta sweep. Only a `Completed`, non-`DryRun` marker blocks a re-run |
-| `UsersMode` | `CreateOnly` | `CreateOnly` skips existing users; `Upsert` overwrites. **Never `Upsert` post-cutover** — it clobbers rehashed passwords and new MFA |
-| `MigrateClients` | `true` | Migrate OAuth clients |
+| `UsersMode` | `CreateOnly` | `CreateOnly` skips existing users; `Upsert` overwrites. **Never `Upsert` post-cutover**, it clobbers rehashed passwords and new MFA |
+| `MigrateClients` | `true` | Migrate OAuth clients. Config-seeded clients always win and existing clients are skipped |
 | `MigrateRefreshTokens` | `false` | Include active refresh tokens. Requires `SourceGrantKeysAreUnhashed` |
 | `SourceGrantKeysAreUnhashed` | `false` | Asserts the source `PersistedGrants.Key` holds handles verbatim. Only true for a fork with a custom grant store |
+| `Source:ConnectionString` | *(none)* | Source Duende SQL Server connection |
+| `MaxDegreeOfParallelism` | `32` | Bounded write concurrency for the high-volume passes (users, external logins, MFA, refresh tokens). Lower it for small or throttle-prone accounts; `1` is fully sequential |
+| `LeaseWaitMinutes` | `10` | Hosted runner: give up waiting for cluster leadership after this long; a later restart retries |
+| `StartupDelaySeconds` | `30` | Hosted runner: delay before starting, so seed services finish and startup is not blocked |
 
 ## Idempotency & delta sweeps
 
@@ -116,14 +120,14 @@ users registered since. Existing records are skipped (or updated under `Upsert`)
 - **Live refresh tokens, against stock Duende.** Duende's `DefaultGrantStore` never persists a
   refresh-token handle: `PersistedGrants.Key` holds `base64(SHA-256(handle + ":" + grantType))`, and
   the presented handle is hashed again on lookup. The handle is therefore not recoverable from the
-  source database, and migrated rows would be permanently unredeemable — which is worse than not
+  source database, and migrated rows would be permanently unredeemable, which is worse than not
   migrating, because the report counts them as created and the breakage only surfaces at the first
   token refresh after cutover. Plan the cutover around one re-login, or run a dual-read shim during
   the transition window. `SourceGrantKeysAreUnhashed` exists only for a fork whose grant store
   persists handles verbatim, and such a fork also owns translating `PersistedGrants.Data` from
   Duende's `RefreshToken` shape into `RefreshTokenData`.
-- **SCIM tokens and groups**, **user provisions** — no Duende equivalent; start empty.
-- **Signing keys** — not automated. To keep existing tokens valid across cutover, export the RSA
+- **SCIM tokens and groups**, **user provisions**: no Duende equivalent; start empty.
+- **Signing keys**: not automated. To keep existing tokens valid across cutover, export the RSA
   signing key from Duende and import it into the `SigningKeys` table close to cutover.
 
 ## Cutover strategy
@@ -132,17 +136,17 @@ users registered since. Existing records are skipped (or updated under `Upsert`)
 2. `Enabled=true, DryRun=true` → restart → review the report at `/admin/migration/status`.
 3. `DryRun=false` → restart → verify the marker is `Completed` + spot-check logins.
 4. Bump `Version` for the final delta sweep, then repoint clients/BFFs to Authagonal. **Expect one
-   forced re-login** — see below.
+   forced re-login**, see above.
 5. Monitor; rollback = repoint to the untouched Duende deployment.
 
 ## NDJSON user import
 
 A second, independent import source in the same `Authagonal.Migration` package: a flat NDJSON file
-(one JSON object per line) instead of a live database connection, and users only — no clients, roles,
+(one JSON object per line) instead of a live database connection, and users only, no clients, roles,
 scopes or federation config. Built for migrating a legacy app's own user table (a hand-rolled
 ASP.NET Identity store, a Rails/Devise table exported to bcrypt, a Node app on scrypt, ...) so people
 keep logging in with their old password while it is transparently rehashed to native PBKDF2 on their
-next successful login — the same lazy-rehash path the Duende importer above relies on.
+next successful login, the same lazy-rehash path the Duende importer above relies on.
 
 ### Record schema
 
@@ -152,19 +156,19 @@ top-level fields fail that line** (strict by default) unless `--AllowUnknownFiel
 | Field | Type | Notes |
 |---|---|---|
 | `email` | string | Required. Must be a plausible email address. Case-insensitive duplicate key. |
-| `username` | string | No dedicated `AuthUser` column — stored in `CustomAttributes["username"]`. |
+| `username` | string | No dedicated `AuthUser` column, stored in `CustomAttributes["username"]`. |
 | `givenName` | string | → `AuthUser.FirstName` |
 | `familyName` | string | → `AuthUser.LastName` |
-| `displayName` | string | No dedicated column — stored in `CustomAttributes["displayName"]`. |
+| `displayName` | string | No dedicated column, stored in `CustomAttributes["displayName"]`. |
 | `emailVerified` | bool | → `AuthUser.EmailConfirmed`. Defaults to `false` when absent. |
-| `passwordHash` | string | → `AuthUser.PasswordHash`, stored **verbatim**. Any format `PasswordHasher` recognises on login (bcrypt `$2a$`/`$2b$`/`$2x$`/`$2y$`, ASP.NET Identity V3, scrypt `$s2$`) verifies unchanged and upgrades to native PBKDF2 from there. Not inspected beyond non-empty — a malformed hash simply fails to verify at login, same as it would outside migration. Omit for SSO-only / passwordless users. |
+| `passwordHash` | string | → `AuthUser.PasswordHash`, stored **verbatim**. Any format `PasswordHasher` recognises on login (bcrypt `$2a$`/`$2b$`/`$2x$`/`$2y$`, ASP.NET Identity V3, scrypt `$s2$`) verifies unchanged and upgrades to native PBKDF2 from there. Not inspected beyond non-empty, a malformed hash simply fails to verify at login, same as it would outside migration. Omit for SSO-only / passwordless users. |
 | `roles` | string[] | → `AuthUser.Roles` |
 | `organizationId` | string | → `AuthUser.OrganizationId` |
 | `attributes` | object (string→string) | Merged into `AuthUser.CustomAttributes` |
 | `phoneNumber` | string | → `AuthUser.Phone` |
 | `disabled` | bool | → `AuthUser.IsActive = !disabled`. Defaults to active when absent. |
 | `createdAt` | string (ISO 8601) | → `AuthUser.CreatedAt`. Defaults to import time when absent. |
-| `externalId` | string | → `AuthUser.ExternalId` — the same field the Duende importer occupies with the source database's user id. |
+| `externalId` | string | → `AuthUser.ExternalId`, the same field the Duende importer occupies with the source database's user id. |
 
 Example file (5 lines):
 
@@ -190,7 +194,7 @@ dotnet run --project tools/Authagonal.Migration.Cli -- import-ndjson-users \
     --AllowPlaintextPii true
 ```
 
-Same target (Azure Table Storage) and PII-plaintext gate as the Duende CLI above — this source writes
+Same target (Azure Table Storage) and PII-plaintext gate as the Duende CLI above, this source writes
 `AuthUser` rows straight to Table Storage with no host-registered `IFieldCipher`/`IIndexTokenizer`, so
 it refuses to run unless `--AllowPlaintextPii true` confirms the target has neither configured (or you
 wire `NdjsonUserImportEngine` into the host's own DI container instead, where those seams do resolve).
@@ -203,9 +207,9 @@ seeds or OAuth client secrets, only user profile fields and a password hash stor
 |---|---|---|
 | `--Input` | *(required)* | Path to the NDJSON file |
 | `--Target:ConnectionString` | *(required)* | Azure Table Storage connection string |
-| `--DryRun` | `false` | Parse + validate every line, resolve duplicates against the target, and produce the full report — write nothing |
+| `--DryRun` | `false` | Parse + validate every line, resolve duplicates against the target, and produce the full report, write nothing |
 | `--OnDuplicate` | `skip` | How to treat a line whose email (case-insensitive) already matches an existing user: `skip` (leave it untouched, idempotent), `update` (merge the line's present fields onto the existing user), or `fail` (abort the run outright) |
-| `--BatchSize` | `500` | How many lines between progress log lines. Not a write-batching mechanism — `IUserStore` has no bulk API, so every import/update is still one store call |
+| `--BatchSize` | `500` | How many lines between progress log lines. Not a write-batching mechanism, `IUserStore` has no bulk API, so every import/update is still one store call |
 | `--AllowUnknownFields` | `false` | Accept and ignore top-level JSON properties outside the schema above, instead of failing the line |
 | `--ContinueOnError` | `false` | Exit 0 even if one or more lines failed to parse/validate. Does not apply to `--OnDuplicate fail`, which always aborts the run regardless of this flag |
 
@@ -214,9 +218,9 @@ seeds or OAuth client secrets, only user profile fields and a password hash stor
 The report is printed as JSON: `TotalLines`, `Imported`, `Updated`, `Skipped`, `Failed`, and the first
 20 `Failures` (`LineNumber` + `Reason`). Blank lines are not counted anywhere. Exit codes:
 
-- `0` — success (or `--ContinueOnError true` with one or more failed lines)
-- `1` — one or more lines failed to parse/validate, and `--ContinueOnError` was not set
-- `2` — the run aborted: `--OnDuplicate fail` hit an existing email, or a required option was missing
+- `0`: success (or `--ContinueOnError true` with one or more failed lines)
+- `1`: one or more lines failed to parse/validate, and `--ContinueOnError` was not set
+- `2`: the run aborted: `--OnDuplicate fail` hit an existing email, or a required option was missing
 
 ### Idempotency
 
@@ -227,7 +231,7 @@ silently collide with existing accounts.
 
 ### What is NOT imported
 
-- **Roles, scopes, OAuth clients, federation config.** This source is users only — see the Duende
+- **Roles, scopes, OAuth clients, federation config.** This source is users only: see the Duende
   importer above if you also need those.
 - **MFA credentials, external logins.** Not part of the schema; add them through the standard MFA
   setup / SSO flows after import.

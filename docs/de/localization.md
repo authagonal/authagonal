@@ -6,9 +6,9 @@ locale: de
 
 # Lokalisierung
 
-Die Login-Oberfläche liefert standardmäßig zehn Sprachen: Englisch, Vereinfachtes Chinesisch (`zh-Hans`), Deutsch (`de`), Französisch (`fr`), Spanisch (`es`), Vietnamesisch (`vi`), Portugiesisch (`pt`), Arabisch (`ar`), Afrikaans (`af`) und Hindi (`hi`). Die Server-API-Antworten sind in den ersten sieben davon lokalisiert. Die Lokalisierung umfasst die Server-API-Antworten, die Login-Oberfläche und diese Dokumentationsseite.
+Die Login-UI bringt von Haus aus elf Locales mit: Englisch, vereinfachtes Chinesisch (`zh-Hans`), Deutsch (`de`), Französisch (`fr`), Spanisch (`es`), Vietnamesisch (`vi`), Portugiesisch (`pt`), Arabisch (`ar`), Afrikaans (`af`), Hindi (`hi`) und Japanisch (`ja`). Auch die Antworten der Server-API und die serverseitig gerenderten Seiten sind in allen elf Sprachen lokalisiert. Die Lokalisierung umfasst die Antworten der Server-API, die Login-UI und diese Dokumentationsseite.
 
-## Unterstützte Sprachen
+## Unterstützte Sprachen {#supported-languages}
 
 | Code | Sprache | Login-UI | Server-API |
 |---|---|---|---|
@@ -19,30 +19,33 @@ Die Login-Oberfläche liefert standardmäßig zehn Sprachen: Englisch, Vereinfac
 | `es` | Spanisch | ✓ | ✓ |
 | `vi` | Vietnamesisch | ✓ | ✓ |
 | `pt` | Portugiesisch | ✓ | ✓ |
-| `ar` | Arabisch (rechts-nach-links) | ✓ | — |
-| `af` | Afrikaans | ✓ | — |
-| `hi` | Hindi | ✓ | — |
+| `ar` | Arabisch (rechts nach links) | ✓ | ✓ |
+| `af` | Afrikaans | ✓ | ✓ |
+| `hi` | Hindi | ✓ | ✓ |
+| `ja` | Japanisch | ✓ | ✓ |
 
-## Server (API-Antworten)
+## Server (API-Antworten) {#server-api-responses}
 
-Der Server verwendet die integrierte Lokalisierung von ASP.NET Core mit `IStringLocalizer<T>` und `.resx`-Ressourcendateien. Die Sprache wird aus dem `Accept-Language`-HTTP-Header ausgewählt.
+Der Server nutzt die eingebaute Lokalisierung von ASP.NET Core mit `IStringLocalizer<T>` und `.resx`-Ressourcendateien. Die Sprache wird anhand des HTTP-Headers `Accept-Language` ausgewählt.
 
-### Was lokalisiert ist
+### Was lokalisiert ist {#what-is-localized}
 
-- Passwort-Validierungsfehlermeldungen
-- Passwortrichtlinien-Labels (`GET /api/auth/password-policy`)
-- Nachrichten zum Passwort-Zurücksetzen (Token-Fehler, Ablauf, Erfolg)
-- Allgemeine Fehlerbeschreibungen der Ausnahmebehandlungs-Middleware
-- Admin-Benutzerverwaltungsnachrichten (E-Mail-Bestätigung, Verifizierung usw.)
-- Bestätigungsnachricht zum Beenden der Sitzung
+- Fehlermeldungen der Passwortvalidierung
+- Beschriftungen der Passwortrichtlinie (`GET /api/auth/password-policy`)
+- Meldungen im Ablauf zum Zurücksetzen des Passworts (Token-Fehler, Ablauf, Erfolg)
+- Allgemeine Fehlerbeschreibungen aus der Middleware zur Ausnahmebehandlung
+- Meldungen der administrativen Benutzerverwaltung (E-Mail-Bestätigung, Verifizierung usw.)
+- Bestätigungsmeldung zum Beenden der Sitzung
+- Serverseitig gerenderte Seiten (Ergebnis der E-Mail-Bestätigung, Bestätigung zum Beenden der Sitzung und Abmeldeseite), einschließlich `<html lang>` und `dir="rtl"` für Arabisch
+- Von der Bibliothek versendete E-Mails (`EmailService`: Verifizierung, Passwort-Reset und der Hinweis „Konto existiert bereits“), in der gespeicherten Locale des Empfängers (`AuthUser.Locale`), andernfalls in der Kultur der Anfrage, andernfalls auf Englisch
 
-### Was NICHT lokalisiert ist
+### Was NICHT lokalisiert ist {#what-is-not-localized}
 
-- Maschinenlesbare `error`-Codes (`"email_required"`, `"invalid_credentials"` usw.), diese sind API-Verträge und bleiben konstant
-- OAuth/OIDC-Fehlercodes und entwicklerbezogene Fehlerbeschreibungen an Token-, Autorisierungs- und Widerrufsendpunkten
-- Interne Protokollnachrichten und Ausnahmenachrichten
+- Maschinenlesbare `error`-Codes (`"email_required"`, `"invalid_credentials"` usw.); sie sind Teil des API-Vertrags und bleiben konstant
+- OAuth-/OIDC-Fehlercodes und an Entwickler gerichtete Fehlerbeschreibungen an Token-, Autorisierungs- und Widerrufsendpunkt
+- Interne Protokollmeldungen und Ausnahmemeldungen
 
-### Server-Lokalisierung testen
+### Lokalisierung des Servers testen {#testing-server-localization}
 
 Senden Sie einen `Accept-Language`-Header an einen beliebigen lokalisierten Endpunkt:
 
@@ -57,9 +60,9 @@ curl -H "Accept-Language: zh-Hans" https://auth.example.com/api/auth/password-po
 curl -H "Accept-Language: de" https://auth.example.com/api/auth/password-policy
 ```
 
-### Ressourcendateien
+### Ressourcendateien {#resource-files}
 
-Alle Server-Übersetzungszeichenketten befinden sich in `.resx`-Dateien unter `src/Authagonal.Server/Resources/`:
+Alle Übersetzungen des Servers liegen in `.resx`-Dateien unter `src/Authagonal.Server/Resources/`:
 
 ```
 Resources/
@@ -71,28 +74,32 @@ Resources/
   SharedMessages.es.resx
   SharedMessages.vi.resx
   SharedMessages.pt.resx
+  SharedMessages.ja.resx
+  SharedMessages.ar.resx
+  SharedMessages.af.resx
+  SharedMessages.hi.resx
 ```
 
-## Login-Oberfläche
+## Login-UI {#login-ui}
 
-Die Login-SPA verwendet [react-i18next](https://react.i18next.com/) für die clientseitige Lokalisierung. Die Sprache wird automatisch aus der `navigator.language`-Einstellung des Browsers erkannt.
+Die Login-SPA verwendet [react-i18next](https://react.i18next.com/) für die clientseitige Lokalisierung. Die Sprache wird automatisch über die Browsereinstellung `navigator.language` erkannt.
 
-Die registrierten Sprachen befinden sich in einer einzigen `LANGUAGES`-Registry in `login-app/src/i18n/index.ts`, die sowohl die i18next-Ressourcenregistrierung als auch jede Sprachauswahl steuert, sodass die beiden nicht auseinanderdriften können. Derzeit erscheint jede registrierte Sprache in der Standardauswahl. `DEFAULT_LANGUAGES` wird getrennt von `LANGUAGES` exportiert, damit eine künftig eingeschränkte Sprache ohne Änderung der Aufrufstellen ausgeschlossen werden könnte — ausgeschlossen ist heute jedoch keine. Mandanten können die Auswahl auf die gleiche Weise einschränken: Ein `languages`-Array in `branding.json` ersetzt die Standardliste vollständig (siehe [Branding](branding)).
+Die registrierten Locales stehen in einer einzigen `LANGUAGES`-Registry in `login-app/src/i18n/index.ts`. Sie steuert sowohl die Registrierung der i18next-Ressourcen als auch jede Sprachauswahl, sodass beide nicht auseinanderlaufen können. Derzeit erscheint jede registrierte Locale in der Standardauswahl. `DEFAULT_LANGUAGES` wird getrennt von `LANGUAGES` exportiert, damit eine künftige eingeschränkte Locale aus den Auswahllisten herausgenommen werden kann, ohne die Aufrufstellen anzufassen; heute ist jedoch nichts ausgenommen. Mandanten können die Auswahl auf dieselbe Weise eingrenzen: Ein `languages`-Array in `branding.json` ersetzt die Standardliste vollständig (siehe [Branding](branding)).
 
-Die aktive Sprache wird auf `<html lang>` und `<html dir>` gespiegelt, sodass Rechts-nach-links-Sprachen (`ar`) die Auth-Karte automatisch umkehren, auch wenn die Sprache über die Auswahl direkt gewechselt wird.
+Die aktive Sprache wird auf `<html lang>` und `<html dir>` gespiegelt, sodass Sprachen mit Schreibrichtung von rechts nach links (`ar`) die Anmeldekarte automatisch spiegeln, auch wenn die Sprache direkt über die Auswahl gewechselt wird.
 
-### Spracherkennung
+### Spracherkennung {#language-detection}
 
-Die Erkennungsreihenfolge ist:
+Die Reihenfolge der Erkennung ist:
 
-1. **localStorage**: gespeicherte Präferenz von einem früheren Besuch
-2. **Abfrageparameter**: `?lng=de` überschreibt die Browsererkennung
+1. **localStorage**: gespeicherte Präferenz aus einem früheren Besuch
+2. **Query-Parameter**: `?lng=de` übersteuert die Erkennung über den Browser
 3. **Browsersprache**: `navigator.language` (automatisch)
 4. **Fallback**: Englisch (`en`)
 
-### Übersetzungsdateien
+### Übersetzungsdateien {#translation-files}
 
-Übersetzungs-JSON-Dateien sind mit der App gebündelt unter `login-app/src/i18n/`:
+Die JSON-Übersetzungsdateien werden mit der App unter `login-app/src/i18n/` gebündelt:
 
 ```
 i18n/
@@ -107,15 +114,16 @@ i18n/
   ar.json         # Arabic
   af.json         # Afrikaans
   hi.json         # Hindi
+  ja.json         # Japanese
 ```
 
-### Passwortrichtlinien-Labels
+### Beschriftungen der Passwortrichtlinie {#password-policy-labels}
 
-Die Passwort-Zurücksetzungsseite übersetzt ihre Passwortanforderungs-Checkliste clientseitig basierend auf dem `rule`-Schlüssel, der von `GET /api/auth/password-policy` zurückgegeben wird (mit Rückfall auf das vom Server bereitgestellte `label` für nicht erkannte Regeln). Dies stellt sicher, dass die Anforderungen der in der Oberfläche gewählten Sprache folgen, auch wenn der `Accept-Language`-Header des Browsers abweicht. Die Registrierungsseite zeigt die vom Server bereitgestellten `label`-Werte an, die aus `Accept-Language` lokalisiert werden.
+Die Seite zum Zurücksetzen des Passworts übersetzt ihre Checkliste der Passwortanforderungen clientseitig anhand des `rule`-Schlüssels, den `GET /api/auth/password-policy` zurückgibt (bei unbekannten Regeln greift sie auf das vom Server gelieferte `label` zurück). So folgen die Anforderungen der in der UI gewählten Sprache, auch wenn der `Accept-Language`-Header des Browsers davon abweicht. Die Registrierungsseite zeigt die vom Server gelieferten `label`-Werte an, die anhand von `Accept-Language` lokalisiert sind.
 
-### npm-Paketnutzer
+### Nutzung über das npm-Paket {#npm-package-consumers}
 
-Wenn Sie die Login-App über `@authagonal/login` nutzen, wird die i18n-Instanz exportiert:
+Wenn Sie die Login-App über `@authagonal/login` einbinden, wird die i18n-Instanz exportiert:
 
 ```typescript
 import { i18n } from '@authagonal/login';
@@ -124,76 +132,76 @@ import { i18n } from '@authagonal/login';
 i18n.changeLanguage('de');
 ```
 
-## Dokumentation
+## Dokumentation {#documentation}
 
-Die Dokumentationsseite verwendet einen verzeichnisbasierten Ansatz. Englische Seiten befinden sich im Stammverzeichnis und Übersetzungen in Sprachunterverzeichnissen (`/zh-Hans/`, `/de/`, `/fr/`, `/es/`, `/vi/`, `/pt/`). Ein Sprachumschalter-Dropdown in der Seitenleiste ermöglicht das Wechseln zwischen Sprachen.
+Die Dokumentationsseite ist verzeichnisbasiert aufgebaut. Englische Seiten liegen im Stammverzeichnis, Übersetzungen in Unterverzeichnissen je Locale (`/zh-Hans/`, `/de/`, `/fr/`, `/es/`, `/vi/`, `/pt/`, `/ja/`). Über ein Auswahlmenü in der Seitenleiste lässt sich zwischen den Sprachen wechseln.
 
-## Eine neue Sprache hinzufügen
+## Eine neue Sprache hinzufügen {#adding-a-new-language}
 
-Um Unterstützung für eine neue Sprache hinzuzufügen (z.B. Japanisch `ja`):
+So fügen Sie Unterstützung für eine neue Sprache hinzu (z. B. Italienisch `it`):
 
-### 1. Server
+### 1. Server {#1-server}
 
-Erstellen Sie eine neue `.resx`-Datei, indem Sie die englische kopieren und die Werte übersetzen:
+Legen Sie eine neue `.resx`-Datei an, indem Sie die englische kopieren und die Werte übersetzen:
 
 ```
-src/Authagonal.Server/Resources/SharedMessages.ja.resx
+src/Authagonal.Server/Resources/SharedMessages.it.resx
 ```
 
-Fügen Sie `"ja"` zum Array der unterstützten Kulturen in `AuthagonalExtensions.cs` hinzu:
+Fügen Sie `"it"` zu `SupportedLocales.All` in `src/Authagonal.Server/Services/SupportedLocales.cs` hinzu, der einzigen Liste, die sowohl die Middleware zur Lokalisierung von Anfragen als auch die serverseitig gerenderten Seiten lesen:
 
 ```csharp
-var supportedCultures = new[] { "en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja" };
+public static readonly string[] All = ["en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja", "ar", "af", "hi", "it"];
 ```
 
-### 2. Login-Oberfläche
+### 2. Login-UI {#2-login-ui}
 
-Erstellen Sie eine neue Übersetzungs-JSON-Datei, indem Sie `en.json` kopieren und die Werte übersetzen:
+Legen Sie eine neue JSON-Übersetzungsdatei an, indem Sie `en.json` kopieren und die Werte übersetzen:
 
 ```
-login-app/src/i18n/ja.json
+login-app/src/i18n/it.json
 ```
 
-Registrieren Sie sie im `LANGUAGES`-Array in `login-app/src/i18n/index.ts`. Dieser eine Eintrag registriert die i18next-Ressource und fügt die Sprache zu jeder Auswahl hinzu:
+Registrieren Sie sie im `LANGUAGES`-Array in `login-app/src/i18n/index.ts`. Dieser eine Eintrag registriert die i18next-Ressource und fügt die Sprache jeder Auswahl hinzu:
 
 ```typescript
-import ja from './ja.json';
+import it from './it.json';
 
 // In the LANGUAGES array:
-{ code: 'ja', label: '日本語', resource: ja },
+{ code: 'it', label: 'Italiano', resource: it },
 ```
 
-### 3. Dokumentation
+### 3. Dokumentation {#3-documentation}
 
-Erstellen Sie ein neues Verzeichnis mit übersetzten Markdown-Dateien:
+Legen Sie ein neues Verzeichnis mit übersetzten Markdown-Dateien an:
 
 ```
-docs/ja/
+docs/it/
   index.md
   installation.md
   quickstart.md
   ...
 ```
 
-Fügen Sie einen Sprach-Standard in `docs/_config.yml` hinzu:
+Fügen Sie in `docs/_config.yml` einen Locale-Standardwert hinzu:
 
 ```yaml
 defaults:
   - scope:
-      path: "ja"
+      path: "it"
     values:
-      locale: "ja"
+      locale: "it"
 ```
 
-Fügen Sie die Sprachoption zum Umschalter in `docs/_layouts/default.html` hinzu.
+Fügen Sie die Sprachoption der Auswahl in `docs/_layouts/default.html` hinzu.
 
-## Neue Zeichenketten hinzufügen
+## Neue Zeichenketten hinzufügen {#adding-new-strings}
 
-### Server
+### Server {#server}
 
 1. Fügen Sie den Schlüssel und den englischen Wert zu `SharedMessages.resx` hinzu
-2. Fügen Sie übersetzte Werte zu jeder `.resx`-Datei der jeweiligen Sprache hinzu
-3. Verwenden Sie `IStringLocalizer<SharedMessages>`, um auf die Zeichenkette zuzugreifen:
+2. Fügen Sie die übersetzten Werte zur `.resx`-Datei jeder Locale hinzu
+3. Greifen Sie über `IStringLocalizer<SharedMessages>` auf die Zeichenkette zu:
 
 ```csharp
 // Inject via parameter
@@ -206,11 +214,11 @@ localizer["MyNewKey"].Value
 string.Format(localizer["MyNewKey"].Value, param1)
 ```
 
-### Login-Oberfläche
+### Login-UI {#login-ui-1}
 
 1. Fügen Sie den Schlüssel und den englischen Wert zu `en.json` hinzu
-2. Fügen Sie übersetzte Werte zu jeder JSON-Datei der jeweiligen Sprache hinzu
-3. Verwenden Sie die `t()`-Funktion in Komponenten:
+2. Fügen Sie die übersetzten Werte zur JSON-Datei jeder Locale hinzu
+3. Verwenden Sie in Komponenten die Funktion `t()`:
 
 ```tsx
 const { t } = useTranslation();

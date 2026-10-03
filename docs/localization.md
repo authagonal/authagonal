@@ -5,7 +5,7 @@ title: Localization
 
 # Localization
 
-The login UI ships ten locales out of the box: English, Simplified Chinese (`zh-Hans`), German (`de`), French (`fr`), Spanish (`es`), Vietnamese (`vi`), Portuguese (`pt`), Arabic (`ar`), Afrikaans (`af`) and Hindi (`hi`). Server API responses are localized in the first seven of these. Localization covers the server API responses, the login UI, and this documentation site.
+The login UI ships eleven locales out of the box: English, Simplified Chinese (`zh-Hans`), German (`de`), French (`fr`), Spanish (`es`), Vietnamese (`vi`), Portuguese (`pt`), Arabic (`ar`), Afrikaans (`af`), Hindi (`hi`) and Japanese (`ja`). Server API responses and server-rendered pages are localized in all eleven as well. Localization covers the server API responses, the login UI, and this documentation site.
 
 ## Supported Languages
 
@@ -18,9 +18,10 @@ The login UI ships ten locales out of the box: English, Simplified Chinese (`zh-
 | `es` | Spanish | ✓ | ✓ |
 | `vi` | Vietnamese | ✓ | ✓ |
 | `pt` | Portuguese | ✓ | ✓ |
-| `ar` | Arabic (right-to-left) | ✓ | — |
-| `af` | Afrikaans | ✓ | — |
-| `hi` | Hindi | ✓ | — |
+| `ar` | Arabic (right-to-left) | ✓ | ✓ |
+| `af` | Afrikaans | ✓ | ✓ |
+| `hi` | Hindi | ✓ | ✓ |
+| `ja` | Japanese | ✓ | ✓ |
 
 ## Server (API Responses)
 
@@ -34,6 +35,8 @@ The server uses ASP.NET Core's built-in localization with `IStringLocalizer<T>` 
 - Generic error descriptions from the exception handling middleware
 - Admin user management messages (email confirmation, verification, etc.)
 - End session confirmation message
+- Server-rendered pages (email confirmation result, end-session confirm and signed-out pages), including `<html lang>` and `dir="rtl"` for Arabic
+- Library-sent emails (`EmailService`: verification, password reset, and the "account already exists" notice), in the recipient's saved locale (`AuthUser.Locale`), else the request culture, else English
 
 ### What is NOT localized
 
@@ -70,6 +73,10 @@ Resources/
   SharedMessages.es.resx
   SharedMessages.vi.resx
   SharedMessages.pt.resx
+  SharedMessages.ja.resx
+  SharedMessages.ar.resx
+  SharedMessages.af.resx
+  SharedMessages.hi.resx
 ```
 
 ## Login UI
@@ -106,6 +113,7 @@ i18n/
   ar.json         # Arabic
   af.json         # Afrikaans
   hi.json         # Hindi
+  ja.json         # Japanese
 ```
 
 ### Password policy labels
@@ -125,24 +133,24 @@ i18n.changeLanguage('de');
 
 ## Documentation
 
-The docs site uses a directory-based approach. English pages are at the root, and translations are in locale subdirectories (`/zh-Hans/`, `/de/`, `/fr/`, `/es/`, `/vi/`, `/pt/`). A language switcher dropdown in the sidebar allows switching between languages.
+The docs site uses a directory-based approach. English pages are at the root, and translations are in locale subdirectories (`/zh-Hans/`, `/de/`, `/fr/`, `/es/`, `/vi/`, `/pt/`, `/ja/`). A language switcher dropdown in the sidebar allows switching between languages.
 
 ## Adding a New Language
 
-To add support for a new language (e.g., Japanese `ja`):
+To add support for a new language (e.g., Italian `it`):
 
 ### 1. Server
 
 Create a new `.resx` file by copying the English one and translating the values:
 
 ```
-src/Authagonal.Server/Resources/SharedMessages.ja.resx
+src/Authagonal.Server/Resources/SharedMessages.it.resx
 ```
 
-Add `"ja"` to the supported cultures array in `AuthagonalExtensions.cs`:
+Add `"it"` to `SupportedLocales.All` in `src/Authagonal.Server/Services/SupportedLocales.cs`, the single list the request localization middleware and the server-rendered pages both read:
 
 ```csharp
-var supportedCultures = new[] { "en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja" };
+public static readonly string[] All = ["en", "zh-Hans", "de", "fr", "es", "vi", "pt", "ja", "ar", "af", "hi", "it"];
 ```
 
 ### 2. Login UI
@@ -150,16 +158,16 @@ var supportedCultures = new[] { "en", "zh-Hans", "de", "fr", "es", "vi", "pt", "
 Create a new translation JSON file by copying `en.json` and translating the values:
 
 ```
-login-app/src/i18n/ja.json
+login-app/src/i18n/it.json
 ```
 
 Register it in the `LANGUAGES` array in `login-app/src/i18n/index.ts`. That one entry registers the i18next resource and adds the language to every picker:
 
 ```typescript
-import ja from './ja.json';
+import it from './it.json';
 
 // In the LANGUAGES array:
-{ code: 'ja', label: '日本語', resource: ja },
+{ code: 'it', label: 'Italiano', resource: it },
 ```
 
 ### 3. Documentation
@@ -167,7 +175,7 @@ import ja from './ja.json';
 Create a new directory with translated markdown files:
 
 ```
-docs/ja/
+docs/it/
   index.md
   installation.md
   quickstart.md
@@ -179,9 +187,9 @@ Add a locale default in `docs/_config.yml`:
 ```yaml
 defaults:
   - scope:
-      path: "ja"
+      path: "it"
     values:
-      locale: "ja"
+      locale: "it"
 ```
 
 Add the language option to the switcher in `docs/_layouts/default.html`.

@@ -64,7 +64,7 @@ GET /api/v1/profile/{userId}
 
 Returns the profile plus what a support console needs to diagnose a sign-in problem:
 `emailConfirmed`, `isActive`, `lockoutEnd`, `accessFailedCount`, `roles`, the linked
-`externalLogins`, and `hasPassword` — presence only, never the hash. That last one is the difference
+`externalLogins`, and `hasPassword` (presence only, never the hash). That last one is the difference
 between "they have forgotten their password" and "they have never had one, they sign in with SSO",
 which are opposite pieces of advice.
 
@@ -100,7 +100,7 @@ Optional admin-only fields: `userId` (caller-supplied id, `409 user_id_in_use` o
 app that is ITSELF a provisioning target and is already part-way through setting this user up: it is
 calling here to mint the identity, not to be called back about a user it is in the middle of
 creating. Without it that app receives its own Try for a half-built user, carrying only the
-attributes that survived the round trip — and, if it recovers, ends up provisioning the user twice.
+attributes that survived the round trip, and, if it recovers, ends up provisioning the user twice.
 
 ### Update User
 
@@ -119,7 +119,7 @@ Content-Type: application/json
 `userId` is required; every other field is optional, only provided fields are updated.
 
 `isActive` deactivates or reactivates the account. `emailConfirmed` (accepted as `emailVerified`
-too) marks the address confirmed without sending a verification mail — for when possession has been
+too) marks the address confirmed without sending a verification mail, for when possession has been
 established some other way.
 
 Changing `organizationId`, or deactivating, triggers:
@@ -143,7 +143,7 @@ Prefix search over the email and name indexes. Returns `{ "users": [ ... ] }`.
 GET /api/v1/profile/by-email?email=jane@example.com
 ```
 
-Exact lookup — distinct from search, which is a prefix match and may return several people. A caller
+Exact lookup, distinct from search, which is a prefix match and may return several people. A caller
 resolving "this address" to "this account" wants one answer or none. `404` if there is no such user.
 
 ### List Users
@@ -153,7 +153,7 @@ GET /api/v1/profile?organizationId=&count=100&continuationToken=
 ```
 
 Cursor-paged directory listing; pass the returned `continuationToken` back for the next page, and
-stop when it is null. Cursors rather than offsets because the store pages by token — an offset would
+stop when it is null. Cursors rather than offsets because the store pages by token: an offset would
 re-scan from the start every page.
 
 ### Which Users Exist
@@ -165,9 +165,20 @@ Content-Type: application/json
 { "userIds": [ "a", "b", "c" ] }
 ```
 
-Returns the subset that exist, plus `truncated: true` when the request exceeded the 500-id cap — so
+Returns the subset that exist, plus `truncated: true` when the request exceeded the 500-id cap, so
 a caller is told its batch was trimmed rather than silently answered about 500 of 600. For
 reconciling an id set against another system's.
+
+### MFA Status for Many Users
+
+```
+POST /api/v1/profile/mfa-status
+Content-Type: application/json
+
+{ "userIds": [ "a", "b", "c" ] }
+```
+
+Returns `{ "statuses": { "a": true, "b": false }, "truncated": false }`: `true` means the user has at least one MFA credential. Capped at 500 ids; `truncated: true` says the request was trimmed. For "uses MFA" badges on a directory view.
 
 ### Set a Password
 
@@ -263,7 +274,7 @@ Removes a specific MFA credential (e.g., a lost authenticator). If the last prim
 ```
 POST   /api/v1/saml/connections                    # Create
 GET    /api/v1/saml/connections/{connectionId}     # Get one
-PUT    /api/v1/saml/connections/{connectionId}     # Update (partial — only supplied fields change)
+PUT    /api/v1/saml/connections/{connectionId}     # Update (partial: only supplied fields change)
 DELETE /api/v1/saml/connections/{connectionId}     # Delete
 ```
 
@@ -340,7 +351,7 @@ Content-Type: application/json
 
 {
   "name": "billing.read",
-  "displayName": "Billing — read-only",
+  "displayName": "Billing, read-only",
   "description": "View invoices and payment history",
   "userClaims": ["billing_plan"]
 }
@@ -469,12 +480,12 @@ GET /api/v1/roles/user/{userId}
 GET /api/v1/roles/{roleName}/users?maxResults=200
 ```
 
-The reverse of the above — who holds this role — answered from a role membership index rather than
+The reverse of the above (who holds this role), answered from a role membership index rather than
 by reading every user. Returns `{ "roleName": "...", "members": [ { "userId", "email", "firstName",
 "lastName", "roles" } ] }`; each member carries their full role set, because a console listing one
 role almost always wants to show what else its members have.
 
-`404 role_not_found` for a role that does not exist, rather than an empty list — "nobody holds this"
+`404 role_not_found` for a role that does not exist, rather than an empty list: "nobody holds this"
 and "you have misspelled the role" are different problems. `501 not_supported` if the configured
 store does not index role membership, for the same reason: an empty membership list would read as
 "nobody administers this".

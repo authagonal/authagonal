@@ -6,11 +6,11 @@ locale: zh-Hans
 
 # 自定义服务器快速入门
 
-本指南演示如何将 Authagonal 作为库托管在您自己的 ASP.NET Core 项目中，然后使用您自己的 React 组件自定义登录界面。
+本指南演示如何在你自己的 ASP.NET Core 项目中将 Authagonal 作为库托管，然后用你自己的 React 组件定制登录界面。
 
-## 第 1 部分：服务器设置
+## 第 1 部分：服务器搭建 {#part-1-server-setup}
 
-### 创建项目
+### 创建项目 {#create-the-project}
 
 ```bash
 dotnet new web -n MyAuthServer
@@ -21,7 +21,7 @@ dotnet add package Authagonal.Server
 dotnet add package Authagonal.AzureProvider
 ```
 
-您的 `.csproj` 应包含：
+你的 `.csproj` 应包含：
 
 ```xml
 <ItemGroup>
@@ -30,16 +30,16 @@ dotnet add package Authagonal.AzureProvider
 </ItemGroup>
 ```
 
-`Authagonal.AzureProvider` 提供 Azure Table Storage 存储，`AddAuthagonal` 会从 `Storage:*` 配置将其接入。若要改为托管在 AWS 上，请引用 `Authagonal.AwsProvider`，并在 `AddAuthagonal` 之前调用 `AddAuthagonalAwsStorage(...)`，参见 [安装 → AWS 后端](installation#aws-backend)。
+`Authagonal.AzureProvider` 提供 Azure Table Storage 存储，由 `AddAuthagonal` 根据 `Storage:*` 配置接入。如果要改为托管在 AWS 上，请引用 `Authagonal.AwsProvider`，并在 `AddAuthagonal` 之前调用 `AddAuthagonalAwsStorage(...)`，参见[安装 → AWS 后端](installation#aws-backend)。
 
-### 配置 Program.cs
+### 配置 Program.cs {#configure-programcs}
 
-最少需要三个调用：`AddAuthagonal`、`UseAuthagonal` 和 `MapAuthagonalEndpoints`。
+最小配置只需三个调用：`AddAuthagonal`、`UseAuthagonal` 和 `MapAuthagonalEndpoints`。
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Register custom services BEFORE AddAuthagonal — yours take precedence
+// 1. Register custom services BEFORE AddAuthagonal (yours take precedence)
 builder.Services.AddSingleton<IAuthHook, AuditAuthHook>();
 builder.Services.AddSingleton<IEmailService, ConsoleEmailService>();
 
@@ -58,7 +58,7 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
-### 配置 appsettings.json
+### 配置 appsettings.json {#configure-appsettingsjson}
 
 ```json
 {
@@ -83,24 +83,24 @@ app.Run();
 }
 ```
 
-| 键 | 描述 |
+| 键 | 说明 |
 |---|---|
-| `Issuer` | 您的认证服务器的公共 URL。用于令牌和 OIDC 发现。 |
-| `Storage:ConnectionString` | Azure Table Storage 连接字符串。 |
-| `Clients` | 启动时播种的 OAuth 客户端数组。 |
+| `Issuer` | 身份验证服务器的公开 URL。用于令牌和 OIDC 发现。 |
+| `Storage:ConnectionString` | Azure Table Storage 连接字符串。也可以改为设置 `Storage:TableServiceUri`，以托管标识进行身份验证；两者必须设置其一。 |
+| `Clients` | 启动时预置的 OAuth 客户端数组。 |
 
-### 扩展点
+### 扩展点 {#extensibility-points}
 
-在调用 `AddAuthagonal()` **之前**注册您的实现，Authagonal 使用 `TryAdd`，因此您的注册优先。
+请在调用 `AddAuthagonal()` **之前**注册你的实现。Authagonal 使用 `TryAdd`，因此你的注册优先。`IAuthHook` 在性质上是个例外：你可以注册多个，它们全部都会运行；只有在你一个都没注册时，才会添加内置的空操作钩子。
 
 | 接口 | 用途 | 默认值 |
 |---|---|---|
-| `IEmailService` | 发送验证和密码重置邮件 | 设置了 `Email:ResendApiKey` 时使用内置的 Resend 发送器；否则为空操作（静默丢弃） |
-| `IAuthHook` | 拦截或审计登录、注册和令牌事件 | 空操作 |
-| `IProvisioningOrchestrator` | 在授权时将用户配置到下游应用 | TCC 配置 |
-| `ISecretProvider` | 解析客户端密钥 | 明文（或使用 `SecretProvider:VaultUri` 的 Key Vault） |
+| `IEmailService` | 发送验证邮件、密码重置邮件和账户已存在邮件 | 设置了 `Email:ResendApiKey` 时使用内置的 Resend 发送器；否则为空操作（静默丢弃） |
+| `IAuthHook` | 对登录、注册和令牌事件进行拦截或审计 | 空操作 |
+| `IProvisioningOrchestrator` | 在授权时将用户预配到下游应用 | TCC 预配 |
+| `ISecretProvider` | 解析客户端密钥 | 明文（或在设置 `SecretProvider:VaultUri` 时使用 Key Vault） |
 
-#### 示例：审计钩子
+#### 示例：审计钩子 {#example-audit-hook}
 
 ```csharp
 using Authagonal.Core.Models;
@@ -125,7 +125,7 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
     public Task OnLoginFailedAsync(string email, string reason,
         CancellationToken ct = default)
     {
-        logger.LogWarning("Failed login: {Email} — {Reason}", email, reason);
+        logger.LogWarning("Failed login: {Email}: {Reason}", email, reason);
         return Task.CompletedTask;
     }
 
@@ -154,9 +154,9 @@ public class AuditAuthHook(ILogger<AuditAuthHook> logger) : IAuthHook
 }
 ```
 
-该接口还有更多可选成员，它们带有空操作的默认实现（`OnMfaVerifyFailedAsync`、`OnEmailConfirmedAsync`、`OnMfaEnrolledAsync`、`OnMfaCredentialRemovedAsync`、`OnRecoveryCodesRegeneratedAsync`、`OnPasswordChangedAsync`），仅在您需要这些事件时才覆盖它们。
+该接口还有其他可选成员，它们带有空操作的默认实现（`OnMfaVerifyFailedAsync`、`OnEmailConfirmedAsync`、`OnMfaEnrolledAsync`、`OnMfaCredentialRemovedAsync`、`OnRecoveryCodesRegeneratedAsync`、`OnPasswordChangedAsync`、`OnTokenIssuingAsync`、`OnDelegationMintedAsync`、`OnApprovalRequestedAsync`、`OnApprovalResolvedAsync`、`OnAgentConsentChangedAsync`、`OnConsentRevokedAsync`、`OnCapabilityTicketRedeemedAsync`），只有在需要这些事件时才需重写。
 
-#### 示例：邮件服务
+#### 示例：邮件服务 {#example-email-service}
 
 ```csharp
 using Authagonal.Core.Services;
@@ -179,19 +179,21 @@ public class ConsoleEmailService(ILogger<ConsoleEmailService> logger) : IEmailSe
 }
 ```
 
-> **邮件是最常见的集成陷阱。** 如果您未注册 `IEmailService` 且未设置 `Email:ResendApiKey`，验证邮件和密码重置邮件会被静默丢弃，而且由于确认邮箱的登录门控默认开启，自助注册的用户将永远无法登录（`UseAuthagonal` 会在启动时发出警告）。当配置了 `Email:ResendApiKey` + `Email:SenderEmail` 时，内置的 Resend 发送器会自动激活；在开发 / 测试环境中，`Auth:AutoConfirmEmailDomains` 会为列出的域名跳过验证。参见 [配置 → 邮件](configuration#email)。
+`IEmailService` 还有一个可选的 `SendAccountExistsEmailAsync(email, signInUrl, ct)`（默认为空操作），当有人用已有账户的地址注册时发送。
 
-### 添加自定义端点
+> **邮件是最常见的集成陷阱。**如果你既没有注册 `IEmailService`，也没有设置 `Email:ResendApiKey`，验证邮件和密码重置邮件会被静默丢弃；又因为“邮箱已确认才可登录”的限制默认开启，自助注册的用户将永远无法登录（`UseAuthagonal` 会在启动时发出警告）。配置了 `Email:ResendApiKey` + `Email:SenderEmail` 后，内置的 Resend 发送器会自动启用；在开发/测试环境中，`Auth:AutoConfirmEmailDomains` 可为列出的域名跳过验证。参见[配置 → 邮件](configuration#email)。
 
-您可以在 Authagonal 的端点旁边添加自己的端点：
+### 添加自定义端点 {#add-custom-endpoints}
+
+你可以在 Authagonal 的端点之外添加自己的端点：
 
 ```csharp
 app.MapGet("/custom/health", () => Results.Ok(new { status = "healthy" }));
 ```
 
-### 禁用管理 API
+### 禁用管理 API {#disable-admin-api}
 
-对于面向公众的部署，禁用管理端点：
+对于面向公众的部署，请禁用管理端点：
 
 ```json
 {
@@ -201,21 +203,21 @@ app.MapGet("/custom/health", () => Results.Ok(new { status = "healthy" }));
 }
 ```
 
-### 运行
+### 运行 {#run-it}
 
 ```bash
 dotnet run
 ```
 
-服务器在配置的 URL 上启动，在 `/.well-known/openid-configuration` 提供 OIDC 发现文档，在 `/login` 提供登录界面，以及所有认证/管理 API。
+服务器会在配置的 URL 上启动，在 `/.well-known/openid-configuration` 提供 OIDC 发现文档，在 `/login` 提供登录界面，并提供所有身份验证/管理 API。
 
 ---
 
-## 第 2 部分：自定义登录界面
+## 第 2 部分：自定义登录界面 {#part-2-custom-login-ui}
 
-默认登录 SPA 开箱即用，但您可以用自己的 React 应用替换它，该应用从 `@authagonal/login` npm 包导入组件和 API 客户端。
+默认的登录 SPA 开箱即用，但你也可以用自己的 React 应用替换它，并从 `@authagonal/login` npm 包中导入组件和 API 客户端。
 
-### 搭建前端项目
+### 搭建前端脚手架 {#scaffold-the-frontend}
 
 ```bash
 mkdir login-app && cd login-app
@@ -224,10 +226,10 @@ npm install react react-dom react-router @authagonal/login
 npm install -D vite @vitejs/plugin-react typescript @types/react @types/react-dom
 ```
 
-### npm 包导出内容
+### npm 包导出的内容 {#what-the-npm-package-exports}
 
 ```typescript
-// Components — use as-is or as reference
+// Components: use as-is or as reference
 import {
   AuthLayout,
   LoginPage,
@@ -237,17 +239,19 @@ import {
   MfaSetupPage,
   RegisterPage,
   ConsentPage,
+  AgentConsentPage,
   GrantsPage,
   DevicePage,
-  App,              // Standalone SPA with full routing
+  App,              // Standalone SPA with full routing (accepts an extraRoutes prop)
 } from '@authagonal/login';
 
 // UI primitives
 import {
-  Button, Input, Label, Card, Alert, Separator, cn,
+  Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
+  Alert, Separator, Turnstile, cn,
 } from '@authagonal/login';
 
-// API clients — call from your custom pages
+// API clients: call from your custom pages
 import {
   login, register, logout, ssoCheck, forgotPassword, resetPassword,
   getSession, getProviders, getPasswordPolicy,
@@ -259,10 +263,14 @@ import {
 
 // Branding
 import {
-  loadBranding, useBranding, BrandingContext, resolveLocalized,
+  loadBranding, useBranding, BrandingContext, brandingDefaults, resolveLocalized,
+  getBoot, getOrganization,
 } from '@authagonal/login';
 
-// i18n — always import from this package, not react-i18next directly
+// Redirect helpers for the post-login hop
+import { resolveRedirect, isSameOriginPath } from '@authagonal/login';
+
+// i18n: always import from this package, not react-i18next directly
 import { useTranslation, i18n } from '@authagonal/login';
 
 // Styles
@@ -276,9 +284,9 @@ import type {
 } from '@authagonal/login';
 ```
 
-### 入口点 (main.tsx)
+### 入口文件（main.tsx） {#entry-point-maintsx}
 
-从服务器加载品牌配置，并将您的应用包裹在品牌上下文中：
+从服务器加载品牌配置，并用品牌上下文包裹你的应用：
 
 ```tsx
 import { createRoot } from 'react-dom/client';
@@ -287,7 +295,7 @@ import '@authagonal/login/styles.css';
 import App from './App';
 
 loadBranding().then((config) => {
-  document.title = `Sign In — ${config.appName}`;
+  document.title = `Sign In | ${config.appName}`;
   createRoot(document.getElementById('root')!).render(
     <BrandingContext.Provider value={config}>
       <App />
@@ -296,30 +304,35 @@ loadBranding().then((config) => {
 });
 ```
 
-### 路由 (App.tsx)
+### 路由（App.tsx） {#routing-apptsx}
 
-将自定义页面与基础包页面混合使用：
+将自定义页面与基础包中的页面混合使用。服务器会把用户引导到 `/login` 下的路径（授权端点重定向到 `/login?returnUrl=...`，邮件中的链接指向 `/login/reset-password`、`/login/consent`、`/login/device`），因此路由器必须使用 `basename="/login"`，下面的路由都相对于它：
 
 ```tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import {
-  ForgotPasswordPage, ResetPasswordPage, ConsentPage, DevicePage, GrantsPage,
+  RegisterPage, ForgotPasswordPage, ResetPasswordPage, MfaChallengePage, MfaSetupPage,
+  ConsentPage, AgentConsentPage, DevicePage, GrantsPage,
 } from '@authagonal/login';
 import MyLoginPage from './MyLoginPage';
 import MyLayout from './MyLayout';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/login">
       <MyLayout>
         <Routes>
-          <Route path="/login" element={<MyLoginPage />} />
+          <Route path="/" element={<MyLoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/mfa-challenge" element={<MfaChallengePage />} />
+          <Route path="/mfa-setup" element={<MfaSetupPage />} />
           <Route path="/consent" element={<ConsentPage />} />
+          <Route path="/consent/agents/:clientId" element={<AgentConsentPage />} />
           <Route path="/device" element={<DevicePage />} />
           <Route path="/grants" element={<GrantsPage />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </MyLayout>
     </BrowserRouter>
@@ -327,16 +340,22 @@ export default function App() {
 }
 ```
 
-### 自定义登录页面
+如果你只想在现成应用的基础上添加页面，请改为渲染包中的 `<App extraRoutes={...} />`。它已经提供了上面的所有路由（外加 `/account`）。
 
-使用 npm 包中的 API 客户端构建您自己的登录表单：
+### 自定义登录页面 {#custom-login-page}
+
+使用 npm 包中的 API 客户端构建你自己的登录表单：
 
 ```tsx
 import { useState } from 'react';
-import { login, ssoCheck, ApiRequestError, useBranding } from '@authagonal/login';
+import { useNavigate, useSearchParams } from 'react-router';
+import { login, resolveRedirect, ApiRequestError, useBranding } from '@authagonal/login';
 
 export default function MyLoginPage() {
   const branding = useBranding();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnUrl = searchParams.get('returnUrl') || '';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -344,10 +363,29 @@ export default function MyLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login(email, password);
-      // Login sets a cookie — redirect to the return URL
-      const params = new URLSearchParams(window.location.search);
-      window.location.href = params.get('returnUrl') || '/';
+      const result = await login(email, password, returnUrl || undefined);
+
+      // A second factor is still owed: hand over to the package's MFA pages.
+      if (result.mfaRequired && result.challengeId) {
+        const params = new URLSearchParams({
+          challengeId: result.challengeId,
+          ...(returnUrl ? { returnUrl } : {}),
+          ...(result.methods ? { methods: result.methods.join(',') } : {}),
+          ...(result.webAuthn ? { webAuthn: JSON.stringify(result.webAuthn) } : {}),
+        });
+        navigate(`/mfa-challenge?${params.toString()}`);
+        return;
+      }
+      if (result.mfaSetupRequired) {
+        navigate(`/mfa-setup${returnUrl ? `?returnUrl=${encodeURIComponent(returnUrl)}` : ''}`, {
+          state: { setupToken: result.setupToken },
+        });
+        return;
+      }
+
+      // Login sets a cookie. resolveRedirect only returns a same-origin path or the origin of a
+      // registered client's home URI; anything else falls back to the default.
+      window.location.href = await resolveRedirect(returnUrl, () => '/login/account');
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message || 'Login failed');
@@ -379,9 +417,9 @@ export default function MyLoginPage() {
 }
 ```
 
-### 自定义布局
+### 自定义布局 {#custom-layout}
 
-包裹基础 `AuthLayout` 以添加您自己的品牌：
+包裹基础的 `AuthLayout`，添加你自己的品牌元素：
 
 ```tsx
 import { AuthLayout } from '@authagonal/login';
@@ -391,7 +429,7 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
     <>
       <AuthLayout>{children}</AuthLayout>
       <footer>
-        &copy; {new Date().getFullYear()} My Company —
+        &copy; {new Date().getFullYear()} My Company |
         <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a>
       </footer>
     </>
@@ -399,9 +437,9 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
 }
 ```
 
-### 品牌配置 (wwwroot/branding.json)
+### 品牌定制（wwwroot/branding.json） {#branding-wwwrootbrandingjson}
 
-无需重新构建即可配置登录界面外观：
+无需重新构建即可配置登录界面的外观：
 
 ```json
 {
@@ -416,9 +454,9 @@ export default function MyLayout({ children }: { children: React.ReactNode }) {
 }
 ```
 
-完整的架构，包括本地化的欢迎文本、语言选择器列表，以及按模式的深色/浅色颜色和徽标背景覆盖，在 [品牌定制](branding) 页面上。
+完整的架构说明，包括本地化的欢迎文本、语言选择器列表，以及按深色/浅色模式分别覆盖的颜色和徽标背景，参见[品牌定制](branding)页面。
 
-### Vite 配置
+### Vite 配置 {#vite-config}
 
 在开发期间将 API 调用代理到后端：
 
@@ -442,9 +480,9 @@ export default defineConfig({
 });
 ```
 
-### 构建和提供服务
+### 构建与托管 {#build-and-serve}
 
-在您的 `.csproj` 中添加构建目标，以自动构建 SPA 并将其复制到 `wwwroot`：
+在 `.csproj` 中添加一个构建目标，自动构建 SPA 并将其复制到 `wwwroot`：
 
 ```xml
 <Target Name="BuildLoginApp" BeforeTargets="Build" Condition="!Exists('wwwroot/index.html')">
@@ -457,4 +495,4 @@ export default defineConfig({
 </Target>
 ```
 
-现在 `dotnet build` 会同时构建 .NET 服务器和 React SPA，`dotnet run` 从单个进程提供所有服务。
+现在 `dotnet build` 会同时构建 .NET 服务器和 React SPA，而 `dotnet run` 会从单个进程提供所有内容。

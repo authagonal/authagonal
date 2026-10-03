@@ -5,7 +5,7 @@ title: Front-Channel Logout
 
 # Front-Channel Logout
 
-Authagonal implements **OpenID Connect Front-Channel Logout 1.0**, a browser-driven logout mechanism that complements [back-channel logout](index#features). Where back-channel logout is a server-to-server POST, front-channel logout renders the logout URL of each relying party in a hidden iframe so that each app's browser session (cookies, local storage) is cleaned up from inside the user's browser.
+Authagonal implements **OpenID Connect Front-Channel Logout 1.0**, a browser-driven logout mechanism that complements [back-channel logout](index#key-features). Where back-channel logout is a server-to-server POST, front-channel logout renders the logout URL of each relying party in a hidden iframe so that each app's browser session (cookies, local storage) is cleaned up from inside the user's browser.
 
 ## When to Use Which
 
@@ -37,15 +37,21 @@ Add a front-channel logout URI to the `OAuthClient` record:
 
 ## How It Works
 
-When the browser visits `/connect/endsession`:
+When the browser visits `/connect/endsession` (GET or POST):
 
-1. The server finds all clients the user currently has grants with.
-2. For each client with a `FrontChannelLogoutUri`, the server builds a URL, appending `iss=<issuer>` (and `sid=<session_id>`, when the session has one) if `FrontChannelLogoutSessionRequired` is `true`.
-3. The server signs the user out of the authorization-server cookie, triggers back-channel logout notifications in the background, and returns an HTML page containing a hidden `<iframe>` for each client logout URL:
+1. **Confirmation (CSRF guard).** If the browser has a signed-in session and the request does not carry an `id_token_hint` whose `sub` matches that session, the server first renders a "sign out?" page with a confirm button instead of logging the user out. The button POSTs back with a short-lived (15 minutes) token bound to that session. This is what stops a third-party page from ending a user's session by navigating to the endpoint (the session cookie is `SameSite=Lax`, so it accompanies a cross-site top-level GET). A matching `id_token_hint` stands in for the confirmation.
+2. The server finds all clients the user currently has grants with.
+3. For each client with a `FrontChannelLogoutUri` that passes the outbound-URL check (loopback is allowed because the user's own browser makes the request, but private-range and link-local addresses are not), the server builds a URL, appending `iss=<issuer>` (and `sid=<session_id>`, when the session has one) if `FrontChannelLogoutSessionRequired` is `true`.
+4. The server revokes the grants minted for the session, signs the user out of the authorization-server cookie, triggers back-channel logout notifications in the background, and, when at least one front-channel URL was built, returns an HTML page containing a hidden `<iframe>` for each:
    ```html
    <iframe src="https://myapp.example.com/oidc/frontchannel?iss=https%3A%2F%2Fauth.example.com&sid=abc123" style="display:none"></iframe>
    ```
-4. After a 2-second grace period, the browser is redirected to `post_logout_redirect_uri`, honored only when the request also carries an `id_token_hint` identifying the client and the URI is in that client's registered `PostLogoutRedirectUris` (a `state` parameter, if supplied, is appended to the redirect). Otherwise a "signed out" confirmation is shown.
+   The page carries a `Content-Security-Policy` whose `frame-src` is limited to the origins of those URLs, and no scripts.
+5. The post-logout destination is resolved the same way whether or not iframes are involved. The `post_logout_redirect_uri` is honored only when the request identifies the client (through the `id_token_hint` audience, or the `client_id` parameter) and the URI is in that client's registered `PostLogoutRedirectUris` (a `state` parameter, if supplied, is appended). With iframes, the page waits 2 seconds (a `meta refresh`) and then redirects, or shows a "signed out" message when there is no valid destination. With no front-channel URLs, the server redirects immediately (`302`), or answers `200` with a JSON `message` when there is no valid destination.
+
+`id_token_hint` is accepted only if it is an ID token this server signed (ES256, `typ: JWT`) with a single audience. Expired tokens are accepted. Access tokens, and logout tokens, are rejected as hints. If both `client_id` and `id_token_hint` are sent and name different clients, the request fails with `400 invalid_request`.
+
+The JSON endpoint `POST /api/auth/logout` (used by the login app's Sign out button) runs the same revocation and notification steps. It does not render iframes: it returns the URLs in `frontchannel_logout_uris` for the caller to load (see the [Auth API](auth-api#logout)).
 
 ## Client-Side Logout Handler
 
@@ -93,11 +99,13 @@ Clients registered via [Dynamic Client Registration](client-registration) may in
 }
 ```
 
+Registration refuses a logout URI that is not an external address (loopback, link-local, private-range and `.localhost`/`.local`/`.internal` names are rejected with `invalid_client_metadata`).
+
 ## Limitations
 
 - **Best effort**: iframes are loaded once. If a network error or browser extension blocks them, there is no retry. Pair with back-channel logout for reliability.
 - **Third-party cookies**: some browsers block cookies in cross-site iframes by default. If your RP relies on first-party cookies, confirm the logout handler does not depend on cookies being sent.
-- **Timeout**: the page waits ~2 seconds before redirecting/confirming. Heavy RP logout handlers may not complete in time.
+- **Timeout**: the page waits ~2 seconds before redirecting. Heavy RP logout handlers may not complete in time.
 
 ## Related
 
