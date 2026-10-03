@@ -162,6 +162,40 @@ public sealed class OrganizationScopedFederationTests : IAsyncLifetime
         Assert.Equal("access_denied", query["error"]);
     }
 
+    /// An invited person who signs in through their organisation's own IdP has accepted: the IdP vouched
+    /// for them, and an SSO user never sets the password the emailed link was waiting for, so leaving the
+    /// row pending refused them a token on every sign-in. Who invited them and the roles they were offered
+    /// carry over.
+    [Fact]
+    public async Task Saml_AnInvitedMembershipIsAcceptedBySigningIn()
+    {
+        var user = await _factory.SeedTestUserAsync(email: "someone@acme.test");
+        var invitedAt = DateTimeOffset.UtcNow.AddDays(-2);
+        await _factory.OrganizationMembershipStore.UpsertAsync(new OrganizationMembership
+        {
+            OrganizationId = "org-acme",
+            UserId = user.Id,
+            Status = MembershipStatus.Invited,
+            Roles = ["billing"],
+            InvitedByUserId = "inviter-1",
+            InvitedAt = invitedAt,
+            CreatedAt = invitedAt,
+        });
+
+        var connectionId = await CreateSamlConnectionAsync("org-acme");
+        await CompleteSamlLoginAsync(connectionId, "someone@acme.test");
+
+        var membership = (await _factory.OrganizationMembershipStore.GetAsync("org-acme", user.Id))!;
+        Assert.Equal(MembershipStatus.Active, membership.Status);
+        Assert.NotNull(membership.JoinedAt);
+        Assert.Equal(["billing"], membership.Roles);
+        Assert.Equal("inviter-1", membership.InvitedByUserId);
+        Assert.Equal(invitedAt, membership.InvitedAt);
+        Assert.Equal(invitedAt, membership.CreatedAt);
+
+        Assert.Equal("org-acme", (await AuthorizeAndReadIdTokenAsync(null))["org_id"]);
+    }
+
     // -----------------------------------------------------------------------
     // OIDC
     // -----------------------------------------------------------------------
@@ -181,6 +215,21 @@ public sealed class OrganizationScopedFederationTests : IAsyncLifetime
         var claims = await AuthorizeAndReadIdTokenAsync(null);
         Assert.Equal("org-acme", claims["org_id"]);
         Assert.Equal("acme", claims["org_slug"]);
+    }
+
+    [Fact]
+    public async Task Oidc_AnInvitedMembershipIsAcceptedBySigningIn()
+    {
+        var user = await _factory.SeedTestUserAsync(email: _oidcMock.Email);
+        _factory.OrganizationMembershipStore.With("org-acme", user.Id, MembershipStatus.Invited, "billing");
+
+        var connectionId = await CreateOidcConnectionAsync("org-acme");
+        await CompleteOidcLoginAsync(connectionId);
+
+        var membership = (await _factory.OrganizationMembershipStore.GetAsync("org-acme", user.Id))!;
+        Assert.Equal(MembershipStatus.Active, membership.Status);
+        Assert.Equal(["billing"], membership.Roles);
+        Assert.Equal("org-acme", (await AuthorizeAndReadIdTokenAsync(null))["org_id"]);
     }
 
     [Fact]

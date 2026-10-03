@@ -136,5 +136,73 @@ public sealed class ScimTokenOrganizationTests : IAsyncDisposable
         Assert.True(string.IsNullOrEmpty(stored));
     }
 
+    /// <summary>
+    /// A binding that names a real organisation makes the synced person a MEMBER of it. The tag alone left
+    /// them outside it everywhere memberships are read: missing from its member list, and refused a token by
+    /// any relying party that names the organisation.
+    /// </summary>
+    [Fact]
+    public async Task ATokenBoundToAnOrganizationThatExistsMakesTheUserAnActiveMember()
+    {
+        await _factory.SeedTestDataAsync();
+        _factory.OrganizationStore.With("org_acme", "acme", "Acme");
+        var (_, token) = await _factory.SeedScimClientAsync("scim-acme", orgId: "org_acme");
+
+        var userId = await ProvisionUserAsync(Authorized(token), "ada@acme.example");
+
+        var membership = await _factory.OrganizationMembershipStore.GetAsync("org_acme", userId);
+        Assert.NotNull(membership);
+        Assert.Equal(Authagonal.Core.Models.MembershipStatus.Active, membership!.Status);
+        Assert.NotNull(membership.JoinedAt);
+        Assert.Equal("org_acme", await StoredOrganizationAsync(userId));
+    }
+
+    /// <summary>
+    /// A binding that names no organisation record is the bare tag it has always been: the account carries
+    /// the string, and no membership is invented for an organisation that does not exist.
+    /// </summary>
+    [Fact]
+    public async Task ATokenBoundToAnIdThatNamesNoOrganizationOnlyTagsTheUser()
+    {
+        await _factory.SeedTestDataAsync();
+        var (_, token) = await _factory.SeedScimClientAsync("scim-legacy", orgId: "customer-42");
+
+        var userId = await ProvisionUserAsync(Authorized(token), "ada@legacy.example");
+
+        Assert.Equal("customer-42", await StoredOrganizationAsync(userId));
+        Assert.Empty(await _factory.OrganizationMembershipStore.ListByUserAsync(userId));
+    }
+
+    [Fact]
+    public async Task AnUnboundTokenCreatesNoMembership()
+    {
+        await _factory.SeedTestDataAsync();
+        _factory.OrganizationStore.With("org_acme", "acme", "Acme");
+        var (_, token) = await _factory.SeedScimClientAsync("scim-plain");
+
+        var userId = await ProvisionUserAsync(Authorized(token), "linus@example.test");
+
+        Assert.Empty(await _factory.OrganizationMembershipStore.ListByUserAsync(userId));
+    }
+
+    /// <summary>
+    /// The membership a sync created goes when the sync deletes the person, so a deprovisioned employee is
+    /// not left listed in the customer's organisation.
+    /// </summary>
+    [Fact]
+    public async Task DeletingASyncedUserRemovesTheirMemberships()
+    {
+        await _factory.SeedTestDataAsync();
+        _factory.OrganizationStore.With("org_acme", "acme", "Acme");
+        var (_, token) = await _factory.SeedScimClientAsync("scim-acme", orgId: "org_acme");
+        var client = Authorized(token);
+        var userId = await ProvisionUserAsync(client, "ada@acme.example");
+
+        var delete = await client.DeleteAsync($"/scim/v2/Users/{userId}");
+
+        Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
+        Assert.Empty(await _factory.OrganizationMembershipStore.ListByUserAsync(userId));
+    }
+
     public async ValueTask DisposeAsync() => await _factory.DisposeAsync();
 }

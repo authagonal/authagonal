@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.30.2], 2026-10-03
+
+### Fixed
+- **Signing in through an organisation-scoped SSO connection accepts an outstanding invitation.**
+  `FederatedOrganizationBinding` used to leave an `invited` membership as it was, so an invitee who signed in
+  through their organisation's SAML or OIDC connection was then refused a token by the membership gate. The row
+  now becomes `active` with `JoinedAt` stamped, keeping its roles, inviter, invitation time and creation time.
+  A `suspended` row is still never modified.
+- **Deleting a user removes their organisation memberships.** `AccountArtefactPurge.PurgeAsync` gains an
+  overload taking an `IOrganizationMembershipStore` and deletes every membership the user holds. The admin
+  `DELETE /api/v1/profile/{userId}`, SCIM `DELETE /scim/v2/Users/{id}` and the SCIM reclaim path all pass it,
+  so an organisation no longer lists a deleted member, and a reclaimed id does not inherit the old account's
+  memberships. The original three-store overload is kept and purges no memberships.
+
+### Added
+- **A SCIM token bound to an organisation makes the users it creates members of it.** When the token's
+  `scim_organization_id` names an existing `Organization`, a SCIM create also writes an `active`
+  `OrganizationMembership` and audits `scim.organization_member_added`. A binding naming no organisation keeps
+  the previous behaviour (the `org_id` tag only). Creation only, like the tag.
+
 ## [0.30.1], 2026-10-03
 
 ### Fixed

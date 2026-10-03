@@ -39,21 +39,45 @@ public static class AccountArtefactPurge
     /// swallowed here: a delete that silently leaves a passkey behind is the defect, and the caller decides
     /// whether to fail the request or log — see each call site.
     /// </remarks>
+    public static Task PurgeAsync(
+        string userId,
+        IMfaStore? mfaStore,
+        IScimGroupStore? groupStore,
+        CancellationToken ct = default)
+        => PurgeAsync(userId, mfaStore, groupStore, organizationMemberships: null, ct);
+
+    /// <summary>
+    /// Removes the second-factor credentials, SCIM group memberships and organisation memberships
+    /// belonging to <paramref name="userId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Organisation memberships are a second index keyed on the user id: a deleted account otherwise
+    /// stayed listed as a member of every organisation it had joined, with nothing behind the row.
+    /// All three stores are optional, for the same reason as above.
+    /// </remarks>
     public static async Task PurgeAsync(
         string userId,
         IMfaStore? mfaStore,
         IScimGroupStore? groupStore,
+        IOrganizationMembershipStore? organizationMemberships,
         CancellationToken ct = default)
     {
         if (mfaStore is not null)
             await mfaStore.DeleteAllCredentialsAsync(userId, ct).ConfigureAwait(false);
 
-        if (groupStore is null) return;
-
-        foreach (var group in await groupStore.GetGroupsByUserIdAsync(userId, ct).ConfigureAwait(false))
+        if (groupStore is not null)
         {
-            if (!group.MemberUserIds.Remove(userId)) continue;
-            await groupStore.UpdateAsync(group, ct).ConfigureAwait(false);
+            foreach (var group in await groupStore.GetGroupsByUserIdAsync(userId, ct).ConfigureAwait(false))
+            {
+                if (!group.MemberUserIds.Remove(userId)) continue;
+                await groupStore.UpdateAsync(group, ct).ConfigureAwait(false);
+            }
+        }
+
+        if (organizationMemberships is not null)
+        {
+            foreach (var membership in await organizationMemberships.ListByUserAsync(userId, ct).ConfigureAwait(false))
+                await organizationMemberships.DeleteAsync(membership.OrganizationId, userId, ct).ConfigureAwait(false);
         }
     }
 }

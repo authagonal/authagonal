@@ -313,6 +313,8 @@ public static class ScimUserEndpoints
         ILogger<Program> logger,
         IMfaStore? mfaStore,
         IScimGroupStore? scimGroupStore,
+        IOrganizationStore? organizations,
+        IOrganizationMembershipStore? memberships,
         CancellationToken ct)
     {
         var clientId = GetClientId(httpContext);
@@ -426,7 +428,7 @@ public static class ScimUserEndpoints
             // Purge again before the old row goes: a row tombstoned by a version that did not clean up still
             // carries the previous holder's passkeys and group memberships, and this is the moment they would
             // otherwise become the new resource's.
-            await AccountArtefactPurge.PurgeAsync(existing!.Id, mfaStore, scimGroupStore, ct);
+            await AccountArtefactPurge.PurgeAsync(existing!.Id, mfaStore, scimGroupStore, memberships, ct);
 
             // The tombstone is removed rather than updated in place, because the new resource has its own id
             // and the old row owns the email index entry the new one needs. Delete clears that entry (and the
@@ -461,6 +463,31 @@ public static class ScimUserEndpoints
             // SCIM-shaped, which a conforming client cannot parse either.
             return ScimResults.Error(400, "invalidValue",
                 "The directory rejected this user. Check the request against the provisioning rules for this client.");
+        }
+
+        // A credential bound to an organisation that EXISTS makes the person a member of it, not just tagged
+        // with its id. The tag alone left a synced user outside the organisation in every place that reads
+        // memberships: absent from its member list, and refused a token by any relying party that names the
+        // organisation, because an explicit selection demands an active membership and SCIM never wrote one.
+        // Active, not invited: the organisation's own directory provisioned them, which is the same
+        // assertion of belonging an org-scoped SSO connection makes (FederatedOrganizationBinding). After
+        // provisioning, so a rejected create leaves no membership behind; an id that names no organisation
+        // stays the bare tag it has always been.
+        if (user.OrganizationId is { } boundOrganizationId
+            && organizations is not null && memberships is not null
+            && await organizations.GetAsync(boundOrganizationId, ct) is { } organization)
+        {
+            var joinedAt = DateTimeOffset.UtcNow;
+            await memberships.UpsertAsync(new OrganizationMembership
+            {
+                OrganizationId = organization.Id,
+                UserId = user.Id,
+                Status = MembershipStatus.Active,
+                JoinedAt = joinedAt,
+                CreatedAt = joinedAt,
+            }, ct);
+            await audit.LogAsync(
+                ScimActor.Of(httpContext), "scim.organization_member_added", "organization", organization.Id, user.Id, ct);
         }
 
         logger.LogInformation("SCIM user created: {UserId} ({Email}) by client {ClientId}", user.Id, email, clientId);
@@ -717,6 +744,7 @@ public static class ScimUserEndpoints
         ILogger<Program> logger,
         IMfaStore? mfaStore,
         IScimGroupStore? scimGroupStore,
+        IOrganizationMembershipStore? memberships,
         CancellationToken ct)
     {
         var clientId = GetClientId(httpContext);
@@ -733,7 +761,7 @@ public static class ScimUserEndpoints
         // so without this a re-provision inherited the departed user's passkeys AND every role-mapped group
         // they occupied. See AccountArtefactPurge. Done before the tombstone so a failure leaves the account
         // intact rather than tombstoned-but-credentialed.
-        await AccountArtefactPurge.PurgeAsync(user.Id, mfaStore, scimGroupStore, ct);
+        await AccountArtefactPurge.PurgeAsync(user.Id, mfaStore, scimGroupStore, memberships, ct);
 
         // Soft delete: deactivate AND tombstone. The deactivation is what kills the sessions; the
         // tombstone is what makes the resource gone, which deactivation on its own never did.

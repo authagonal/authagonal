@@ -264,6 +264,24 @@ public sealed class AdminEndpointTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
+    /// A deleted account must not stay listed as a member of the organisations it had joined.
+    [Fact]
+    public async Task DeleteUser_RemovesTheirOrganizationMemberships()
+    {
+        SetAdminAuth();
+        var user = await _factory.SeedTestUserAsync(email: "member-delete@example.com");
+        _factory.OrganizationMembershipStore
+            .With("org-a", user.Id)
+            .With("org-b", user.Id, Authagonal.Core.Models.MembershipStatus.Invited)
+            .With("org-a", "someone-else");
+
+        var response = await _client.DeleteAsync($"/api/v1/profile/{user.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await _factory.OrganizationMembershipStore.ListByUserAsync(user.Id));
+        Assert.NotNull(await _factory.OrganizationMembershipStore.GetAsync("org-a", "someone-else"));
+    }
+
     [Fact]
     public async Task DeleteUser_NonexistentUser_Returns404()
     {

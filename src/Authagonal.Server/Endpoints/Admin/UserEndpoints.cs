@@ -524,6 +524,7 @@ public static class UserEndpoints
         HttpContext httpContext,
         IMfaStore? mfaStore,
         IScimGroupStore? scimGroupStore,
+        IOrganizationMembershipStore? organizationMemberships,
         CancellationToken ct)
     {
         var user = await userStore.GetAsync(userId, ct);
@@ -543,7 +544,7 @@ public static class UserEndpoints
         // resolves the account from the credential without consulting MfaEnabled. See AccountArtefactPurge.
         //
         // Before the delete, so a failure here leaves the account intact rather than deleted-but-credentialed.
-        await AccountArtefactPurge.PurgeAsync(userId, mfaStore, scimGroupStore, ct);
+        await AccountArtefactPurge.PurgeAsync(userId, mfaStore, scimGroupStore, organizationMemberships, ct);
 
         await userStore.DeleteAsync(userId, ct);
         await authHooks.RunOnUserDeletedAsync(userId, user.Email, "admin", ct);

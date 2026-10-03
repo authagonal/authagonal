@@ -18,8 +18,9 @@ namespace Authagonal.Server.Services;
 public static class FederatedOrganizationBinding
 {
     /// <summary>
-    /// Ensures this user holds a membership of <paramref name="organizationId"/>, creating an active
-    /// one if they hold none, and returns the claim that binds the session to it.
+    /// Ensures this user holds an active membership of <paramref name="organizationId"/>, creating one
+    /// if they hold none and accepting a pending invitation, and returns the claim that binds the
+    /// session to it.
     /// </summary>
     /// <remarks>
     /// Signing in through a connection that belongs to an organisation IS the assertion of belonging:
@@ -29,12 +30,19 @@ public static class FederatedOrganizationBinding
     /// <see cref="Organization.RequireMembershipForTokens"/>, with nothing in the product able to
     /// create the row they are missing.
     /// <para>
-    /// An EXISTING row is never modified, and that is the security half. A
-    /// <see cref="MembershipStatus.Suspended"/> membership is how an administrator revokes access
-    /// without destroying the record; re-activating it here would mean anyone suspended could restore
-    /// their own access simply by signing in again, which is the one thing suspension has to prevent.
-    /// An <see cref="MembershipStatus.Invited"/> row is likewise left for the invitation flow to
-    /// accept, and any roles already on the row are left alone.
+    /// An <see cref="MembershipStatus.Invited"/> row is ACCEPTED: the organisation invited this person
+    /// and its own IdP has now vouched for them, which is a stronger proof than the emailed link the
+    /// invitation was waiting on. Leaving it pending stranded exactly the users an operator meant to
+    /// let in: invited into an organisation that signs in through SSO, they never set a password, so
+    /// the link that would have activated them is never used, and every sign-in ended in a refused
+    /// token. Who invited them, when, and the roles they were offered are kept, the same acceptance
+    /// <see cref="OrganizationSelector"/> performs for a verified email domain.
+    /// </para>
+    /// <para>
+    /// A <see cref="MembershipStatus.Suspended"/> row is never modified, and that is the security half.
+    /// Suspension is how an administrator revokes access without destroying the record; re-activating
+    /// it here would mean anyone suspended could restore their own access simply by signing in again,
+    /// which is the one thing suspension has to prevent.
     /// </para>
     /// </remarks>
     public static async Task<Claim> BindAsync(
@@ -62,6 +70,27 @@ public static class FederatedOrganizationBinding
                 "Created an active membership of organization {OrganizationId} for {UserId}, who signed in "
                 + "through organization-scoped connection {ConnectionId}",
                 organizationId, userId, connectionId);
+        }
+        else if (string.Equals(existing.Status, MembershipStatus.Invited, StringComparison.Ordinal))
+        {
+            var now = DateTimeOffset.UtcNow;
+            await memberships.UpsertAsync(new OrganizationMembership
+            {
+                OrganizationId = existing.OrganizationId,
+                UserId = existing.UserId,
+                Status = MembershipStatus.Active,
+                Roles = [.. existing.Roles],
+                InvitedByUserId = existing.InvitedByUserId,
+                InvitedAt = existing.InvitedAt,
+                JoinedAt = now,
+                CreatedAt = existing.CreatedAt,
+                UpdatedAt = now,
+            }, ct);
+
+            logger.LogInformation(
+                "Accepted {UserId}'s invitation to organization {OrganizationId}: they signed in through "
+                + "organization-scoped connection {ConnectionId}",
+                userId, organizationId, connectionId);
         }
         else if (!string.Equals(existing.Status, MembershipStatus.Active, StringComparison.Ordinal))
         {
