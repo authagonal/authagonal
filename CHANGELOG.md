@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.1], 2026-10-04
+
+### Changed
+- Dependency refresh, no code changes. CI actions: `docker/build-push-action` 7.4.0, `docker/setup-buildx-action`
+  4.4.1, `grafana/setup-k6-action` 1.2.2. Base image digests: `dotnet/runtime:10.0-alpine` (Backup tool) and
+  `nginx:alpine` (sample app frontend).
+
 ## [0.31.0], 2026-10-04
 
 ### Added
