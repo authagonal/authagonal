@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.31.0], 2026-10-04
+
+### Added
+- **Japanese (`ja`).** The login UI (`login-app/src/i18n/ja.json`), server messages (`SharedMessages.ja.resx`) and
+  the documentation site (`docs/ja/`, all 29 pages) are available in Japanese.
+- **Server resources for Arabic, Afrikaans and Hindi.** The login UI already shipped `ar`, `af` and `hi`, but the
+  server had no resources for them, so its own pages and errors fell back to English. They now have
+  `SharedMessages.{ar,af,hi}.resx`.
+- `SupportedLocales` (`Authagonal.Server.Services`): the one list of supported UI cultures, used by request
+  localization, plus `Resolve(tag)`, which maps a stored or browser-supplied tag onto one of them by the login app's
+  rules (exact, any `zh*` to `zh-Hans`, then the base language).
+
+### Changed
+- **Emails are localized.** The verification, password-reset and account-exists emails from `EmailService` are
+  written in the recipient's stored `AuthUser.Locale`, else the request's UI culture, else English. A failed
+  locale lookup never blocks the email.
+- **Server-rendered pages are localized and carry `lang`/`dir`.** The email-confirmation page and the
+  end-session pages take their text from `SharedMessages`; `dir="rtl"` is set for Arabic.
+- The documentation was audited against the code and retranslated into zh-Hans, de, fr, es, pt and vi. A new
+  `docs/bff.md` page covers the BFF packages.
+
 ## [0.30.2], 2026-10-03
 
 ### Fixed
