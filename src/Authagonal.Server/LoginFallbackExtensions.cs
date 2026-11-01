@@ -42,8 +42,10 @@ public static class AuthagonalLoginFallbackExtensions
     ///   stores is bounded to ten seconds, so an unreachable one costs a request that long at most.</item>
     /// </list>
     /// <para>
-    /// <c>/</c> is answered by the default-files middleware with the static <c>index.html</c>, before this
-    /// endpoint is reached, so the payload is on every login page but the bare root.
+    /// The bare root <c>/</c> is served as it always was, the plain <c>index.html</c>: the route matches
+    /// it (endpoint routing selects this endpoint before the default-files middleware could rewrite the
+    /// path, and the static-file middleware stands aside for a selected endpoint), so the handler answers
+    /// it with the plain document itself. Every other login page carries the payload.
     /// </para>
     /// </remarks>
     public static IEndpointConventionBuilder MapAuthagonalLoginFallback(this IEndpointRouteBuilder endpoints)
@@ -89,6 +91,12 @@ public static class AuthagonalLoginFallbackExtensions
                 }
 
                 context.Response.ContentType = "text/html; charset=utf-8";
+
+                if (context.Request.Path.Value is null or "" or "/")
+                {
+                    await context.Response.Body.WriteAsync(shell.Value.Bytes, context.RequestAborted);
+                    return;
+                }
 
                 string? injected = null;
                 try

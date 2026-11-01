@@ -5,7 +5,10 @@ using Authagonal.Core.Services;
 using Authagonal.Core.Stores;
 using Authagonal.Protocol.Models;
 using Authagonal.Protocol.Services;
+using Authagonal.Server;
+using Authagonal.Server.Endpoints;
 using Authagonal.Server.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Authagonal.Tests.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -1305,5 +1308,51 @@ public class OrganizationBrandingTests
         var providers = boot.GetProperty("providers").GetProperty("providers").EnumerateArray().ToList();
         Assert.Single(providers);
         Assert.Equal("conn-tenant-google", providers[0].GetProperty("connectionId").GetString());
+    }
+
+    /// <summary>
+    /// A host that calls <c>AddAuthagonalCore</c> alone (the multi-tenant host does) and brings its own
+    /// stores gets the builder: it is registered beside <see cref="PreAuthOrganizationResolver"/>, not in
+    /// <c>AddAuthagonal</c>.
+    /// </summary>
+    [Fact]
+    public void LoginBootPayloadBuilder_ResolvesFromAddAuthagonalCoreAndAProvidersStores()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Issuer"] = "https://auth.acme.com" })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(configuration);
+        services.AddAuthagonalCore(configuration);
+        services.AddSingleton<IOidcProviderStore>(new StubOidcProviderStore());
+        services.AddSingleton<ISamlProviderStore>(new StubSamlProviderStore());
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetService<LoginBootPayloadBuilder>());
+    }
+
+    /// <summary>A branding string cannot close the element it is inlined in, and the document is
+    /// otherwise unchanged; a document with no head is left to the caller.</summary>
+    [Fact]
+    public void InjectIntoShell_EscapesMarkupAndLeavesTheRestOfTheDocument_AndReturnsNullWithoutAHead()
+    {
+        var payload = new LoginBootPayload(
+            new JsonObject { ["appName"] = "</script><b>x</b>" },
+            new SsoProviderListResponse(),
+            new LoginBootOrganization("Org_7fA2", "acme-eu", "Acme <EU>"));
+
+        var html = LoginBootPayloadBuilder.InjectIntoShell(Shell, payload);
+
+        Assert.NotNull(html);
+        Assert.DoesNotContain("</script><b>", html);
+        Assert.DoesNotContain("<EU>", html);
+        var element = """<script type="application/json" id="authagonal-boot">""";
+        Assert.Equal(1, html.Split(element).Length - 1);
+        var at = html.IndexOf(element, StringComparison.Ordinal);
+        Assert.Equal(Shell, html.Remove(at, html.IndexOf("</script>", at, StringComparison.Ordinal) + "</script>".Length - at));
+        Assert.Null(LoginBootPayloadBuilder.InjectIntoShell("<html><body></body></html>", payload));
     }
 }
