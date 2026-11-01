@@ -67,7 +67,7 @@ public sealed class AdminAuditConventionTests
 
                 var body = HandlerBody(text, declaration.Index);
 
-                if (!body.Contains("audit.LogAsync", StringComparison.Ordinal))
+                if (!body.Contains("audit.LogAsync", StringComparison.Ordinal) && !DelegatesToAuditedOperation(body))
                     offenders.Add($"{name}: {handler}");
             }
         }
@@ -114,6 +114,40 @@ public sealed class AdminAuditConventionTests
         Assert.True(writers.Count == 0,
             "These handlers are exempt from the audit rule as reads, and they now write to a store. Remove "
             + "the exemption and audit them:" + Environment.NewLine + string.Join(Environment.NewLine, writers));
+    }
+
+    private static readonly Regex OperationCall = new(
+        @"\boperations\.(?<method>[A-Za-z_][A-Za-z0-9_]*Async)\s*\(", RegexOptions.Compiled);
+
+    /// <summary>
+    /// True when the handler hands its write to an operation (<c>operations.XAsync(...)</c>, an
+    /// <c>OperationResult</c>-returning class in <c>Services/*Operations.cs</c>) and every such method it calls
+    /// records the audit row itself.
+    /// </summary>
+    /// <remarks>
+    /// The operations own the rule and the audit row so a host calling them from its own surface writes the
+    /// same row; a handler over one has nothing of its own to record. The audit call is still required, only
+    /// one hop further in: an operation method that writes without auditing fails this exactly as a handler
+    /// would.
+    /// </remarks>
+    private static bool DelegatesToAuditedOperation(string handlerBody)
+    {
+        var calls = OperationCall.Matches(handlerBody).Select(m => m.Groups["method"].Value).Distinct().ToList();
+        if (calls.Count == 0) return false;
+
+        var servicesDir = Path.Combine(RepositoryRoot(), "src", "Authagonal.Server", "Services");
+        var operationSources = Directory.EnumerateFiles(servicesDir, "*Operations*.cs").Select(File.ReadAllText).ToList();
+
+        return calls.All(method => operationSources.Any(source =>
+        {
+            var declaration = new Regex(
+                $@"^\s*public (?:async )?Task<[^\n]*> {Regex.Escape(method)}\s*\(", RegexOptions.Multiline).Match(source);
+            if (!declaration.Success) return false;
+            var rest = source[declaration.Index..];
+            var next = Regex.Match(rest[1..], @"\n    (?:public|private|internal|///)");
+            var body = next.Success ? rest[..(next.Index + 1)] : rest;
+            return body.Contains("audit.LogAsync", StringComparison.Ordinal);
+        }));
     }
 
     /// <summary>

@@ -58,6 +58,23 @@ public sealed class ErrorInfoResponse
     public string? Message { get; set; }
 }
 
+/// <summary>
+/// The admin API's answer when an operation (<c>Authagonal.Server.Services.OperationResult{T}</c>) fails.
+/// </summary>
+public sealed class OperationErrorResponse
+{
+    /// <summary>The operation's machine-readable code, for example <c>slug_taken</c>.</summary>
+    [JsonPropertyName("error")] public string Error { get; set; } = "";
+
+    /// <summary>The operation's message, or the code when it gave none.</summary>
+    [JsonPropertyName("error_description")] public string ErrorDescription { get; set; } = "";
+
+    /// <summary>The request fields the failure refers to; omitted when it names none.</summary>
+    [JsonPropertyName("fields")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Fields { get; set; }
+}
+
 // --- Auth / Login ---
 
 public sealed class LoginSuccessResponse

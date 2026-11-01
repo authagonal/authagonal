@@ -243,6 +243,7 @@ public static class AuthagonalExtensions
         // Grant reconciliation scans the raw grant index tables directly (keyed TableClients), so it's
         // Azure-only; register it only when the Azure backend provided those clients. On other backends,
         // expiry cleanup is handled by TokenCleanupService via IGrantStore.RemoveExpiredAsync.
+        // It takes its EnvPartitioner from the container; AddAuthagonalCore registers Live.
         if (services.Any(d => d.IsKeyedService && (d.ServiceKey as string) == "Grants"))
             services.AddHostedService<GrantReconciliationService>();
         services.AddHostedService<SigningKeyRotationService>();
@@ -549,6 +550,16 @@ public static class AuthagonalExtensions
         // Which organization a request is for, and whether the user and client may have it. Scoped
         // because the stores it reads are (the cloud resolves them per tenant, per request).
         services.AddScoped<OrganizationSelector>();
+        // Organisation and membership administration (the admin API's /api/v1/organizations and any host
+        // surface doing the same job). Scoped for the same reason; TryAdd so a host may substitute it.
+        services.TryAddScoped<OrganizationOperations>();
+        // The env partitioning, for services that take it from the container (GrantReconciliationService).
+        // Nothing registered one, so a standalone host on the Azure backend failed to start ("Unable to
+        // resolve service for type EnvPartitioner"). Live is the single-env partitioning a self-hosted host
+        // runs on, the one every provider and AddServerSideSessions already use. Here rather than in
+        // AddAuthagonal, which calls this first, so a host built on Core (the test factory) has it too;
+        // TryAdd so a multi-env host's own registration wins.
+        services.TryAddSingleton(EnvPartitioner.Live);
         // The same question asked BEFORE anyone has signed in — home-realm discovery, the login page's
         // provider list and /sso-check. Scoped for the same reason, and because it reads ITenantContext.
         services.AddScoped<PreAuthOrganizationResolver>();
@@ -1428,6 +1439,7 @@ public static class AuthagonalExtensions
             app.MapMfaAdminEndpoints();
             app.MapScimTokenAdminEndpoints();
             app.MapAgentAdminEndpoints();
+            app.MapOrganizationAdminEndpoints();
         }
 
         app.MapScimUserEndpoints();

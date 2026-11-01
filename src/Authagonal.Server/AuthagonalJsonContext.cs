@@ -106,6 +106,13 @@ namespace Authagonal.Server;
 [JsonSerializable(typeof(ClientRegistrationResponse))]
 [JsonSerializable(typeof(ScimTokenCreatedResponse))]
 [JsonSerializable(typeof(ScimTokenListResponse))]
+// Organisation operations (Services/OrganizationOperations.cs) and their admin endpoints
+[JsonSerializable(typeof(OrganizationDto))]
+[JsonSerializable(typeof(ResultPage<OrganizationDto>))]
+[JsonSerializable(typeof(MembershipDto))]
+[JsonSerializable(typeof(ResultPage<MembershipDto>))]
+[JsonSerializable(typeof(Authagonal.Server.Endpoints.Admin.OrganizationEndpoints.UserOrganizationListResponse))]
+[JsonSerializable(typeof(OperationErrorResponse))]
 // Email
 [JsonSerializable(typeof(ResendEmailRequest))]
 // Token response
