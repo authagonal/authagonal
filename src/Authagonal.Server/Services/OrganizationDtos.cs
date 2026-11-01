@@ -179,3 +179,46 @@ public sealed class UserOrganizationDto
     /// <summary>See <see cref="OrganizationMembership.Roles"/>: this user's roles within this organisation.</summary>
     public List<string> Roles { get; set; } = [];
 }
+
+/// <summary>Result of <see cref="OrganizationOperations.BackfillAsync"/>.</summary>
+public sealed class BackfillResultDto
+{
+    /// <summary>True when nothing was written: the counts below describe what WOULD happen.</summary>
+    public bool DryRun { get; set; }
+
+    /// <summary>Count of new <see cref="Organization"/> rows (created, or that would be created on a dry
+    /// run) across every distinct legacy value.</summary>
+    public int OrganizationsCreated { get; set; }
+
+    /// <summary>Count of new <see cref="OrganizationMembership"/> rows (created, or that would be created
+    /// on a dry run) across every affected user.</summary>
+    public int MembershipsCreated { get; set; }
+
+    /// <summary>Count of users left untouched because they already held a membership of the resolved
+    /// organisation: a re-run is idempotent, these are not counted again.</summary>
+    public int UsersSkipped { get; set; }
+
+    /// <summary>The first 50 distinct legacy values processed, and what each resolved to.</summary>
+    public List<BackfillOrganizationEntryDto> Organizations { get; set; } = [];
+
+    /// <summary>True when the user scan stopped at <see cref="OrganizationOperations.MaxUsersScanned"/>
+    /// before reaching the end of the tenant's user population: the counts above describe only the users
+    /// scanned so far, not the whole tenant. A caller that sees this should run the backfill again; the
+    /// already-migrated users this run did cover are skipped on the re-run, so re-running is cheap and
+    /// safe, not merely idempotent by accident.</summary>
+    public bool Truncated { get; set; }
+}
+
+/// <summary>One distinct legacy <see cref="AuthUser.OrganizationId"/> value and what it resolved to.</summary>
+public sealed class BackfillOrganizationEntryDto
+{
+    /// <summary>The raw legacy <see cref="AuthUser.OrganizationId"/> string, unmodified.</summary>
+    public string LegacyValue { get; set; } = "";
+
+    /// <summary>The <see cref="Organization.Slug"/> it resolved (or would resolve) to.</summary>
+    public string Slug { get; set; } = "";
+
+    /// <summary>How many users carry this legacy value: the size of the migration bucket, not merely
+    /// the count newly given a membership (some may already have one from an earlier run).</summary>
+    public int Users { get; set; }
+}

@@ -112,6 +112,8 @@ namespace Authagonal.Server;
 [JsonSerializable(typeof(MembershipDto))]
 [JsonSerializable(typeof(ResultPage<MembershipDto>))]
 [JsonSerializable(typeof(Authagonal.Server.Endpoints.Admin.OrganizationEndpoints.UserOrganizationListResponse))]
+[JsonSerializable(typeof(OrganizationDomainDto))]
+[JsonSerializable(typeof(BackfillResultDto))]
 [JsonSerializable(typeof(OperationErrorResponse))]
 // Email
 [JsonSerializable(typeof(ResendEmailRequest))]

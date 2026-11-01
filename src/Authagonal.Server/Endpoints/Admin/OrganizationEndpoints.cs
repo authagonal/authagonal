@@ -26,6 +26,12 @@ public static class OrganizationEndpoints
         group.MapPut("/{id}/members/{userId}", UpdateMember);
         group.MapDelete("/{id}/members/{userId}", RemoveMember);
 
+        group.MapPost("/{id}/domains", AddDomain);
+        group.MapPost("/{id}/domains/{domain}/verify", VerifyDomain);
+        group.MapDelete("/{id}/domains/{domain}", RemoveDomain);
+
+        group.MapPost("/backfill", Backfill);
+
         // What is keyed on a user sits on the admin user group, beside the user's other admin routes.
         var users = app.MapGroup("/api/v1/profile")
             .RequireAuthorization("IdentityAdmin")
@@ -139,6 +145,53 @@ public static class OrganizationEndpoints
         return result.Succeeded ? Results.NoContent() : OperationResultHttp.Error(result);
     }
 
+    private static async Task<IResult> AddDomain(
+        string id,
+        AddOrganizationDomainRequest request,
+        OrganizationOperations operations,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var result = await operations.AddDomainAsync(id, request.Domain, AdminActor.Of(http), ct);
+        if (!result.Succeeded)
+            return OperationResultHttp.Error(result);
+
+        return Created(http, $"/api/v1/organizations/{id}/domains/{result.Value!.Domain}",
+            result.Value, AuthagonalJsonContext.Default.OrganizationDomainDto);
+    }
+
+    /// <summary>
+    /// A miss answers 409 <c>verification_failed</c>, never 200 with <c>verified: false</c>, so a caller
+    /// polling for success cannot mistake a miss for one.
+    /// </summary>
+    private static async Task<IResult> VerifyDomain(
+        string id, string domain, OrganizationOperations operations, HttpContext http, CancellationToken ct)
+    {
+        var result = await operations.VerifyDomainAsync(id, domain, AdminActor.Of(http), ct);
+        return result.Succeeded
+            ? TypedResults.Json(result.Value!, AuthagonalJsonContext.Default.OrganizationDomainDto)
+            : OperationResultHttp.Error(result);
+    }
+
+    private static async Task<IResult> RemoveDomain(
+        string id, string domain, OrganizationOperations operations, HttpContext http, CancellationToken ct)
+    {
+        var result = await operations.RemoveDomainAsync(id, domain, AdminActor.Of(http), ct);
+        return result.Succeeded ? Results.NoContent() : OperationResultHttp.Error(result);
+    }
+
+    /// <summary>
+    /// <c>dryRun</c> defaults true even with no body at all: a nullable complex-type parameter binds to
+    /// null on an empty request body instead of failing, so <c>request?.DryRun ?? true</c> covers both "no
+    /// body" and "body present but dryRun omitted" (the request's own property default is also true).
+    /// </summary>
+    private static async Task<IResult> Backfill(
+        BackfillRequest? request, OrganizationOperations operations, HttpContext http, CancellationToken ct)
+    {
+        var result = await operations.BackfillAsync(request?.DryRun ?? true, AdminActor.Of(http), ct);
+        return TypedResults.Json(result, AuthagonalJsonContext.Default.BackfillResultDto);
+    }
+
     private static async Task<IResult> ListUserOrganizations(
         string userId, OrganizationOperations operations, CancellationToken ct)
     {
@@ -197,6 +250,21 @@ public static class OrganizationEndpoints
     {
         public string? Status { get; set; }
         public List<string>? Roles { get; set; }
+    }
+
+    /// <summary>Body of <c>POST /api/v1/organizations/{id}/domains</c>; see <see cref="OrganizationOperations.AddDomainAsync"/>.</summary>
+    public sealed class AddOrganizationDomainRequest
+    {
+        /// <summary>The email domain to claim, e.g. <c>acme.com</c>. Normalised (trimmed, lowercased,
+        /// trailing dot dropped) before validation.</summary>
+        public string? Domain { get; set; }
+    }
+
+    /// <summary>Body of <c>POST /api/v1/organizations/backfill</c>; see <see cref="OrganizationOperations.BackfillAsync"/>.</summary>
+    public sealed class BackfillRequest
+    {
+        /// <summary>When true (the default) nothing is written and the counts describe what would happen.</summary>
+        public bool DryRun { get; set; } = true;
     }
 
     /// <summary>Answer of <c>GET /api/v1/profile/{userId}/organizations</c>.</summary>

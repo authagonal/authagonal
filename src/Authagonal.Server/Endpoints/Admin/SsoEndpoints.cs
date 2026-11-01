@@ -653,9 +653,12 @@ public static class SsoEndpoints
     /// Refuses an <c>OrganizationId</c> that names no organisation. A connection pinned to a
     /// non-existent organisation is a connection nothing can ever reach: pre-authentication resolution
     /// validates the organisation before it will offer one, so the connection would simply never be
-    /// offered and never route a domain — a silent misconfiguration with no error anywhere.
+    /// offered and never route a domain — a silent misconfiguration with no error anywhere. A SCIM token
+    /// tagged with one has the same fault: the library turns a resolvable binding into an Active
+    /// membership for every user the credential provisions, and an unresolvable one into a bare org_id tag
+    /// no organisation lists, so <see cref="ScimTokenEndpoints"/> asks it too.
     /// </summary>
-    private static async Task<IResult?> ValidateOrganizationAsync(
+    internal static async Task<IResult?> ValidateOrganizationAsync(
         string? organizationId, IOrganizationStore organizations, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(organizationId)) return null;

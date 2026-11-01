@@ -553,6 +553,9 @@ public static class AuthagonalExtensions
         // Organisation and membership administration (the admin API's /api/v1/organizations and any host
         // surface doing the same job). Scoped for the same reason; TryAdd so a host may substitute it.
         services.TryAddScoped<OrganizationOperations>();
+        // How the organisation email-domain proof reads DNS TXT records. Singleton: DnsClient's LookupClient is
+        // thread-safe and meant to be shared. TryAdd so a host's own resolver wins (and the tests' fake).
+        services.TryAddSingleton<ITxtResolver, DnsTxtResolver>();
         // The env partitioning, for services that take it from the container (GrantReconciliationService).
         // Nothing registered one, so a standalone host on the Azure backend failed to start ("Unable to
         // resolve service for type EnvPartitioner"). Live is the single-env partitioning a self-hosted host

@@ -212,6 +212,30 @@ public sealed class TestTokenExchangeSubjectTransformer : Authagonal.Protocol.IT
 /// but that the trail names who did it. Several of the highest-impact writes (SCIM token mint, SSO
 /// connection create, role and scope edits) produced no row at all.
 /// </remarks>
+/// <summary>
+/// An <see cref="Authagonal.Core.Services.ITxtResolver"/> that answers from a dictionary, so a test can
+/// publish (or withhold, or break) the record an organisation domain verification looks for.
+/// </summary>
+public sealed class FakeTxtResolver : Authagonal.Core.Services.ITxtResolver
+{
+    private readonly Dictionary<string, List<string>> _records = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<string> Queried { get; } = [];
+
+    /// <summary>When set, every lookup throws it, as a resolver does on a network failure.</summary>
+    public Exception? Failure { get; set; }
+
+    public void Publish(string name, params string[] values) => _records[name] = [.. values];
+
+    public Task<IReadOnlyList<string>> ResolveTxtAsync(string name, CancellationToken ct = default)
+    {
+        Queried.Add(name);
+        if (Failure is not null) throw Failure;
+        return Task.FromResult<IReadOnlyList<string>>(
+            _records.TryGetValue(name, out var values) ? [.. values] : []);
+    }
+}
+
 public sealed class RecordingAuditLogger : IAuditLogger
 {
     public List<(string Actor, string Action, string EntityType, string? EntityId, string? Detail)> Entries { get; } = [];

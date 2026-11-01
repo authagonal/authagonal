@@ -104,6 +104,9 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     public TestAuthHook AuthHook { get; } = new();
     public RecordingAuditLogger AuditLog { get; } = new();
 
+    /// <summary>The DNS the organisation domain verification reads: no network, whatever a test publishes.</summary>
+    public FakeTxtResolver TxtResolver { get; } = new();
+
     /// <summary>Every log record the host wrote — for asserting that a secret is absent from it.</summary>
     public RecordingLoggerProvider LogSink { get; } = new();
     public TestTokenExchangeSubjectTransformer ExchangeTransformer { get; } = new();
@@ -374,6 +377,8 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
         // AddAuthagonalCore TryAddSingletons NullAuditLogger; the suite records instead, so an admin write
         // can be asserted to leave an attributable trail.
         services.AddSingleton<IAuditLogger>(AuditLog);
+        // AddAuthagonalCore TryAdds the DnsClient-backed resolver; a test host has no DNS to ask.
+        services.AddSingleton<Authagonal.Core.Services.ITxtResolver>(TxtResolver);
         services.AddSingleton<Authagonal.Protocol.ITokenExchangeSubjectTransformer>(ExchangeTransformer);
         services.AddSingleton<Authagonal.Protocol.IClientCredentialsClaimsTransformer>(ClientCredentialsTransformer);
         services.AddSingleton<IProvisioningOrchestrator>(Provisioning);

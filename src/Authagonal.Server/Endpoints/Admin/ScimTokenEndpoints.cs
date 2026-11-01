@@ -25,6 +25,7 @@ public static class ScimTokenEndpoints
         GenerateScimTokenRequest request,
         IScimTokenStore scimTokenStore,
         IClientStore clientStore,
+        IOrganizationStore organizations,
         IAuditLogger audit,
         HttpContext http,
         ILogger<Program> logger,
@@ -78,6 +79,13 @@ public static class ScimTokenEndpoints
                 Error = "invalid_request",
                 ErrorDescription = $"organizationId must be {MaxOrganizationIdLength} characters or fewer.",
             }, AuthagonalJsonContext.Default.ErrorInfoResponse, statusCode: 400);
+
+        // Must name a real organisation: the library turns a resolvable binding into an Active membership for
+        // every user this credential provisions, and an unresolvable one into a bare org_id tag that no
+        // organisation lists, so a typo here silently produced members of nothing. The same refusal, in the
+        // same shape, as an SSO connection pinned to an organisation that does not exist.
+        if (await SsoEndpoints.ValidateOrganizationAsync(organizationId, organizations, ct) is { } organizationError)
+            return organizationError;
 
         // Generate a cryptographically secure token
         var rawTokenBytes = RandomNumberGenerator.GetBytes(32);

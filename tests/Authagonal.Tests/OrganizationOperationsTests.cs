@@ -3,6 +3,7 @@ using Authagonal.Core.Models;
 using Authagonal.Core.Stores;
 using Authagonal.Server.Services;
 using Authagonal.Tests.Infrastructure;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Authagonal.Tests;
 
@@ -18,11 +19,12 @@ public sealed partial class OrganizationOperationsTests
     private readonly WritableOrganizationMembershipStore _members = new();
     private readonly InMemoryUserStore _users = new();
     private readonly RecordingAuditLogger _audit = new();
+    private readonly FakeTxtResolver _dns = new();
     private readonly OrganizationOperations _ops;
 
     public OrganizationOperationsTests()
     {
-        _ops = new OrganizationOperations(_orgs, _members, _users, _audit);
+        _ops = new OrganizationOperations(_orgs, _members, _users, _audit, _dns, NullLogger<OrganizationOperations>.Instance);
     }
 
     [GeneratedRegex("^org_[0-9a-f]{32}$")]
@@ -208,7 +210,7 @@ public sealed partial class OrganizationOperationsTests
     public async Task Create_StoreThrowsInvalidOperation_IsSlugTakenConflict()
     {
         var racing = new ThrowingUpsertOrganizationStore(_orgs);
-        var ops = new OrganizationOperations(racing, _members, _users, _audit);
+        var ops = new OrganizationOperations(racing, _members, _users, _audit, _dns, NullLogger<OrganizationOperations>.Instance);
 
         var result = await ops.CreateAsync("racer", "Racer", null, null, null, null, null, Actor, Ct);
 
