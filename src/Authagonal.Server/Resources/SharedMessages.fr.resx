@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>Quelqu'un a essayé de s'inscrire avec cette adresse e-mail, mais un compte existe déjà. Connectez-vous, ou réinitialisez votre mot de passe si vous l'avez oublié.</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>Se connecter</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>Si ce n'était pas vous, vous pouvez ignorer cet e-mail.</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>Vous êtes invité</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>Vous êtes invité</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>Vous avez été invité à rejoindre {0}. Définissez un mot de passe pour activer votre compte et commencer.</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>Définir mon mot de passe</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>Ce lien d'invitation expire dans 7 jours. Si vous n'attendiez pas cette invitation, vous pouvez ignorer cet e-mail.</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Déconnecté</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Déconnexion</value></data>
 </root>

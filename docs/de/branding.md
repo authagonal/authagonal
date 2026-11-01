@@ -31,17 +31,20 @@ neben `branding` und `providers` ein drittes Element enthalten:
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
 `organization` ist `null` (oder das Element fehlt), wenn der Request zu keiner Organisation aufgelöst
 wurde: bei einer Bereitstellung mit nur einem Mandanten oder wenn für diesen Host keine benutzerdefinierte
-Domain einer Organisation zugeordnet ist. Diese Bibliothek ermittelt für einen anonymen Request vor der
-Authentifizierung selbst keine Organisation (`OrganizationSelector` benötigt einen angemeldeten
-`AuthUser`); ein Host mit eigener Auflösung vor der Authentifizierung (Authagonal Cloud ordnet je
-benutzerdefinierter Domain eine zu) setzt `organization`, wenn er die Boot-Payload zusammenstellt.
+Domain einer Organisation zugeordnet ist. Die Bibliothek ermittelt die Organisation für einen anonymen Request vor der Authentifizierung selbst, in der Reihenfolge, die unter [Organisationen](organizations#organizations-on-the-login-page) beschrieben ist: zuerst eine maßgebliche Host-Zuordnung, dann die Organisation der Autorisierungsanfrage, dann eine Client-Beschränkung mit einem einzigen Eintrag. Ein Host mit eigener Auflösung vor der Authentifizierung (Authagonal Cloud ordnet je benutzerdefinierter Domain eine zu) setzt diese Zuordnung über `ITenantContext` (`OrganizationId` zusammen mit `OrganizationIdIsAuthoritative`), die `LoginBootPayloadBuilder.BuildAsync` über `PreAuthOrganizationResolver` auflöst, oder erstellt selbst einen `LoginBootPayload`-Record und übergibt ihn an `LoginBootPayloadBuilder.InjectIntoShell`. `BuildAsync` nimmt kein Organisationsargument entgegen.
 
 Ist `organization.name` vorhanden und weicht es von `branding.appName` ab (ohne Beachtung von Groß- und
 Kleinschreibung und nach Entfernen von Leerzeichen am Rand, damit eine Organisation mit demselben Namen wie
@@ -52,6 +55,20 @@ eingebundene Route (Anmeldung, Registrierung, Passwort vergessen und zurücksetz
 MFA-Abfrage und MFA-Einrichtung, die Geräteseite, Zustimmung und Agenten-Zustimmung, Grants und Konto) ihn
 identisch anzeigt. Nichts wird gerendert, und die Kopfzeile behält ihre normalen Abstände, wenn
 `organization` fehlt, `null` ist oder der Name mit `branding.appName` übereinstimmt.
+
+## Organisations-Branding {#organisation-branding}
+
+Wird der Request einer Organisation zugeordnet, wird deren `BrandingJson` Feld für Feld über das Branding des Mandanten gelegt; das Ergebnis ist das Element `branding` der Boot-Payload. Ein Feld, das null ist oder fehlt, erbt den Wert des Mandanten, unbekannte Schlüssel werden ignoriert, ein Wert der falschen Art behält für diesen Schlüssel den Wert des Mandanten, `languages` ersetzt die Liste des Mandanten, und ein fehlerhaftes Dokument ergibt unverändert das Branding des Mandanten. Eine Organisation kann `showRegistration` nicht setzen. Die Regeln stehen unter [Organisationen](organizations#organization-branding) (`OrganizationBranding.Merge`).
+
+Der eigenständige Server erstellt die Boot-Payload mit `LoginBootPayloadBuilder` für die Login-Routen (`/login`, `/accept-invite` und die übrigen SPA-Routen; das nackte `/` wird als einfache `index.html` ohne Payload ausgeliefert und zeigt daher keine Organisation), und `MapAuthagonalLoginFallback()` bettet sie als `<script type="application/json" id="authagonal-boot">` unmittelbar vor `</head>` ein. `branding.json` wird bei jedem Request neu gelesen; eine Änderung an der eingebundenen Datei wirkt also sofort. Eine fehlende oder fehlerhafte Datei wird wie `{}` behandelt (bei einer fehlerhaften mit einer Warnung). Schlägt irgendetwas fehl, wird die einfache `index.html` ausgeliefert, und die SPA lädt `/branding.json` wie bisher.
+
+## Organisations-Branding in Einladungs-E-Mails {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` ist ein JSON-Objekt, das dem Host gehört. Neben der Anmeldeseite ([oben](#organisation-branding)) liest die Bibliothek es in der Einladungs-E-Mail (`IEmailService.SendUserInviteEmailAsync`, siehe [Organisationen](organizations#inviting-people)). Bei einer Einladung in eine Organisation übernimmt der eingebaute Versand `appName`, `logoUrl` und `primaryColor` daraus, Feld für Feld, über den eigenen Standardwerten der E-Mail: `Authagonal`, kein Logo und `#2563eb` (die Standardwerte der Login-App). Ein fehlendes, leeres oder nicht als Zeichenkette angegebenes Feld gilt als nicht gesetzt; ein Logo muss eine absolute `https`-URL sein und eine Farbe eine einfache CSS-Farbe (Hex, `rgb()`/`hsl()` oder ein Schlüsselwort), sonst gilt sie ebenfalls als nicht gesetzt. Fehlerhaftes JSON wird ignoriert: Eine Einladung wird nie wegen des Brandings einer Organisation abgelehnt.
+
+Der Betreff besteht aus dem lokalisierten Einladungstitel und dem Anwendungsnamen, der Text nennt die Organisation, und jeder Wert wird HTML-kodiert. Eine einfache Einladung (ohne Organisation) verwendet die Standardwerte und nennt den Absender (`Email:SenderName`, sonst `Authagonal`).
+
+Ein Host mit eigenem `IEmailService` ist nicht betroffen. Das standardmäßige `SendUserInviteEmailAsync` der Schnittstelle sendet die Passwort-zurücksetzen-E-Mail mit dem Annahme-Link; überschreiben Sie es, um eine Einladung mit eigenem Branding zu versenden. Die Seite, die der Link öffnet, `/accept-invite`, gehört zur Login-App und übernimmt das `branding.json` des Mandanten wie jede andere Seite, mit dem Branding der Organisation, die ihr Parameter `organization` nennt, darübergelegt ([oben](#organisation-branding)).
 
 ## Konfiguration {#configuration}
 

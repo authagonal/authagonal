@@ -22,6 +22,8 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
+A custom host can call `app.MapAuthagonalLoginFallback()` instead of `app.MapFallbackToFile("index.html")` to inline the organization boot payload into the login pages, as the standalone server does. The bare `/` is still served as the plain `index.html`.
+
 ### Multi-Tenant Hosting
 
 For multi-tenant deployments, use `AddAuthagonalCore()` instead. It registers endpoints, middleware, and core services but skips storage and background services; you provide those per-tenant. Signing-key management defaults to `Authagonal.Protocol`'s `ProtocolKeyManager` singleton, and a host that registers its own `IKeyManager` before `AddAuthagonalCore()` keeps it:
@@ -388,6 +390,8 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 
 app.MapFallbackToFile("index.html");
 ```
+
+A custom host can call `app.MapAuthagonalLoginFallback()` instead of `app.MapFallbackToFile("index.html")` to inline the organization boot payload into the login pages, as the standalone server does. The bare `/` is still served as the plain `index.html`.
 
 ## HashiCorp Vault Transit Integration
 

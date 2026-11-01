@@ -171,5 +171,15 @@
   "account.saving": "Wird gespeichert…",
   "emailVerified": "Die E-Mail-Adresse wurde überprüft – melden Sie sich an, um fortzufahren.",
   "accountCreated": "Konto erstellt – melden Sie sich an, um fortzufahren.",
-  "oidcErrorGeneric": "Die Anmeldung konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut."
+  "oidcErrorGeneric": "Die Anmeldung konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.",
+  "invite.title": "Richten Sie Ihr Konto ein",
+  "invite.titleOrganization": "{{organization}} beitreten",
+  "invite.intro": "Wählen Sie ein Passwort, um die Einrichtung Ihres Kontos abzuschließen.",
+  "invite.introOrganization": "Sie wurden eingeladen, {{organization}} beizutreten. Wählen Sie ein Passwort, um die Einrichtung Ihres Kontos abzuschließen.",
+  "invite.button": "Konto erstellen",
+  "invite.creating": "Wird eingerichtet…",
+  "invite.successTitle": "Alles erledigt",
+  "invite.successMessage": "Ihr Passwort ist gesetzt. Sie können sich jetzt anmelden.",
+  "invite.invalidTitle": "Einladung ungültig",
+  "invite.invalidMessage": "Dieser Einladungslink ist ungültig oder abgelaufen. Bitten Sie die Person, die Sie eingeladen hat, einen neuen zu senden."
 }

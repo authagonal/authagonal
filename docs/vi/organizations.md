@@ -24,12 +24,9 @@ Một `Organization` cho nó một bản ghi: một id mờ bất biến, một 
 - **Không có bộ chọn tổ chức.** Một người dùng thuộc nhiều tổ chức, trên một request không nêu tổ chức nào, sẽ nhận `account_selection_required`, một lỗi mà relying party có thể xử lý bằng cách thử lại kèm một tham số. Không có màn hình được host nào yêu cầu họ chọn.
 - **Không có quản trị tổ chức được ủy quyền.** Không có quyền nào cho phép quản trị viên của chính khách hàng quản lý thành viên của họ.
 - **Không có cô lập SCIM theo phạm vi tổ chức.** Một SCIM token gắn với một tổ chức (`ScimToken.OrganizationId`) gắn nhãn cho những người dùng mà nó tạo ra và, khi id đó trỏ tới một tổ chức có thật, biến họ thành thành viên đang hoạt động (xem [Tư cách thành viên từ một SCIM token](#membership-from-a-scim-token)). Các phép kiểm tra quyền sở hữu vẫn dựa trên OAuth client, không dựa trên tổ chức, nên việc gắn quyết định việc gắn nhãn chứ không quyết định quyền truy cập.
-- **Không có luồng mời trong thư viện này.** Không có endpoint mời và không có email mời. Host tự ghi một tư cách thành viên `invited`; các cách để nó trở thành `active` nằm ở mục [Lời mời](#invitations).
 - **Không có nhóm theo phạm vi tổ chức.** Claim `groups` và tư cách thành viên nhóm SCIM vẫn áp dụng trên toàn tenant; chỉ vai trò mới theo phạm vi tổ chức.
 - **Không có sự kiện webhook cho tổ chức, và không có audit theo phạm vi tổ chức.** `IAuthHook` không có sự kiện vòng đời tổ chức (tạo, cấp hoặc thu hồi tư cách thành viên), các payload hook hiện có không mang `organizationId`, và audit log không có cột hay chỉ mục nào cho tổ chức.
 - **Các scope giới hạn theo vai trò được lọc theo vai trò của tenant tại authorize.** `Scope.AllowedRoles` được áp dụng trên `/connect/authorize` dựa vào các vai trò được gán trực tiếp cho tài khoản, trước khi tổ chức được phân giải, nên một scope mà `AllowedRoles` chỉ được thỏa mãn bởi một vai trò theo phạm vi tổ chức sẽ bị loại bỏ tại authorize, hoặc bị từ chối với `access_denied` nếu không còn scope được yêu cầu nào. Khi refresh, cùng phép kiểm tra đó chạy với các vai trò của chủ thể đã phân giải, vốn có bao gồm vai trò của tổ chức. Cho tới khi hai bên thống nhất, hãy giới hạn scope theo vai trò của tenant.
-- **Không có thương hiệu tổ chức trong thư viện này.** `Organization.BrandingJson` được lưu để host trộn đè lên thương hiệu của tenant; không có gì trong thư viện này đọc nó. Ứng dụng đăng nhập hiển thị tên tổ chức ("Đang đăng nhập vào {name}") khi boot payload của host mang một `organization` (`{ id, slug, name }`); bản thân thư viện không phân giải tổ chức nào trước khi xác thực, ngoại trừ qua tham số `organization`, một giới hạn client chỉ có một mục, một kết nối theo phạm vi tổ chức, hoặc `ITenantContext.OrganizationId` của host.
-- **Không có REST API quản trị tổ chức.** `IOrganizationStore` và `IOrganizationMembershipStore` là bề mặt có sẵn; host nào muốn có endpoint thì tự xây dựng. Host liệt kê tổ chức hoặc thành viên nên dùng `ListPageAsync` / `ListByOrganizationPageAsync` (bên dưới).
 
 ## Tạo một tổ chức {#creating-an-organization}
 
@@ -72,16 +69,17 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 
 ### Lời mời {#invitations}
 
-Một bản ghi `invited` mang `InvitedByUserId`, `InvitedAt`, và các vai trò được đề nghị cho người được mời. Thư viện không bao giờ gửi lời mời; nó nâng bản ghi lên `active` (giữ nguyên vai trò, người mời và thời điểm mời, và gán `JoinedAt`) ở hai chỗ:
+Một dòng `invited` mang `InvitedByUserId`, `InvitedAt` và các vai trò được đề nghị cho người được mời. API quản trị ghi một dòng như vậy khi mời ai đó vào một tổ chức ([Mời người dùng](#inviting-people)), và một host cũng có thể tự ghi. Thư viện nâng dòng lên `active` (giữ nguyên vai trò, người mời và thời điểm mời, đồng thời đặt `JoinedAt`) trong ba trường hợp:
 
+- **Khi chấp nhận lời mời.** Đặt mật khẩu qua liên kết lời mời sẽ xác nhận địa chỉ email, và hook kích hoạt của thư viện chuyển mọi tư cách thành viên `invited` của người dùng đó sang `active` và ghi `organization.member.joined`.
 - **Đăng nhập qua một kết nối SAML hoặc OIDC theo phạm vi tổ chức.** Việc IdP của chính tổ chức đó xác nhận cho người đó đồng nghĩa với chấp nhận lời mời (`FederatedOrganizationBinding`, 0.30.2). Nếu không có điều này, một người được mời chỉ luôn đăng nhập qua SSO sẽ bị phép kiểm tra tư cách thành viên từ chối cấp token.
 - **Tư cách thành viên tự động** (bên dưới), khi người dùng đủ điều kiện.
 
-Một bản ghi `suspended` không bao giờ được nâng cấp bởi cả hai đường này và không bao giờ bị thay đổi bởi một lần đăng nhập.
+Một dòng `suspended` không bao giờ được nâng lên bởi bất kỳ đường nào trong số này và không lần đăng nhập nào thay đổi nó.
 
 ### Tên miền đã xác minh và tư cách thành viên tự động {#verified-domains-and-automatic-membership}
 
-`Organization.Domains` chứa các tên miền email mà tổ chức đã khai báo sở hữu, mỗi tên miền là một `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`. `Domain` được lưu ở dạng chữ thường, đã cắt khoảng trắng, không có dấu chấm ở cuối. Thư viện lưu lời khai báo và đọc `VerifiedAt`; việc chứng minh quyền kiểm soát (thường là một bản ghi DNS TXT mang `VerificationToken`) là việc của host, và host gán `VerifiedAt` khi việc này thành công.
+`Organization.Domains` chứa các miền email mà tổ chức đã đăng ký, mỗi miền là một `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`. `Domain` được lưu dưới dạng chữ thường, không có khoảng trắng và không có dấu chấm cuối. API quản trị lưu miền được đăng ký, chứng minh quyền kiểm soát bằng một bản ghi DNS TXT mang `VerificationToken` và đặt `VerifiedAt` ([Xác minh miền](#domain-verification)); một host có cách kiểm tra riêng có thể tự đặt `VerifiedAt`.
 
 `Organization.AllowAutoMembership` (mặc định tắt) cho phép người dùng tham gia mà không cần lời mời. Khi tổ chức được chọn **một cách tường minh** (một refresh grant được mang theo, tham số `organization`, một kết nối theo phạm vi tổ chức, hoặc một client bị giới hạn vào đúng tổ chức đó) và người dùng chưa có tư cách thành viên đang hoạt động, họ được biến thành thành viên nếu **tất cả** các điều kiện sau đều đúng:
 
@@ -93,13 +91,86 @@ Nếu chưa có bản ghi, một bản ghi `active` không có vai trò nào s�
 
 ### Tư cách thành viên từ một SCIM token {#membership-from-a-scim-token}
 
-Một SCIM token được tạo với `organizationId` sẽ gán giá trị đó làm `org_id` cho mọi người dùng mà nó tạo ra. Khi id đó trỏ tới một tổ chức đang tồn tại, thao tác tạo cũng ghi một tư cách thành viên `active` không có vai trò nào và ghi audit `scim.organization_member_added`. Một id không trỏ tới tổ chức nào vẫn chỉ là một nhãn đơn thuần. Chỉ khi tạo: một lần đồng bộ sau đó không gắn nhãn lại hay thêm thành viên. Xem [SCIM](scim#tagging-a-connectors-users-with-an-organization).
+Một token SCIM được cấp với `organizationId` sẽ gắn giá trị đó làm `org_id` trên mọi người dùng mà nó tạo. `POST /api/v1/scim/tokens` từ chối bằng `400 unknown_organization` một `organizationId` không trỏ tới tổ chức nào (bằng `400 invalid_request` nếu sai định dạng), giống như một kết nối SSO, nên token cấp qua API quản trị không bao giờ mang nhãn mà không tổ chức nào liệt kê. Khi id trỏ tới một tổ chức, việc tạo cũng ghi một tư cách thành viên `active` không có vai trò và ghi kiểm toán `scim.organization_member_added`. Một token đã mang sẵn id không trỏ tới đâu vẫn chỉ là một nhãn. Chỉ khi tạo: một lần đồng bộ sau đó không gắn nhãn lại hay thêm thành viên. Xem [SCIM](scim#tagging-a-connectors-users-with-an-organization).
 
 ### Liệt kê và xóa {#listing-and-deleting}
 
 `IOrganizationStore.ListPageAsync(cursor, limit)` và `IOrganizationMembershipStore.ListByOrganizationPageAsync(organizationId, cursor, limit)` trả về một trang (`Items` và một `NextCursor` mờ, là null ở trang cuối). `limit` bị kẹp trong khoảng 1..200 và một cursor sai định dạng sẽ ném `ArgumentException`. Cursor dựa trên keyset, nên một bản ghi được thêm hoặc xóa giữa các lần đọc không bao giờ làm lệch hay lặp lại một trang. Cả hai đều có bản cài đặt mặc định dựa trên các phép liệt kê không phân trang, nên một store tùy chỉnh vẫn biên dịch được; các store Azure Table ghi đè chúng bằng một truy vấn khoảng phía máy chủ.
 
 Xóa một người dùng qua `DELETE /api/v1/profile/{userId}` của admin, `DELETE /scim/v2/Users/{id}` của SCIM hoặc đường thu hồi lại của SCIM cũng xóa mọi tư cách thành viên mà người đó nắm giữ (`AccountArtefactPurge.PurgeAsync` với một `IOrganizationMembershipStore`; overload ba store không xóa tư cách thành viên nào). Host có đường xóa riêng cũng phải truyền membership store vào, nếu không các tổ chức sẽ tiếp tục liệt kê thành viên đã bị xóa.
+
+## Quản trị tổ chức qua HTTP {#administering-over-http}
+
+API quản trị (`AdminApi:Enabled`, phạm vi quản trị) quản lý tổ chức, tư cách thành viên, miền và lời mời. Trang [API quản trị](admin-api#organizations) nêu từng yêu cầu, từng trạng thái thành công và từng mã lỗi; tóm tắt:
+
+| Route | Mục đích |
+|---|---|
+| `GET /api/v1/organizations`, `POST /api/v1/organizations` | Liệt kê (có phân trang) và tạo |
+| `GET /api/v1/organizations/{idOrSlug}`, `PUT /api/v1/organizations/{id}`, `DELETE /api/v1/organizations/{id}` | Đọc, cập nhật, xóa (thành viên bị xóa cùng) |
+| `GET /api/v1/organizations/{id}/members`, `POST /api/v1/organizations/{id}/members`, `PUT /api/v1/organizations/{id}/members/{userId}`, `DELETE /api/v1/organizations/{id}/members/{userId}` | Liệt kê, thêm, đổi trạng thái và vai trò, gỡ |
+| `POST /api/v1/organizations/{id}/domains`, `POST /api/v1/organizations/{id}/domains/{domain}/verify`, `DELETE /api/v1/organizations/{id}/domains/{domain}` | Đăng ký, chứng minh và giải phóng một miền email |
+| `POST /api/v1/organizations/backfill` | Biến các giá trị `OrganizationId` cũ thành tổ chức |
+| `GET /api/v1/profile/{userId}/organizations` | Các tổ chức mà một người dùng thuộc về |
+| `POST /api/v1/profile/invite`, `POST /api/v1/profile/{userId}/resend-invite` | Mời ai đó qua email, gửi lại lời mời |
+
+Một lỗi trả về `{ "error": "<code>", "error_description": "..." }` với `400` (đầu vào không hợp lệ), `404` (không tìm thấy), `409` (xung đột) hoặc `502` (`invite_email_failed`).
+
+## Xác minh miền {#domain-verification}
+
+`POST /api/v1/organizations/{id}/domains` với `{ "domain": "acme.com" }` đăng ký miền, chưa xác minh, và trả về `201` cùng bản ghi cần công bố: `recordName` (`_authagonal-org.acme.com`) và `recordValue` (`authagonal-org-verify=<token>`). Token gồm 256 bit ngẫu nhiên, mỗi lần đăng ký một token. Hãy công bố một bản ghi TXT với tên đó và đúng giá trị đó, rồi gọi `POST /api/v1/organizations/{id}/domains/acme.com/verify`.
+
+Khi khớp, `VerifiedAt` được đặt và `organization.domain_verified` được ghi. Thất bại là `409 verification_failed`, không bao giờ là `200` với `verified: false`, và mô tả của nó nêu tên và giá trị bản ghi cần công bố cùng những gì đã tìm thấy. Xác minh một miền đã xác minh sẽ trả về nguyên trạng. Một miền thuộc về tối đa một tổ chức, dù đã xác minh hay chưa (`domain_taken`). Gỡ một miền chấm dứt việc tự động tham gia về sau và không loại ai ra.
+
+Việc đọc DNS đi qua `ITxtResolver` (`Authagonal.Core.Services`): `ResolveTxtAsync(name, ct)` trả về các giá trị TXT được công bố tại một tên, một danh sách rỗng khi không có, và ném ngoại lệ khi truy vấn thất bại (được báo là `verification_failed`; nội dung ngoại lệ không bao giờ được trả về). Mặc định đọc DNS thật qua DnsClient và nối các chuỗi ký tự của một bản ghi thành một giá trị. Nó được đăng ký bằng `TryAdd`, nên một resolver bạn đăng ký trước `AddAuthagonal()` (một resolver nội bộ, DNS qua HTTPS) sẽ được ưu tiên.
+
+## Backfill {#backfill}
+
+Trước khi có tổ chức, `AuthUser.OrganizationId` là văn bản tự do. `POST /api/v1/organizations/backfill` nhóm người dùng theo đúng chuỗi đó và tạo một tổ chức cho mỗi giá trị riêng biệt, với một tư cách thành viên `active` (không có vai trò) cho từng người dùng. Slug là giá trị đó viết thường, mỗi chuỗi ký tự khác được rút gọn thành một dấu gạch ngang (`-2`, `-3`, v.v. nếu trùng), tên hiển thị là chính giá trị đó, và tổ chức được đánh dấu bằng khóa metadata `legacyOrganizationId`. Phần thân là `{ "dryRun": true }`; **chạy thử là mặc định**, kể cả khi không có thân, và không ghi gì.
+
+Chạy lại là an toàn (idempotent): một tổ chức đã được đánh dấu cho một giá trị sẽ được dùng lại, kể cả sau khi đổi tên, và người dùng đã có tư cách thành viên được tính vào `usersSkipped`. Phản hồi gồm `dryRun`, `organizationsCreated`, `membershipsCreated`, `usersSkipped`, `organizations` (50 tổ chức đầu tiên, mỗi tổ chức có `legacyValue`, `slug` và `users`) và `truncated`. Một lần chạy quét tối đa 50.000 người dùng; `truncated: true` nghĩa là cần chạy lại. Một lần chạy thật ghi `organization.backfill`.
+
+## Mời người dùng {#inviting-people}
+
+`POST /api/v1/profile/invite` nhận `email` (bắt buộc), `firstName`, `lastName`, `locale`, `organizationId` và `organizationRoles`. Nó tạo tài khoản ngay, chưa xác nhận và chưa có mật khẩu dùng được, rồi gửi một liên kết qua email; phản hồi là `200` với `{ "userId", "email" }`. Với `organizationId`, nó cũng ghi một tư cách thành viên `invited` kèm vai trò, `InvitedByUserId` (quản trị viên đang gọi) và `InvitedAt`, và email nêu tên tổ chức cùng thương hiệu của tổ chức ([Thương hiệu](branding#organisation-branding-in-invitation-emails)). Mọi thứ liên quan đến tổ chức được kiểm tra trước khi tài khoản tồn tại, nên một lời mời bị từ chối không để lại người dùng mồ côi. Chỉ có thể mời tài khoản mới: một địa chỉ đã tồn tại là `409 user_already_exists`, và người dùng đã có được thêm bằng `POST /api/v1/organizations/{id}/members`.
+
+Liên kết mang một grant `password_reset` dùng một lần, thời hạn bảy ngày, được `POST /api/auth/reset-password` hiện có đổi; không có endpoint đổi thứ hai. Đặt mật khẩu sẽ xác nhận địa chỉ và kích hoạt `IAuthHook.OnEmailConfirmedAsync`, và hook kích hoạt của chính thư viện chuyển mọi tư cách thành viên `invited` của người dùng sang `active` (giữ nguyên vai trò, người mời và thời điểm mời, đồng thời đặt `JoinedAt`) và ghi `organization.member.joined`, với thành viên mới là tác nhân. Dòng `suspended` hoặc `active` không bị đụng tới, lỗi kho lưu trữ được ghi log và không bao giờ làm việc xác nhận thất bại, và hook là idempotent. Nó chạy ở bất cứ nơi nào thư viện kích hoạt `OnEmailConfirmedAsync`, dù host của bạn đăng ký những hook nào.
+
+`POST /api/v1/profile/{userId}/resend-invite` tạo một liên kết mới và gửi đi: `404 user_not_found`, `400 already_accepted` sau khi địa chỉ đã được xác nhận (hãy dùng đặt lại mật khẩu), và `502 invite_email_failed` khi việc gửi ném ngoại lệ. Lời mời đầu tiên dễ tính hơn: một lần gửi thất bại chỉ được ghi log, và người dùng cùng liên kết vẫn tồn tại vì lời mời có thể được gửi lại. Một lời mời gửi lại nêu tên tổ chức khi người dùng có đúng một tư cách thành viên `invited`.
+
+Email đi qua `IEmailService.SendUserInviteEmailAsync(toEmail, tenantName, acceptUrl, locale, ct, organization)`, một thành viên interface có triển khai mặc định, phần thân của nó gửi email đặt lại mật khẩu kèm liên kết chấp nhận, nên host có `IEmailService` riêng vẫn gửi đi một liên kết dùng được; hãy ghi đè để gửi lời mời của riêng bạn. Bộ gửi tích hợp soạn lời mời bằng ngôn ngữ của quản trị viên đang mời khi thư viện có ngôn ngữ đó (`Accept-Language` đầu tiên nó nhận ra, nếu không thì `locale` của yêu cầu), nếu không thì bằng ngôn ngữ của người được mời, và nếu không nữa thì bằng tiếng Anh.
+
+`IInviteLinkBuilder` (`Authagonal.Core.Services`) quyết định liên kết trỏ tới đâu: `Task<string> BuildAcceptUrlAsync(string token, Organization? organization, CancellationToken ct = default)`. Mặc định trả về `{issuer}/accept-invite?p=<token>`, kèm `&organization=<slug>` cho lời mời vào một tổ chức, cả hai đều được escape. Hãy đăng ký của bạn trước `AddAuthagonal()` (được thêm bằng `TryAdd`) để phục vụ trang ở nơi khác, chẳng hạn miền riêng của một tổ chức; lời mời và việc gửi lại đều dựng mọi liên kết qua nó.
+
+## Trang chấp nhận lời mời {#the-accept-invite-page}
+
+Ứng dụng đăng nhập phục vụ `/accept-invite` ở gốc của host, ngoài đường dẫn gốc `/login`, và SPA fallback của máy chủ độc lập phục vụ nó. Trang đọc token từ `p`, yêu cầu nhập mật khẩu mới hai lần, kiểm tra theo chính sách mật khẩu và gửi tới `/api/auth/reset-password`. Khi liên kết có `organization`, trang nêu tên tổ chức đó: bằng tên hiển thị nếu dữ liệu khởi động của host (`getOrganization()`) có cùng tổ chức đó, nếu không thì bằng slug trong liên kết, đây là những gì máy chủ độc lập hiển thị. Một liên kết không có token hiển thị thông báo «không hợp lệ hoặc đã hết hạn» và không có biểu mẫu; một token không rõ hay đã hết hạn hiển thị cùng thông báo khi mật khẩu được gửi đi. Một mật khẩu bị máy chủ từ chối (`weak_password`) hiển thị thông báo của máy chủ. Văn bản có đủ mười một ngôn ngữ. Host dựa trên gói npm nhập `AcceptInvite` từ `@authagonal/login` và gắn nó tại `/accept-invite`.
+
+## Gọi các dịch vụ từ mã {#calling-the-services-from-code}
+
+Các endpoint rất mỏng: `OrganizationOperations` và `UserInviteOperations` (`Authagonal.Server.Services`, đăng ký theo scope và `TryAdd`) nắm từng quy tắc, từng mã lỗi và từng dòng kiểm toán, nên một bề mặt riêng của host (một route cổng thông tin, một công cụ) có thể gọi chúng và ghi đúng những dòng đó. `OrganizationOperations` có `ListPageAsync`, `GetAsync`, `CreateAsync`, `UpdateAsync`, `DeleteAsync`, `ListMembersPageAsync`, `AddMemberAsync`, `UpdateMemberAsync`, `RemoveMemberAsync`, `AddDomainAsync`, `VerifyDomainAsync`, `RemoveDomainAsync`, `ListUserOrganizationsAsync` và `BackfillAsync`; `UserInviteOperations` có `InviteAsync` và `ResendInviteAsync`. Chúng nhận tác nhân kiểm toán dưới dạng chuỗi và không dùng kiểu HTTP nào; ai được gọi chúng (ai được mời vào tổ chức, một lời mời được gửi lại thường xuyên đến đâu) là chính sách của host.
+
+Mỗi hàm trả về `OperationResult<T>`: `Outcome` (`Ok`, `Invalid`, `NotFound`, `Conflict` hoặc `Failed`), `Value`, `Error` (mã), `Message`, `Fields` và `Succeeded`. API quản trị ánh xạ các kết quả sang `400`, `404`, `409` và `502`. Một danh sách trả về `ResultPage<T>` (`Items` và `NextCursor`). `ListUserOrganizationsAsync` và `BackfillAsync` trả về giá trị trực tiếp.
+
+## Hành động kiểm toán {#audit-actions}
+
+Mỗi lần ghi đi qua `IAuditLogger`, với loại thực thể `organization` (`user` ở hai hành động cuối) và subject của quản trị viên đang gọi làm tác nhân.
+
+| Hành động | Được ghi khi | Chi tiết |
+|---|---|---|
+| `organization.created` | tổ chức được tạo | slug |
+| `organization.updated` | tổ chức được cập nhật | slug |
+| `organization.deleted` | tổ chức bị xóa | slug |
+| `organization.member.added` | thành viên được thêm | `user=<userId>` |
+| `organization.member.updated` | trạng thái hoặc vai trò của thành viên thay đổi | `user=<userId>` |
+| `organization.member.removed` | thành viên bị gỡ | `user=<userId>` |
+| `organization.member.invited` | một lời mời tạo tư cách thành viên `invited` | `user=<userId>` |
+| `organization.member.joined` | tư cách `invited` chuyển sang `active` khi xác nhận email (tác nhân là người dùng) | `user=<userId>` |
+| `organization.domain_added` | một miền được đăng ký | `domain=<domain>` |
+| `organization.domain_verified` | một miền được chứng minh | `domain=<domain>` |
+| `organization.domain_removed` | một miền được giải phóng | `domain=<domain>` |
+| `organization.backfill` | một backfill không phải chạy thử | `organizationsCreated=<n> membershipsCreated=<n>` |
+| `user.invited` | ai đó được mời | địa chỉ với phần local bị che (`***@acme.com`) |
+| `user.invite_resent` | lời mời được gửi lại | như trên |
 
 ## Vai trò theo phạm vi tổ chức {#organization-scoped-roles}
 
@@ -168,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 Mỗi mục phải khớp dạng id tổ chức `^[A-Za-z0-9._~-]{1,200}$`; admin API trả `400 invalid_request` cho một mục rỗng hoặc sai định dạng, vì một giới hạn liệt kê id mà không tham số `organization` nào gửi được sẽ không khớp gì cả, và một giới hạn không khớp gì cả sẽ từ chối mọi request. Một danh sách `null` được chuẩn hóa thành rỗng.
 
 Rỗng (điều mà mọi client hiện có đều đang có) nghĩa là không giới hạn. Một request có tổ chức không nằm trong danh sách sẽ bị từ chối với `access_denied`. Một danh sách một mục cũng đồng thời chọn tổ chức, theo quy tắc 4 ở trên. Một danh sách nhiều mục thì giới hạn nhưng không chọn: request vẫn phải nêu một tổ chức, nếu không sẽ bị từ chối với `account_selection_required`.
+
+## Tổ chức trên trang đăng nhập {#organizations-on-the-login-page}
+
+Trước khi có ai đăng nhập thì chưa có người dùng, nên trang đăng nhập phải tự biết từ chính request rằng nó dành cho tổ chức nào. `PreAuthOrganizationResolver` làm việc này cho trang đăng nhập theo thứ tự dưới đây; quy tắc đầu tiên chỉ ra một tổ chức sẽ thắng.
+
+1. **Ghim host có thẩm quyền.** Host đã ghim tên miền của request vào một tổ chức và đánh dấu ghim đó là có thẩm quyền (xem [Ghim một host vào một tổ chức](#pinning-a-host-to-an-organization)). Một ghim không chỉ tới tổ chức nào tồn tại (đã bị xóa) thì không được tính là ghim: việc phân giải tiếp tục. Trang đăng nhập làm vậy một cách im lặng; chỉ việc thực thi trên `/connect/authorize` và `/connect/par` mới ghi log cảnh báo.
+2. **`organization` chỉ trên `/accept-invite`.**
+3. **Tổ chức của request ủy quyền**: `organization`, `org_slug` hoặc `org_id` trong query của `returnUrl`, hoặc bên trong request đã được đẩy (push) mà `request_uri` của nó chỉ tới; khi đó tham số và client của request ấy thay thế các giá trị bên ngoài.
+4. **Mục duy nhất trong `RestrictedToOrganizationIds` của một client đang được bật.**
+5. **Một ghim không có thẩm quyền**, xét sau cùng.
+
+Mỗi tên được phân giải trước như slug, rồi như id, giống như trong [Chọn một tổ chức trong request ủy quyền](#selecting-an-organization-on-an-authorization-request). Việc phân giải này không kiểm tra tổ chức có đang được bật hay không, nên trang đăng nhập của một tổ chức đã bị vô hiệu hóa vẫn hiển thị thương hiệu của nó; endpoint ủy quyền vẫn từ chối tổ chức đó. Mọi lỗi đều cho kết quả là không có tổ chức, không bao giờ là một trang lỗi.
+
+### Ghim một host vào một tổ chức {#pinning-a-host-to-an-organization}
+
+Host đánh dấu tổ chức mà nó đã phân giải cho một request là có thẩm quyền bằng cách trả về `true` từ `ITenantContext.OrganizationIdIsAuthoritative`, một default interface member có giá trị mặc định `false`. Một ghim chỉ có thẩm quyền khi giá trị đó là `true` và `OrganizationId` không rỗng. Host không đặt cả hai thì hoạt động như trước: ghim xếp sau cùng, như quy tắc 5 ở trên.
+
+Máy chủ độc lập không cần viết mã. Ánh xạ mỗi tên host tới **id** của tổ chức (không phải slug) trong `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+hoặc, không dùng tệp:
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+Host được so sánh không phân biệt hoa thường với tên host của request, và cổng bị bỏ qua. Một mục khớp sẽ đặt `OrganizationId` và biến nó thành có thẩm quyền; không có mục, hoặc không có section, thì không có gì thay đổi. Một id không chỉ tới tổ chức nào là ghim treo và được xử lý như ở trên.
+
+### Ghim có thẩm quyền áp đặt điều gì {#what-an-authoritative-pin-enforces}
+
+Dưới một ghim có thẩm quyền, `/connect/authorize` và `POST /connect/par` (và không endpoint nào khác) bị ràng buộc vào tổ chức đã ghim:
+
+- Request không chỉ định tổ chức nào (`organization`, `org_slug` hoặc `org_id`) sẽ được thêm `organization=<id đã ghim>`: vào query, hoặc với PAR là vào form body. Request ủy quyền mang `request_uri` được giữ nguyên.
+- Request chỉ định tổ chức đã ghim, bằng slug hoặc id, được cho qua.
+- Request chỉ định bất kỳ tổ chức nào khác, hoặc một tổ chức không tồn tại, bị từ chối và không bao giờ được chuyển hướng:
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR chỉ được đọc khi body của nó là `application/x-www-form-urlencoded`; mọi body khác đều bị từ chối. Độ dài khai báo vượt quá 32 KiB được để cho endpoint xử lý, endpoint này trả 413; body không khai báo độ dài được đọc tối đa 32 KiB và bị từ chối nếu vượt quá. Body được khôi phục sau khi đọc.
+
+Những từ chối mà các endpoint vốn đã đưa ra sau khi tổ chức được chọn (không là thành viên, hạn chế client, tổ chức bị vô hiệu hóa) không thay đổi.
+
+### Thương hiệu tổ chức {#organization-branding}
+
+`Organization.BrandingJson` được `OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` trộn theo từng trường đè lên thương hiệu của tenant. Hàm trả về một `JsonObject` mới và không thay đổi đầu vào. Các quy tắc:
+
+- Khóa null hoặc không có sẽ kế thừa giá trị của tenant.
+- Khóa không xác định bị bỏ qua. Khóa được so khớp không phân biệt hoa thường.
+- Giá trị sai kiểu JSON cho khóa của nó giữ giá trị của tenant, chỉ cho khóa đó.
+- `languages` thay thế danh sách của tenant; nó không được trộn.
+- `BrandingJson` sai định dạng, hoặc không phải một đối tượng JSON, cho ra thương hiệu của tenant.
+- Tổ chức không thể đặt `showRegistration`; nó luôn giữ giá trị của tenant.
+
+Các khóa mà tổ chức có thể đặt là các tùy chọn thương hiệu của ứng dụng đăng nhập (xem [Thương hiệu](branding)) và năm màu email (`emailBg`, `emailHeaderColor`, `emailCardBg`, `emailFooterColor`, `emailLogoBg`).
+
+### Boot payload của trang đăng nhập {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` thực hiện một lần phân giải cho trang đăng nhập và trả về `{ branding, providers, organization }`: thương hiệu đã trộn (của tenant nếu không phân giải được tổ chức nào), danh sách nhà cung cấp của tổ chức đó, và `organization` dưới dạng `{ id, slug, name }` hoặc `null`. `MapAuthagonalLoginFallback()` phục vụ `index.html` của ứng dụng đăng nhập với payload đó được nhúng dưới dạng `<script type="application/json" id="authagonal-boot">` ngay trước `</head>`; máy chủ độc lập gọi hàm này. Xem [Thương hiệu](branding#organisation-name).
 
 ## Các claim {#the-claims}
 

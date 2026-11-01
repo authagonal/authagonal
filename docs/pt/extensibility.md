@@ -23,6 +23,8 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
+Um anfitrião personalizado pode chamar `app.MapAuthagonalLoginFallback()` em vez de `app.MapFallbackToFile("index.html")` para incorporar o payload de arranque da organização nas páginas de início de sessão, tal como o servidor autónomo. A raiz `/` continua a ser servida como o `index.html` simples.
+
 ### Alojamento multi-inquilino {#multi-tenant-hosting}
 
 Para implementações multi-inquilino, utilize antes `AddAuthagonalCore()`. Regista os endpoints, o middleware e os serviços principais, mas omite o armazenamento e os serviços em segundo plano; é o anfitrião que os fornece por inquilino. A gestão das chaves de assinatura recorre por predefinição ao singleton `ProtocolKeyManager` de `Authagonal.Protocol`, e um anfitrião que registe o seu próprio `IKeyManager` antes de `AddAuthagonalCore()` mantém-no:
@@ -389,6 +391,8 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 
 app.MapFallbackToFile("index.html");
 ```
+
+Um anfitrião personalizado pode chamar `app.MapAuthagonalLoginFallback()` em vez de `app.MapFallbackToFile("index.html")` para incorporar o payload de arranque da organização nas páginas de início de sessão, tal como o servidor autónomo. A raiz `/` continua a ser servida como o `index.html` simples.
 
 ## Integração com o HashiCorp Vault Transit {#hashicorp-vault-transit-integration}
 

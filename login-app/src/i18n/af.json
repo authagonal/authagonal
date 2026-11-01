@@ -171,5 +171,15 @@
   "account.saving": "Besig om te stoor…",
   "emailVerified": "E-pos geverifieer – meld aan om voort te gaan.",
   "accountCreated": "Rekening geskep – meld aan om voort te gaan.",
-  "oidcErrorGeneric": "Aanmelding kon nie voltooi word nie. Probeer asseblief weer."
+  "oidcErrorGeneric": "Aanmelding kon nie voltooi word nie. Probeer asseblief weer.",
+  "invite.title": "Stel jou rekening op",
+  "invite.titleOrganization": "Sluit aan by {{organization}}",
+  "invite.intro": "Kies 'n wagwoord om die opstel van jou rekening te voltooi.",
+  "invite.introOrganization": "Jy is genooi om by {{organization}} aan te sluit. Kies 'n wagwoord om die opstel van jou rekening te voltooi.",
+  "invite.button": "Skep rekening",
+  "invite.creating": "Besig om op te stel…",
+  "invite.successTitle": "Alles is gereed",
+  "invite.successMessage": "Jou wagwoord is gestel. Jy kan nou aanmeld.",
+  "invite.invalidTitle": "Ongeldige uitnodiging",
+  "invite.invalidMessage": "Hierdie uitnodigingskakel is ongeldig of het verval. Vra die persoon wat jou genooi het om 'n nuwe een te stuur."
 }

@@ -118,6 +118,14 @@ Consulte [Extensibilidad](extensibility) para ver todos los puntos de sustituci�
 
 El remitente integrado de [Resend](https://resend.com) se activa automáticamente cuando se configuran `Email:ResendApiKey` y `Email:SenderEmail`, sin necesidad de registrar ningún servicio. Sin ningún `IEmailService`, los correos de verificación y de restablecimiento de contraseña se **descartan sin aviso** y, como el inicio de sesión exige por defecto un correo electrónico confirmado, los usuarios autorregistrados nunca podrán iniciar sesión (`UseAuthagonal` registra una advertencia al iniciar). Establezca las claves `Email:*`, registre su propio `IEmailService` antes de `AddAuthagonal()` o incluya sus dominios en `Auth:AutoConfirmEmailDomains` para omitir la verificación (solo para desarrollo y pruebas). Consulte [Configuración → Correo electrónico](configuration#email).
 
+### Organizaciones e invitaciones {#organizations-and-invitations}
+
+`AddAuthagonal()` registra todo lo que necesita la API de administración de organizaciones, así que un host que no cambia nada la obtiene junto con el resto de la API de administración (`AdminApi:Enabled`): `/api/v1/organizations` y las rutas de invitación `/api/v1/profile/invite` y `/api/v1/profile/{userId}/resend-invite`. Las organizaciones y las pertenencias necesitan un almacén duradero; todos los proveedores incluyen uno y, en Azure Table Storage, no hace falta nada más. Consulte [Organizaciones](organizations).
+
+- **El enlace de invitación abre `/accept-invite` en el emisor.** El fallback de SPA del servidor independiente la sirve. Un host que monte por su cuenta la SPA de inicio de sesión debe servir la aplicación en la raíz del host para que `/accept-invite` la alcance fuera de la ruta base `/login`, o importar `AcceptInvite` de `@authagonal/login` y enrutar hacia ella. Para que el enlace apunte a otro sitio, registre su propio `IInviteLinkBuilder` antes de `AddAuthagonal()`.
+- **Las invitaciones necesitan un remitente de correo.** El remitente integrado de Resend las envía en cuanto se configuran `Email:ResendApiKey` y `Email:SenderEmail`. Un host con su propio `IEmailService` sobrescribe `SendUserInviteEmailAsync`; sin sobrescritura, la persona invitada recibe el correo de restablecimiento de contraseña con el enlace de aceptación.
+- **La comprobación de dominios lee DNS** mediante `ITxtResolver`; registre el suyo antes de `AddAuthagonal()` para usar otro resolvedor.
+
 ## Backend SQL {#sql-backend}
 
 Para ejecutarlo sobre su propia base de datos en lugar de un servicio en la nube, haga referencia a `Authagonal.SqlProvider` y regístrelo **antes** de `AddAuthagonal()`; esos registros son los que hacen que `AddAuthagonal()` omita su configuración de Azure Table Storage:
@@ -179,6 +187,30 @@ El paquete incluye JS y CSS compilados; importe los componentes y los estilos di
 ## Backend-for-Frontend (BFF) {#backend-for-frontend-bff}
 
 Si su SPA llama a API con un token de portador, guarde el token en un BFF en lugar de en el navegador. El BFF se publica como paquete NuGet (`Authagonal.Bff`) y como paquete npm (`@authagonal/bff`); ninguno de los dos forma parte de la imagen del servidor. Consulte [Backend-for-Frontend](bff).
+
+## Fijar un host a una organización {#pinning-a-host-to-an-organization}
+
+Para servir una organización distinta en cada dominio, asigne nombres de host a **ids** de organización con `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+El host se compara sin distinguir mayúsculas de minúsculas y el puerto se ignora. Un host fijado queda limitado a su organización en `/connect/authorize` y `/connect/par`, y sus rutas de inicio de sesión (por ejemplo `/login`, pero no la raíz `/`, que se sirve como el `index.html` simple) muestran el nombre y la personalización de marca de esa organización. Véase [Organizaciones](organizations#pinning-a-host-to-an-organization).
 
 ## Lista de comprobación de seguridad para producción {#production-security-checklist}
 

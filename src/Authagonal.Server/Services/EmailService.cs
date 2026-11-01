@@ -2,7 +2,9 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Text.Unicode;
+using Authagonal.Core.Models;
 using Authagonal.Core.Services;
 using Authagonal.Core.Stores;
 using Microsoft.Extensions.Localization;
@@ -29,7 +31,21 @@ public sealed class EmailService(
     private static readonly HtmlEncoder TextEncoder = HtmlEncoder.Create(UnicodeRanges.All);
 
     private const string ConfigSection = "Email";
-    private const string ResendApiUrl = "https://api.resend.com/emails";
+
+    // Where mail goes when Email:ResendApiUrl is not set. The setting exists so a deployment can send through
+    // its own relay or proxy; it comes from the deployment's own configuration only, never from an admin API
+    // or a registrant, so nothing here guards it.
+    private const string DefaultResendApiUrl = "https://api.resend.com/emails";
+
+    // What an organisation's branding falls back to, field by field.
+    private const string DefaultAppName = "Authagonal";
+    private const string DefaultPrimaryColor = "#2563eb";
+
+    // A simple, safe CSS colour (hex, rgb[a]/hsl[a], or a plain keyword); anything that could break out of
+    // the inline style attribute falls back to the default.
+    private static readonly Regex SafeColor = new(
+        @"^(#[0-9a-fA-F]{3,8}|rgba?\([\d.,%\s/]+\)|hsla?\([\d.,%\s/]+\)|[a-zA-Z]{1,20})$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public async Task SendVerificationEmailAsync(string email, string callbackUrl, CancellationToken ct = default)
     {
@@ -55,6 +71,25 @@ public sealed class EmailService(
         var culture = await ResolveCultureAsync(email, ct);
         var (subject, html) = Render(culture, "Email_Reset", callbackUrl);
         await SendAsync(email, subject, html, ct);
+    }
+
+    public async Task SendUserInviteEmailAsync(string toEmail, string tenantName, string acceptUrl, string? locale = null,
+        CancellationToken ct = default, Organization? organization = null)
+    {
+        if (IsTestEmail(toEmail))
+        {
+            logger.LogInformation("Skipping user invite email for test address: {Email}", toEmail);
+            return;
+        }
+
+        // The inviting administrator's language when it names one we ship; the invitee has no stored
+        // preference yet unless the invite recorded one, which the lookup then finds.
+        var culture = SupportedLocales.Resolve(locale) ?? await ResolveCultureAsync(toEmail, ct);
+        var invitedTo = organization is null || string.IsNullOrWhiteSpace(organization.DisplayName)
+            ? tenantName
+            : organization.DisplayName;
+        var (subject, html) = RenderInvite(culture, acceptUrl, invitedTo, ParseBranding(organization?.BrandingJson));
+        await SendAsync(toEmail, subject, html, ct);
     }
 
     public async Task SendAccountExistsEmailAsync(string email, string signInUrl, CancellationToken ct = default)
@@ -123,6 +158,106 @@ public sealed class EmailService(
         }
     }
 
+    /// <summary>The branding an invite email wears: the three fields an organisation can override.</summary>
+    private sealed record InviteBranding(string AppName, string? LogoUrl, string PrimaryColor);
+
+    /// <summary>
+    /// The organisation's <c>appName</c>, <c>logoUrl</c> and <c>primaryColor</c> merged field by field over
+    /// the defaults (<c>Authagonal</c>, no logo, <c>#2563eb</c>), so an organisation that sets only a logo
+    /// keeps the default name and colour. A logo must be an absolute https URL and a colour a simple CSS
+    /// colour; a value that is neither is treated as unset. Malformed JSON is ignored: an invite is never
+    /// refused for an organisation's branding.
+    /// </summary>
+    private InviteBranding ParseBranding(string? brandingJson)
+    {
+        var appName = DefaultAppName;
+        string? logoUrl = null;
+        var primaryColor = DefaultPrimaryColor;
+
+        if (!string.IsNullOrWhiteSpace(brandingJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(brandingJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var property in doc.RootElement.EnumerateObject())
+                    {
+                        if (property.Value.ValueKind != JsonValueKind.String) continue;
+                        var value = property.Value.GetString()?.Trim();
+                        if (string.IsNullOrEmpty(value)) continue;
+
+                        if (property.Name.Equals("appName", StringComparison.OrdinalIgnoreCase))
+                            appName = value;
+                        else if (property.Name.Equals("logoUrl", StringComparison.OrdinalIgnoreCase)
+                                 && Uri.TryCreate(value, UriKind.Absolute, out var logo) && logo.Scheme == Uri.UriSchemeHttps)
+                            logoUrl = logo.AbsoluteUri;
+                        else if (property.Name.Equals("primaryColor", StringComparison.OrdinalIgnoreCase)
+                                 && SafeColor.IsMatch(value))
+                            primaryColor = value;
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                logger.LogDebug(ex, "Ignoring unreadable organisation branding in an invite email");
+            }
+        }
+
+        return new InviteBranding(appName, logoUrl, primaryColor);
+    }
+
+    /// <summary>
+    /// Renders the invite in an explicit culture. The subject is the localized title and the app name, as
+    /// <c>"{title} — {appName}"</c>; the body names what the person is invited to (<paramref name="invitedTo"/>).
+    /// Every piece of text is HTML-encoded, including the branding values.
+    /// </summary>
+    private (string Subject, string Html) RenderInvite(
+        CultureInfo culture, string acceptUrl, string invitedTo, InviteBranding branding)
+    {
+        var previous = CultureInfo.CurrentUICulture;
+        CultureInfo.CurrentUICulture = culture;
+        try
+        {
+            static string Enc(string v) => TextEncoder.Encode(v);
+            var title = localizer["Email_Invite_Subject"].Value;
+            var subject = $"{title} — {branding.AppName}";
+            var header = branding.LogoUrl is null
+                ? $"""<p style="font-size: 20px; font-weight: 700; margin: 0 0 16px;">{Enc(branding.AppName)}</p>"""
+                : $"""<p style="margin: 0 0 16px;"><img src="{Enc(branding.LogoUrl)}" alt="{Enc(branding.AppName)}" style="max-height: 54px; max-width: 220px;" /></p>""";
+            var html = $"""
+                <div {HtmlDocumentLocale.HtmlAttributes(culture)} style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+                    {header}
+                    <h2>{Enc(localizer["Email_Invite_Heading"].Value)}</h2>
+                    <p>{Enc(localizer["Email_Invite_Body", invitedTo].Value)}</p>
+                    <p><a href="{Enc(acceptUrl)}" style="display: inline-block; padding: 12px 24px; background: {Enc(branding.PrimaryColor)}; color: {ReadableText(branding.PrimaryColor)}; text-decoration: none; border-radius: 6px;">{Enc(localizer["Email_Invite_Button"].Value)}</a></p>
+                    <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">{Enc(localizer["Email_Invite_Footer"].Value)}</p>
+                </div>
+                """;
+            return (subject, html);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = previous;
+        }
+    }
+
+    /// <summary>Near-black on a light background, white otherwise, so the invite button stays readable
+    /// whatever primary colour an organisation picks. Only a hex colour of at least 6 digits can be
+    /// measured (the first six, so <c>#rrggbbaa</c> is read as <c>#rrggbb</c>); anything else (shorthand,
+    /// rgb(), a keyword) keeps white.</summary>
+    private static string ReadableText(string background)
+    {
+        if (background.Length < 7 || background[0] != '#'
+            || !int.TryParse(background.AsSpan(1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r)
+            || !int.TryParse(background.AsSpan(3, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g)
+            || !int.TryParse(background.AsSpan(5, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
+            return "#ffffff";
+
+        var luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
+        return luminance > 0.6 ? "#10211f" : "#ffffff";
+    }
+
     private async Task SendAsync(string toEmail, string subject, string html, CancellationToken ct)
     {
         var apiKey = configuration[$"{ConfigSection}:ResendApiKey"]
@@ -135,7 +270,10 @@ public sealed class EmailService(
 
         var client = httpClientFactory.CreateClient("Resend");
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, ResendApiUrl);
+        var resendApiUrl = configuration[$"{ConfigSection}:ResendApiUrl"];
+        if (string.IsNullOrWhiteSpace(resendApiUrl)) resendApiUrl = DefaultResendApiUrl;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, resendApiUrl);
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
         request.Content = JsonContent.Create(new ResendEmailRequest
         {
@@ -144,6 +282,9 @@ public sealed class EmailService(
             Subject = subject,
             Html = html
         }, AuthagonalJsonContext.Default.ResendEmailRequest);
+        // Buffered so the request carries a Content-Length: a relay behind Email:ResendApiUrl may not read a
+        // chunked body, and JsonContent alone streams one.
+        await request.Content.LoadIntoBufferAsync(ct);
 
         var response = await client.SendAsync(request, ct);
 

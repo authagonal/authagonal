@@ -243,6 +243,7 @@ public static class AuthagonalExtensions
         // Grant reconciliation scans the raw grant index tables directly (keyed TableClients), so it's
         // Azure-only; register it only when the Azure backend provided those clients. On other backends,
         // expiry cleanup is handled by TokenCleanupService via IGrantStore.RemoveExpiredAsync.
+        // It takes its EnvPartitioner from the container; AddAuthagonalCore registers Live.
         if (services.Any(d => d.IsKeyedService && (d.ServiceKey as string) == "Grants"))
             services.AddHostedService<GrantReconciliationService>();
         services.AddHostedService<SigningKeyRotationService>();
@@ -332,7 +333,8 @@ public static class AuthagonalExtensions
         // before calling AddAuthagonal; TryAdd ensures it is not overwritten.
         // ---------------------------------------------------------------------------
         services.TryAddSingleton<Authagonal.Core.Services.ITenantContext>(
-            sp => new DefaultTenantContext(sp.GetRequiredService<IConfiguration>()));
+            sp => new DefaultTenantContext(
+                sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<IHttpContextAccessor>()));
 
         // ---------------------------------------------------------------------------
         // Password policy
@@ -421,10 +423,12 @@ public static class AuthagonalExtensions
         services.AddHttpClient("BackChannelLogout")
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(10))
             .ConfigurePrimaryHttpMessageHandler(RegistrantSuppliedOutboundHandler);
-        // Resend posts to a compile-time constant (api.resend.com) — no configuration, no registrant input,
-        // nothing for an address check to decide. So no ConnectCallback, and the ambient proxy is left
-        // alone: attaching the socket guard here would buy nothing and would need UseProxy = false to mean
-        // anything, which is how a deployment that egresses through a mandatory proxy loses all its email.
+        // Resend posts to Email:ResendApiUrl, api.resend.com unless the deployment sets another (a relay or
+        // proxy of its own). That URL comes only from the deployment's own configuration — never from an admin
+        // API, a registrant or a request — so it is the operator's choice and there is nothing for an address
+        // check to decide. So no ConnectCallback, and the ambient proxy is left alone: a guard here would need
+        // UseProxy = false to mean anything, and a deployment that egresses through a mandatory proxy would
+        // lose all its email.
         // The redirect refusal is what matters on this client and it stays — the request carries the mail
         // API key in an Authorization header, and .NET only strips that when a redirect crosses origins.
         services.AddHttpClient("Resend")
@@ -549,9 +553,31 @@ public static class AuthagonalExtensions
         // Which organization a request is for, and whether the user and client may have it. Scoped
         // because the stores it reads are (the cloud resolves them per tenant, per request).
         services.AddScoped<OrganizationSelector>();
+        // Organisation and membership administration (the admin API's /api/v1/organizations and any host
+        // surface doing the same job). Scoped for the same reason; TryAdd so a host may substitute it.
+        services.TryAddScoped<OrganizationOperations>();
+        // Inviting someone by email and resending the invite, the same way: scoped, TryAdd so a host may
+        // substitute it. The link the email carries is built by IInviteLinkBuilder, whose default is the
+        // issuer's own /accept-invite page; a host serving the accept page elsewhere registers its own.
+        services.TryAddScoped<UserInviteOperations>();
+        services.TryAddScoped<IInviteLinkBuilder, DefaultInviteLinkBuilder>();
+        // How the organisation email-domain proof reads DNS TXT records. Singleton: DnsClient's LookupClient is
+        // thread-safe and meant to be shared. TryAdd so a host's own resolver wins (and the tests' fake).
+        services.TryAddSingleton<ITxtResolver, DnsTxtResolver>();
+        // The env partitioning, for services that take it from the container (GrantReconciliationService).
+        // Nothing registered one, so a standalone host on the Azure backend failed to start ("Unable to
+        // resolve service for type EnvPartitioner"). Live is the single-env partitioning a self-hosted host
+        // runs on, the one every provider and AddServerSideSessions already use. Here rather than in
+        // AddAuthagonal, which calls this first, so a host built on Core (the test factory) has it too;
+        // TryAdd so a multi-env host's own registration wins.
+        services.TryAddSingleton(EnvPartitioner.Live);
         // The same question asked BEFORE anyone has signed in — home-realm discovery, the login page's
         // provider list and /sso-check. Scoped for the same reason, and because it reads ITenantContext.
         services.AddScoped<PreAuthOrganizationResolver>();
+        // The login document's boot payload: branding, providers and organisation from one resolution of
+        // the question above. Registered here with the resolver, not in AddAuthagonal, so a host that calls
+        // AddAuthagonalCore alone (the multi-tenant host does) can serve the same payload.
+        services.AddScoped<LoginBootPayloadBuilder>();
         // Subject resolver — maps ClaimsPrincipal / OidcSubject back to AuthUser via the user store.
         services.AddScoped<UserStoreOidcSubjectResolver>();
         services.AddScoped<IOidcSubjectResolver>(sp => sp.GetRequiredService<UserStoreOidcSubjectResolver>());
@@ -608,6 +634,10 @@ public static class AuthagonalExtensions
         // NullAuthHook is only added if no hooks are registered by the host.
         if (!services.Any(s => s.ServiceType == typeof(IAuthHook)))
             services.AddSingleton<IAuthHook, NullAuthHook>();
+        // After the check above, so it keeps its meaning (a host with no hooks of its own gets NullAuthHook):
+        // the library's own hook that activates a user's invited organisation memberships when their address
+        // is confirmed, which is what accepting an invite does. Appended, so it runs after the host's hooks.
+        services.AddSingleton<IAuthHook, OrganizationInviteActivationHook>();
 
         // Secret provider: defaults to plaintext; set SecretProvider:VaultUri to use Key Vault.
         // UseAuthagonal warns at startup when the plaintext default is what a non-Development host
@@ -1362,6 +1392,12 @@ public static class AuthagonalExtensions
         });
 
         app.UseCors();
+
+        // An authoritative organisation pin (ITenantContext.OrganizationIdIsAuthoritative) governs
+        // /connect/authorize and POST /connect/par. After anything the host registered before this call
+        // (a multi-tenant host's own resolution middleware sets the pin), and before the endpoints.
+        app.UseOrganizationPin();
+
         app.UseAuthentication();
         app.UseAuthorization();
 
@@ -1428,6 +1464,8 @@ public static class AuthagonalExtensions
             app.MapMfaAdminEndpoints();
             app.MapScimTokenAdminEndpoints();
             app.MapAgentAdminEndpoints();
+            app.MapOrganizationAdminEndpoints();
+            app.MapUserInviteAdminEndpoints();
         }
 
         app.MapScimUserEndpoints();

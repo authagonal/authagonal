@@ -14,6 +14,7 @@
     <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.5.0" />
     <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.9.0" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
+    <PackageReference Include="DnsClient" Version="1.8.0" />
     <!-- Patch floor, not a pin. 9.0.0 admits runtimes carrying an unauthenticated request-smuggling
          bypass and three unauthenticated DoS CVEs; a net9.0 consumer restoring the old floor got them
          silently. Bracketed above the current security patch and below the next major, and the two

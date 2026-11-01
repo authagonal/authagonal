@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>どなたかがこのメールアドレスで登録しようとしましたが、アカウントはすでに存在しています。サインインするか、パスワードをお忘れの場合はリセットしてください。</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>サインイン</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>お心当たりがない場合は、このメールを無視していただいて問題ありません。</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>招待されました</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>招待されました</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>{0} に招待されました。パスワードを設定してアカウントを有効化し、利用を開始してください。</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>パスワードを設定</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>この招待リンクの有効期限は7日間です。心当たりがない場合は、このメールを無視してください。</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>サインアウトしました</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>サインアウト</value></data>
 </root>

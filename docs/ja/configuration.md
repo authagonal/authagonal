@@ -513,6 +513,7 @@ OIDC Back-Channel Logout 1.0 の通知を受け取るには、クライアント
 | 設定 | 説明 |
 |---|---|
 | `Email:ResendApiKey` | Resend の API キー。設定されている場合、組み込みの Resend 送信機能が使われます。 |
+| `Email:ResendApiUrl` | 組み込みの Resend 送信者が POST するエンドポイントです。既定は `https://api.resend.com/emails` です。独自のリレー経由で送信するには、この値を設定します。構成からのみ読み取られ、管理 API やリクエストからは読み取られません。 |
 | `Email:SenderEmail` | 送信者のメールアドレス |
 | `Email:SenderName` | 送信者の表示名 (既定は `"Authagonal"`) |
 

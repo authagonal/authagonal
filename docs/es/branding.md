@@ -31,16 +31,19 @@ a un cliente), la carga `authagonal-boot` puede llevar un tercer miembro junto a
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
 `organization` es `null` (o el miembro no está presente) cuando la solicitud no se resolvió a ninguna organización:
-un despliegue de un solo inquilino, o uno sin un dominio personalizado fijado para este host. Esta biblioteca no
-resuelve por sí misma una organización para una solicitud anónima previa a la autenticación (`OrganizationSelector`
-necesita un `AuthUser` con sesión iniciada); un host que tiene su propia resolución previa a la autenticación
-(Authagonal Cloud fija una por dominio personalizado) establece `organization` al ensamblar la carga de arranque.
+un despliegue de un solo inquilino, o uno sin un dominio personalizado fijado para este host. La biblioteca resuelve por sí misma la organización de una solicitud anónima previa a la autenticación, en el orden descrito en [Organizaciones](organizations#organizations-on-the-login-page): primero una fijación de host autoritativa, después la organización de la solicitud de autorización y luego una restricción de cliente con una sola entrada. Un host con su propia resolución previa a la autenticación (Authagonal Cloud fija una por dominio personalizado) establece esa fijación mediante `ITenantContext` (`OrganizationId` junto con `OrganizationIdIsAuthoritative`), que `LoginBootPayloadBuilder.BuildAsync` resuelve a través de `PreAuthOrganizationResolver`, o construye por sí mismo un registro `LoginBootPayload` y lo pasa a `LoginBootPayloadBuilder.InjectIntoShell`. `BuildAsync` no recibe ningún argumento de organización.
 
 Cuando `organization.name` está presente y difiere de `branding.appName` (sin distinguir mayúsculas y minúsculas y sin
 espacios en los extremos, para que una organización con el mismo nombre que el inquilino no produzca «Acme / Iniciando
@@ -51,6 +54,20 @@ olvidada y restablecimiento de contraseña, las páginas de desafío y de config
 consentimiento y el consentimiento de agentes, las concesiones y la cuenta) lo muestran de forma idéntica. No se muestra
 nada, y el encabezado conserva su espaciado normal, cuando `organization` no está presente, es `null` o su nombre
 coincide con `branding.appName`.
+
+## Personalización de marca de la organización {#organisation-branding}
+
+Cuando la solicitud se resuelve a una organización, su `BrandingJson` se combina campo a campo sobre la personalización de marca del inquilino, y el resultado es el miembro `branding` de la carga de arranque. Un campo nulo o ausente hereda el valor del inquilino, las claves desconocidas se ignoran, un valor del tipo equivocado conserva el valor del inquilino para esa clave, `languages` sustituye la lista del inquilino, y un documento mal formado da la personalización de marca del inquilino sin cambios. Una organización no puede establecer `showRegistration`. Las reglas están en [Organizaciones](organizations#organization-branding) (`OrganizationBranding.Merge`).
+
+El servidor independiente construye la carga de arranque con `LoginBootPayloadBuilder` para las rutas de inicio de sesión (`/login`, `/accept-invite` y las demás rutas de la SPA; la raíz `/` se sirve como el `index.html` simple, sin carga, por lo que no muestra ninguna organización), y `MapAuthagonalLoginFallback()` la incorpora como `<script type="application/json" id="authagonal-boot">` justo antes de `</head>`. `branding.json` se vuelve a leer en cada solicitud, así que una edición del archivo montado se aplica de inmediato; un archivo ausente o mal formado se trata como `{}` (con una advertencia si está mal formado). Si algo falla, se sirve el `index.html` simple y la SPA obtiene `/branding.json` como antes.
+
+## Personalización de marca de la organización en los correos de invitación {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` es un objeto JSON que pertenece al host. Además de la página de inicio de sesión ([arriba](#organisation-branding)), la biblioteca lo lee en el correo de invitación (`IEmailService.SendUserInviteEmailAsync`, consulte [Organizaciones](organizations#inviting-people)). Para una invitación a una organización, el remitente integrado toma de él `appName`, `logoUrl` y `primaryColor`, campo a campo, sobre los valores predeterminados del propio correo: `Authagonal`, sin logotipo y `#2563eb` (los valores predeterminados de la aplicación de inicio de sesión). Un campo ausente, vacío o que no sea una cadena se considera sin definir; un logotipo debe ser una URL `https` absoluta y un color un color CSS sencillo (hexadecimal, `rgb()`/`hsl()` o una palabra clave); de lo contrario también se considera sin definir. El JSON mal formado se ignora: una invitación nunca se rechaza por la personalización de marca de una organización.
+
+El asunto es el título localizado de la invitación y el nombre de la aplicación, el cuerpo nombra la organización y cada valor se codifica como HTML. Una invitación simple (sin organización) usa los valores predeterminados y nombra al remitente (`Email:SenderName`, si no `Authagonal`).
+
+Un host con su propio `IEmailService` no se ve afectado. El `SendUserInviteEmailAsync` predeterminado de la interfaz envía el correo de restablecimiento de contraseña con el enlace de aceptación; sobrescríbalo para enviar una invitación con su propia marca. La página que abre el enlace, `/accept-invite`, forma parte de la aplicación de inicio de sesión y toma el `branding.json` del inquilino como cualquier otra página, con la organización que nombra su parámetro `organization` combinada encima ([arriba](#organisation-branding)).
 
 ## Configuración {#configuration}
 

@@ -118,6 +118,14 @@ Consulte [Extensibilidade](extensibility) para todos os pontos de substituição
 
 O remetente [Resend](https://resend.com) integrado é ativado automaticamente quando `Email:ResendApiKey` e `Email:SenderEmail` estão configurados, sem necessidade de registar nenhum serviço. Sem nenhum `IEmailService`, os emails de verificação e de redefinição da palavra-passe são **descartados sem aviso** e, como o início de sessão exige, por predefinição, um email confirmado, os utilizadores que se registaram por si próprios nunca conseguem iniciar sessão (`UseAuthagonal` regista um aviso no arranque). Defina as chaves `Email:*`, registe o seu próprio `IEmailService` antes de `AddAuthagonal()` ou indique os seus domínios em `Auth:AutoConfirmEmailDomains` para saltar a verificação (apenas em desenvolvimento/testes). Consulte [Configuração → Email](configuration#email).
 
+### Organizações e convites {#organizations-and-invitations}
+
+`AddAuthagonal()` registra tudo de que a API de administração de organizações precisa, então um host que não altera nada a obtém junto com o restante da API de administração (`AdminApi:Enabled`): `/api/v1/organizations` e as rotas de convite `/api/v1/profile/invite` e `/api/v1/profile/{userId}/resend-invite`. Organizações e associações precisam de um armazenamento durável; todo provedor inclui um e, no Azure Table Storage, nada mais é necessário. Veja [Organizações](organizations).
+
+- **O link do convite abre `/accept-invite` no emissor.** O fallback de SPA do servidor autônomo a serve. Um host que monte por conta própria a SPA de login deve servir o aplicativo na raiz do host para que `/accept-invite` o alcance fora do caminho base `/login`, ou importar `AcceptInvite` de `@authagonal/login` e rotear para ele. Para que o link aponte para outro lugar, registre o seu próprio `IInviteLinkBuilder` antes de `AddAuthagonal()`.
+- **Os convites precisam de um remetente de e-mail.** O remetente integrado do Resend os envia assim que `Email:ResendApiKey` e `Email:SenderEmail` estão configurados. Um host com o próprio `IEmailService` sobrescreve `SendUserInviteEmailAsync`; sem sobrescrita, o convidado recebe o e-mail de redefinição de senha com o link de aceitação.
+- **A verificação de domínios lê o DNS** por meio de `ITxtResolver`; registre o seu antes de `AddAuthagonal()` para usar outro resolvedor.
+
 ## Backend SQL {#sql-backend}
 
 Para executar na sua própria base de dados em vez de num serviço na cloud, referencie `Authagonal.SqlProvider` e registe-o **antes** de `AddAuthagonal()`: são esses registos que fazem com que `AddAuthagonal()` ignore a sua ligação ao Azure Table Storage:
@@ -179,6 +187,30 @@ O pacote inclui JS e CSS compilados; importe os componentes e os estilos diretam
 ## Backend-for-Frontend (BFF) {#backend-for-frontend-bff}
 
 Se a sua SPA chamar APIs com um bearer token, aloje o token num BFF em vez de no browser. O BFF é publicado como pacote NuGet (`Authagonal.Bff`) e como pacote npm (`@authagonal/bff`); nenhum deles faz parte da imagem do servidor. Consulte [Backend-for-Frontend](bff).
+
+## Associar um anfitrião a uma organização {#pinning-a-host-to-an-organization}
+
+Para servir uma organização diferente em cada domínio, mapeie nomes de anfitrião para **ids** de organização com `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+O anfitrião é comparado sem distinguir maiúsculas de minúsculas e a porta é ignorada. Um anfitrião associado fica limitado à sua organização em `/connect/authorize` e `/connect/par`, e as suas rotas de início de sessão (por exemplo `/login`, mas não a raiz `/`, que é servida como o `index.html` simples) mostram o nome e a personalização visual dessa organização. Ver [Organizações](organizations#pinning-a-host-to-an-organization).
 
 ## Lista de verificação de segurança para produção {#production-security-checklist}
 

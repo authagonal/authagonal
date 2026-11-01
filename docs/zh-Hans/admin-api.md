@@ -242,6 +242,50 @@ Content-Type: application/json
 DELETE /api/v1/profile/{userId}/identities/{provider}/{externalUserId}
 ```
 
+### 列出用户的组织 {#list-a-users-organizations}
+
+```
+GET /api/v1/profile/{userId}/organizations
+```
+
+返回 `{ "items": [ { "organizationId", "slug", "name", "status", "roles" } ] }`:用户拥有成员关系的每个组织,无论其状态如何。组织已不存在的成员关系会被省略。
+
+### 邀请用户 {#invite-user}
+
+```
+POST /api/v1/profile/invite
+Content-Type: application/json
+
+{
+  "email": "ada@acme.com",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "locale": "en",
+  "organizationId": "org_0123456789abcdef0123456789abcdef",
+  "organizationRoles": ["Auditor"]
+}
+```
+
+只有 `email` 是必填的。创建账户(未确认,没有可用的密码),并通过邮件发送一个指向 `/accept-invite` 的一次性链接,有效期 7 天。提供 `organizationId`(组织的 id,而不是 slug)时,邀请的是该组织:会写入一条带有 `organizationRoles` 的 `invited` 成员关系,受邀者设置密码后它变为 `active`。邮件使用你的请求中库所支持的第一个 `Accept-Language` 撰写,否则使用 `locale`,再否则使用英语。参见[组织](organizations#inviting-people)。
+
+返回 `200`,内容为 `{ "userId": "...", "email": "ada@acme.com" }`(地址为小写)。失败为 `{ "error", "error_description" }`:
+
+| 状态 | `error` | 何时 |
+|---|---|---|
+| 400 | `email_required` | 缺少 `email` 或为空白 |
+| 400 | `invalid_email` | `email` 不是可用的地址 |
+| 400 | `invalid_role` | 某个组织角色以 `tenant:` 或 `platform:` 开头 |
+| 404 | `organization_not_found` | `organizationId` 不指向任何组织 |
+| 409 | `user_already_exists` | 该地址已有账户 |
+
+### 重新发送邀请 {#resend-invite}
+
+```
+POST /api/v1/profile/{userId}/resend-invite
+```
+
+生成新链接并发送。返回 `200`,内容为 `{ "sent": true }`。用户未知时为 `404 user_not_found`,地址确认后为 `400 already_accepted`(请使用密码重置),邮件无法发送时为 `502 invite_email_failed`。
+
 ## MFA 管理 {#mfa-management}
 
 ### 获取 MFA 状态 {#get-mfa-status}
@@ -494,6 +538,167 @@ GET /api/v1/roles/{roleName}/users?maxResults=200
 在该索引出现之前写入的账户在重新索引之前对它是不可见的
 （`IUserStore.ReindexUserAsync`，它会 upsert 用户的成员资格，而不会移除任何成员资格）。
 
+## 组织 {#organizations}
+
+组织、它们的成员以及邮箱域名(其含义参见[组织](organizations))。失败为 `{ "error": "<code>", "error_description": "..." }`,状态为 `400`(输入无效)、`404`(未找到)或 `409`(冲突)。
+
+列表使用 `?cursor={cursor}&limit={limit}` 分页:`limit` 限制在 1..200(默认 50),响应为 `{ "items": [...], "nextCursor": "..." }`,最后一页的 `nextCursor` 为 null。请原样传回 `nextCursor`;列表未发出过的游标返回 `400 invalid_cursor`。
+
+组织的结构为 `{ "id", "slug", "name", "brandingJson", "metadata", "enabled", "requireMembershipForTokens", "allowAutoMembership", "createdAt", "updatedAt", "domains" }`。
+
+### 列出组织 {#list-organizations}
+
+```
+GET /api/v1/organizations?cursor={cursor}&limit={limit}
+```
+
+`200`,按 id 排序。`400 invalid_cursor`。
+
+### 创建组织 {#create-organization}
+
+```
+POST /api/v1/organizations
+Content-Type: application/json
+
+{
+  "slug": "acme",
+  "name": "Acme Corp",
+  "brandingJson": "{\"appName\":\"Acme\",\"primaryColor\":\"#1a56db\"}",
+  "enabled": true,
+  "requireMembershipForTokens": true,
+  "allowAutoMembership": false,
+  "metadata": { "plan": "enterprise" }
+}
+```
+
+`slug` 和 `name` 必填;其余可选,省略时保留组织的默认值。`brandingJson` 是包含 JSON 对象的字符串。返回 `201`,带有 `Location` 头和组织本身;其 `id` 为 `org_` 后接 32 位十六进制数字。
+
+| 状态 | `error` | 何时 |
+|---|---|---|
+| 400 | `slug_required` | 缺少 `slug` 或为空白 |
+| 400 | `slug_invalid` | `slug` 不是由 1 到 64 个小写字母、数字和内部连字符组成 |
+| 400 | `name_required` | 缺少 `name` 或为空白 |
+| 400 | `invalid_branding_json` | `brandingJson` 不是 JSON 对象 |
+| 409 | `slug_taken` | 另一个组织已将该值用作 slug 或 id,包括并发创建的情况 |
+
+### 获取组织 {#get-organization}
+
+```
+GET /api/v1/organizations/{idOrSlug}
+```
+
+`200`,先按 id 查找,再按 slug 查找。`404 organization_not_found`。
+
+### 更新组织 {#update-organization}
+
+```
+PUT /api/v1/organizations/{id}
+Content-Type: application/json
+
+{ "name": "Acme Corporation", "enabled": true }
+```
+
+所有字段都是可选的,并且只更改自身:`name`、`brandingJson`、`enabled`、`requireMembershipForTokens`、`allowAutoMembership` 和 `metadata`(整体替换;`{}` 会清除除 `legacyOrganizationId` 之外的所有键,该键由回填写入,在任何替换后都会保留)。`slug` 仅为在其不同时拒绝而被接受。返回 `200` 和组织。`404 organization_not_found`、`400 slug_immutable`、`400 invalid_branding_json`。
+
+### 删除组织 {#delete-organization}
+
+```
+DELETE /api/v1/organizations/{id}
+```
+
+先删除所有成员关系,再删除组织。`204`;`404 organization_not_found`。
+
+### 列出成员 {#list-members}
+
+```
+GET /api/v1/organizations/{id}/members?cursor={cursor}&limit={limit}
+```
+
+按用户 id 排序的一页 `{ "organizationId", "userId", "email", "name", "status", "roles", "createdAt", "updatedAt" }`;`email` 和 `name` 来自用户记录,用户已不存在时为 null。`404 organization_not_found`、`400 invalid_cursor`。
+
+### 添加成员 {#add-member}
+
+```
+POST /api/v1/organizations/{id}/members
+Content-Type: application/json
+
+{ "userId": "user-id", "status": "active", "roles": ["Auditor"] }
+```
+
+通过 `userId`(优先检查)或 `email` 指定一个已有用户。`status` 为 `invited`、`active`(默认)或 `suspended`;`roles` 可选。返回 `201`,带有 `Location` 头和成员关系。
+
+| 状态 | `error` | 何时 |
+|---|---|---|
+| 404 | `organization_not_found` | 没有该组织 |
+| 404 | `user_not_found` | `userId` 和 `email` 都不指向任何用户 |
+| 409 | `membership_exists` | 用户已经是成员 |
+| 400 | `invalid_role` | 某个角色以 `tenant:` 或 `platform:` 开头 |
+| 400 | `invalid_status` | `status` 不是这三个值之一 |
+
+### 更新成员 {#update-member}
+
+```
+PUT /api/v1/organizations/{id}/members/{userId}
+Content-Type: application/json
+
+{ "status": "suspended", "roles": [] }
+```
+
+两个字段都是可选的。返回 `200` 和成员关系。`404 membership_not_found`、`400 invalid_status`、`400 invalid_role`。
+
+### 移除成员 {#remove-member}
+
+```
+DELETE /api/v1/organizations/{id}/members/{userId}
+```
+
+`204`;`404 membership_not_found`。
+
+### 添加域名 {#add-domain}
+
+```
+POST /api/v1/organizations/{id}/domains
+Content-Type: application/json
+
+{ "domain": "acme.com" }
+```
+
+申领该域名(未验证)。域名会先转为小写并去除空白,且必须是 `acme.com` 这样的简单名称。返回 `201`,带有 `Location` 头和 `{ "domain", "verified", "verifiedAt", "createdAt", "recordName", "recordValue" }`;请在 `recordName` 处发布值为 `recordValue` 的 TXT 记录(参见[域名验证](organizations#domain-verification))。
+
+| 状态 | `error` | 何时 |
+|---|---|---|
+| 404 | `organization_not_found` | 没有该组织 |
+| 400 | `domain_invalid` | 不是简单的域名 |
+| 409 | `domain_exists` | 该组织已申领它 |
+| 409 | `domain_taken` | 另一个组织已申领它,无论是否已验证 |
+
+### 验证域名 {#verify-domain}
+
+```
+POST /api/v1/organizations/{id}/domains/{domain}/verify
+```
+
+查询 TXT 记录。返回 `200` 和域名(`verified: true`),包括已验证的情况。`404 organization_not_found`、`404 domain_not_found`、`409 domain_taken`,以及记录缺失或错误时的 `409 verification_failed`;其 `error_description` 给出需要发布的名称和值,以及实际找到的内容。
+
+### 移除域名 {#remove-domain}
+
+```
+DELETE /api/v1/organizations/{id}/domains/{domain}
+```
+
+`204`。成员不受影响。`404 organization_not_found`、`404 domain_not_found`。
+
+### 回填组织 {#backfill-organizations}
+
+```
+POST /api/v1/organizations/backfill
+Content-Type: application/json
+
+{ "dryRun": true }
+```
+
+根据用户旧的 `OrganizationId` 创建组织和成员关系。无论有无请求体,`dryRun` 默认为 true,此时不会写入任何内容。返回 `200`,内容为 `{ "dryRun", "organizationsCreated", "membershipsCreated", "usersSkipped", "organizations": [ { "legacyValue", "slug", "users" } ], "truncated" }`。参见[回填](organizations#backfill)。
+
 ## SCIM 令牌 {#scim-tokens}
 
 ### 生成令牌 {#generate-token}
@@ -510,6 +715,8 @@ Content-Type: application/json
 ```
 
 `description` 和 `expiresInDays` 是可选的（省略 `expiresInDays` 即可得到永不过期的令牌）。原始令牌只返回一次。请妥善保存，之后无法再次获取。
+
+`organizationId` 是可选的,会给令牌创建的每个用户打上标签(参见[组织](organizations#membership-from-a-scim-token))。它必须指向一个已存在的组织:否则结果为 `400 unknown_organization`,格式错误的值返回 `400 invalid_request`。
 
 ### 列出令牌 {#list-tokens}
 

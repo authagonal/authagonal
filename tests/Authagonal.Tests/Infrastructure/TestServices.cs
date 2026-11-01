@@ -14,12 +14,26 @@ public sealed class TestTenantContext(string issuer) : ITenantContext
     /// reports and what keeps every pre-existing test on the tenant-wide path.
     /// </summary>
     public string? OrganizationId { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="OrganizationId"/> is a pin the host insists on. False by default, which is
+    /// what every pre-existing test (and every host that sets only <see cref="OrganizationId"/>) gets.
+    /// </summary>
+    public bool OrganizationIdIsAuthoritative { get; set; }
 }
 
 
+/// <summary>
+/// An <see cref="IEmailService"/> written before invitations existed: it implements only the original
+/// members, so an invite reaches it through the default <c>SendUserInviteEmailAsync</c> and is recorded as a
+/// password reset carrying the accept link.
+/// </summary>
 public sealed class TestEmailService : IEmailService
 {
     public List<(string Email, string CallbackUrl, string Type)> SentEmails { get; } = [];
+
+    /// <summary>When set, a password-reset send throws it, as a mail provider does when it is down.</summary>
+    public Exception? FailPasswordResetWith { get; set; }
 
     public Task SendVerificationEmailAsync(string email, string callbackUrl, CancellationToken ct = default)
     {
@@ -29,6 +43,7 @@ public sealed class TestEmailService : IEmailService
 
     public Task SendPasswordResetEmailAsync(string email, string callbackUrl, CancellationToken ct = default)
     {
+        if (FailPasswordResetWith is not null) throw FailPasswordResetWith;
         SentEmails.Add((email, callbackUrl, "password_reset"));
         return Task.CompletedTask;
     }
@@ -212,6 +227,30 @@ public sealed class TestTokenExchangeSubjectTransformer : Authagonal.Protocol.IT
 /// but that the trail names who did it. Several of the highest-impact writes (SCIM token mint, SSO
 /// connection create, role and scope edits) produced no row at all.
 /// </remarks>
+/// <summary>
+/// An <see cref="Authagonal.Core.Services.ITxtResolver"/> that answers from a dictionary, so a test can
+/// publish (or withhold, or break) the record an organisation domain verification looks for.
+/// </summary>
+public sealed class FakeTxtResolver : Authagonal.Core.Services.ITxtResolver
+{
+    private readonly Dictionary<string, List<string>> _records = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<string> Queried { get; } = [];
+
+    /// <summary>When set, every lookup throws it, as a resolver does on a network failure.</summary>
+    public Exception? Failure { get; set; }
+
+    public void Publish(string name, params string[] values) => _records[name] = [.. values];
+
+    public Task<IReadOnlyList<string>> ResolveTxtAsync(string name, CancellationToken ct = default)
+    {
+        Queried.Add(name);
+        if (Failure is not null) throw Failure;
+        return Task.FromResult<IReadOnlyList<string>>(
+            _records.TryGetValue(name, out var values) ? [.. values] : []);
+    }
+}
+
 public sealed class RecordingAuditLogger : IAuditLogger
 {
     public List<(string Actor, string Action, string EntityType, string? EntityId, string? Detail)> Entries { get; } = [];

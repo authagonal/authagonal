@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>Iemand het probeer registreer met hierdie e-posadres, maar 'n rekening bestaan reeds. Teken eerder in, of stel jou wagwoord terug as jy dit vergeet het.</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>Teken in</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>As dit nie jy was nie, kan jy hierdie e-pos veilig ignoreer.</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>Jy is uitgenooi</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>Jy is uitgenooi</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>Jy is genooi na {0}. Stel 'n wagwoord om jou rekening te aktiveer en aan die gang te kom.</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>Stel jou wagwoord</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>Hierdie uitnodigingskakel verval oor 7 dae. As jy dit nie verwag het nie, kan jy hierdie e-pos veilig ignoreer.</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Afgeteken</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Teken uit</value></data>
 </root>

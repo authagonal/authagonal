@@ -118,6 +118,14 @@ Xem [Khả năng mở rộng](extensibility) để biết mọi điểm ghi đè
 
 Bên gửi [Resend](https://resend.com) dựng sẵn tự động kích hoạt khi `Email:ResendApiKey` và `Email:SenderEmail` được cấu hình, không cần đăng ký dịch vụ nào. Khi không có `IEmailService` nào, email xác minh và email đặt lại mật khẩu bị **loại bỏ một cách âm thầm**, và vì theo mặc định đăng nhập đòi hỏi email đã được xác nhận, người dùng tự đăng ký sẽ không bao giờ đăng nhập được (`UseAuthagonal` ghi một cảnh báo lúc khởi động). Hãy đặt các khóa `Email:*`, hoặc đăng ký `IEmailService` của riêng bạn trước `AddAuthagonal()`, hoặc liệt kê các tên miền của bạn trong `Auth:AutoConfirmEmailDomains` để bỏ qua bước xác minh (chỉ cho dev/test). Xem [Cấu hình → Email](configuration#email).
 
+### Tổ chức và lời mời {#organizations-and-invitations}
+
+`AddAuthagonal()` đăng ký mọi thứ API quản trị tổ chức cần, nên một host không đổi gì sẽ có nó cùng phần còn lại của API quản trị (`AdminApi:Enabled`): `/api/v1/organizations` và các route lời mời `/api/v1/profile/invite` và `/api/v1/profile/{userId}/resend-invite`. Tổ chức và tư cách thành viên cần một kho lưu trữ bền vững; mọi provider đều có một kho, và trên Azure Table Storage không cần thêm gì. Xem [Tổ chức](organizations).
+
+- **Liên kết lời mời mở `/accept-invite` trên issuer.** SPA fallback của máy chủ độc lập phục vụ nó. Host tự gắn SPA đăng nhập phải phục vụ ứng dụng ở gốc host để `/accept-invite` tới được nó ngoài đường dẫn gốc `/login`, hoặc nhập `AcceptInvite` từ `@authagonal/login` và định tuyến tới đó. Để liên kết trỏ nơi khác, hãy đăng ký `IInviteLinkBuilder` của riêng bạn trước `AddAuthagonal()`.
+- **Lời mời cần một bộ gửi email.** Bộ gửi Resend tích hợp gửi chúng ngay khi `Email:ResendApiKey` và `Email:SenderEmail` được cấu hình. Host có `IEmailService` riêng ghi đè `SendUserInviteEmailAsync`; nếu không ghi đè, người được mời nhận email đặt lại mật khẩu kèm liên kết chấp nhận.
+- **Việc kiểm tra miền đọc DNS** qua `ITxtResolver`; hãy đăng ký của bạn trước `AddAuthagonal()` để dùng resolver khác.
+
 ## Backend SQL {#sql-backend}
 
 Để chạy trên cơ sở dữ liệu của riêng bạn thay vì một dịch vụ cloud, hãy tham chiếu `Authagonal.SqlProvider` và đăng ký nó **trước** `AddAuthagonal()`, chính các đăng ký đó khiến `AddAuthagonal()` bỏ qua phần kết nối Azure Table Storage:
@@ -179,6 +187,30 @@ Gói này đi kèm JS và CSS đã biên dịch, hãy import trực tiếp các 
 ## Backend-for-Frontend (BFF) {#backend-for-frontend-bff}
 
 Nếu SPA của bạn gọi API bằng bearer token, hãy giữ token trong một BFF thay vì trong trình duyệt. BFF được phát hành dưới dạng gói NuGet (`Authagonal.Bff`) và gói npm (`@authagonal/bff`); không gói nào thuộc server image. Xem [Backend-for-Frontend](bff).
+
+## Ghim một host vào một tổ chức {#pinning-a-host-to-an-organization}
+
+Để phục vụ một tổ chức khác nhau trên mỗi tên miền, hãy ánh xạ tên host tới **id** của tổ chức bằng `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+Host được so sánh không phân biệt hoa thường và cổng bị bỏ qua. Host đã ghim bị ràng buộc vào tổ chức của nó trên `/connect/authorize` và `/connect/par`, và các route đăng nhập của nó (ví dụ `/login`, nhưng không phải đường dẫn gốc `/`, vốn được phục vụ dưới dạng `index.html` thuần) hiển thị tên và thương hiệu của tổ chức đó. Xem [Tổ chức](organizations#pinning-a-host-to-an-organization).
 
 ## Danh sách kiểm tra bảo mật cho production {#production-security-checklist}
 

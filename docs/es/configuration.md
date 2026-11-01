@@ -515,6 +515,7 @@ El remitente de correo integrado usa [Resend](https://resend.com) y **se activa 
 | Ajuste | Descripción |
 |---|---|
 | `Email:ResendApiKey` | Clave de API de Resend. Cuando se establece, se usa el remitente integrado de Resend. |
+| `Email:ResendApiUrl` | El endpoint al que publica el remitente integrado de Resend. Por defecto es `https://api.resend.com/emails`. Establézcalo para enviar a través de un relé propio. Solo se lee de la configuración, nunca de una API de administración ni de una solicitud. |
 | `Email:SenderEmail` | Dirección de correo electrónico del remitente |
 | `Email:SenderName` | Nombre para mostrar del remitente (por defecto `"Authagonal"`) |
 

@@ -104,6 +104,9 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     public TestAuthHook AuthHook { get; } = new();
     public RecordingAuditLogger AuditLog { get; } = new();
 
+    /// <summary>The DNS the organisation domain verification reads: no network, whatever a test publishes.</summary>
+    public FakeTxtResolver TxtResolver { get; } = new();
+
     /// <summary>Every log record the host wrote — for asserting that a secret is absent from it.</summary>
     public RecordingLoggerProvider LogSink { get; } = new();
     public TestTokenExchangeSubjectTransformer ExchangeTransformer { get; } = new();
@@ -124,6 +127,13 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     /// </summary>
     public HttpMessageHandler? BackChannelLogoutHttpHandler { get; set; }
 
+    /// <summary>
+    /// Set before starting the factory, together with <c>Configuration["Email:ResendApiUrl"]</c>, to answer the
+    /// real sender's request in process instead of over a socket, so a test reads exactly what the library
+    /// put on the wire.
+    /// </summary>
+    public HttpMessageHandler? ResendHttpHandler { get; set; }
+
     /// <summary>Set to an Azurite connection string to enable SAML/OIDC state storage.</summary>
     public string? AzuriteConnectionString { get; set; }
 
@@ -136,6 +146,14 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     /// which <c>UseAuthagonal</c> reads at pipeline-composition time.
     /// </summary>
     public Dictionary<string, string?> Configuration { get; } = [];
+
+    /// <summary>
+    /// Leave <see cref="Authagonal.Core.Services.ITenantContext"/> to the production registration
+    /// (<c>DefaultTenantContext</c>, which pins hosts from <c>Organizations:PinnedHosts</c>) instead of
+    /// registering <see cref="TenantContext"/>. Set it before the host starts; set the pins through
+    /// <see cref="Configuration"/>.
+    /// </summary>
+    public bool UseDefaultTenantContext { get; set; }
 
     private WebApplication? _app;
     private bool _started;
@@ -365,15 +383,32 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
         services.AddSingleton<IOrganizationStore>(OrganizationStore);
         services.AddSingleton<IOrganizationMembershipStore>(OrganizationMembershipStore);
 
-        // Tenant context
-        services.AddSingleton<Authagonal.Core.Services.ITenantContext>(TenantContext);
+        // Tenant context. Left to AddAuthagonalCore's TryAdd when the test wants the production one.
+        if (!UseDefaultTenantContext)
+            services.AddSingleton<Authagonal.Core.Services.ITenantContext>(TenantContext);
 
         // Extensibility test doubles. Every one of these is a TryAdd or a gate in the real registration.
-        services.AddSingleton<IEmailService>(EmailService);
+        // The recorder, unless a test names a Resend endpoint of its own (Email:ResendApiUrl): then the real
+        // sender runs against that endpoint, through AddAuthagonalCore's own `Email:ResendApiKey` branch, so
+        // what reaches the wire (From, To, Subject, Html, the Bearer header) is the library's, not a double's.
+        if (string.IsNullOrWhiteSpace(builder.Configuration["Email:ResendApiUrl"]))
+        {
+            services.AddSingleton<IEmailService>(EmailService);
+        }
+        else
+        {
+            // `??=` is not enough: appsettings may carry the keys as empty strings.
+            if (string.IsNullOrWhiteSpace(builder.Configuration["Email:ResendApiKey"]))
+                builder.Configuration["Email:ResendApiKey"] = "re_test_key";
+            if (string.IsNullOrWhiteSpace(builder.Configuration["Email:SenderEmail"]))
+                builder.Configuration["Email:SenderEmail"] = "noreply@authagonal.test";
+        }
         services.AddSingleton<IAuthHook>(AuthHook);
         // AddAuthagonalCore TryAddSingletons NullAuditLogger; the suite records instead, so an admin write
         // can be asserted to leave an attributable trail.
         services.AddSingleton<IAuditLogger>(AuditLog);
+        // AddAuthagonalCore TryAdds the DnsClient-backed resolver; a test host has no DNS to ask.
+        services.AddSingleton<Authagonal.Core.Services.ITxtResolver>(TxtResolver);
         services.AddSingleton<Authagonal.Protocol.ITokenExchangeSubjectTransformer>(ExchangeTransformer);
         services.AddSingleton<Authagonal.Protocol.IClientCredentialsClaimsTransformer>(ClientCredentialsTransformer);
         services.AddSingleton<IProvisioningOrchestrator>(Provisioning);
@@ -447,6 +482,7 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
                      ("OidcDiscovery", OidcHttpHandler),
                      ("AuthagonalJwks", JwksHttpHandler),
                      ("BackChannelLogout", BackChannelLogoutHttpHandler),
+                     ("Resend", ResendHttpHandler),
                  })
         {
             if (handler is not null)

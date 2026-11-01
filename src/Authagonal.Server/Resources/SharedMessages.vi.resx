@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>Có người đã cố đăng ký bằng email này, nhưng tài khoản đã tồn tại. Hãy đăng nhập, hoặc đặt lại mật khẩu nếu bạn đã quên.</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>Đăng nhập</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>Nếu đó không phải là bạn, bạn có thể bỏ qua email này.</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>Bạn đã được mời</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>Bạn đã được mời</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>Bạn đã được mời tham gia {0}. Hãy đặt mật khẩu để kích hoạt tài khoản và bắt đầu.</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>Đặt mật khẩu của bạn</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>Liên kết lời mời này sẽ hết hạn sau 7 ngày. Nếu bạn không mong đợi lời mời này, bạn có thể bỏ qua email này.</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Đã đăng xuất</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Đăng xuất</value></data>
 </root>

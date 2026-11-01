@@ -24,12 +24,9 @@ nav_order: 14
 - **没有组织选择器。**属于多个组织的用户，在未指定任何组织的请求上会得到 `account_selection_required`，依赖方可以据此带上参数重试。没有让用户进行选择的托管界面。
 - **没有委派的组织管理。**没有任何权限能让客户自己的管理员管理其成员。
 - **没有按组织隔离的 SCIM。**绑定到组织的 SCIM 令牌（`ScimToken.OrganizationId`）会标记其创建的用户；当该 ID 指向一个真实的组织时，还会使这些用户成为活跃成员（参见[来自 SCIM 令牌的成员资格](#membership-from-a-scim-token)）。所有权检查仍以 OAuth 客户端而不是组织为键，因此该绑定决定的是标记，而不是访问。
-- **本库中没有邀请流程。**没有邀请端点，也没有邀请邮件。宿主需要自行写入 `invited` 成员资格；它变为 `active` 的途径见[邀请](#invitations)。
 - **没有组织范围的组。**`groups` 声明和 SCIM 组成员资格仍是租户范围的；只有角色是组织范围的。
 - **没有组织 Webhook 事件，也没有组织范围的审计。**`IAuthHook` 没有组织生命周期事件（创建、授予或撤销成员资格），现有的钩子载荷不携带 `organizationId`，审计日志上也没有组织列或索引。
 - **受角色限制的作用域在授权时依据租户角色进行过滤。**`Scope.AllowedRoles` 在 `/connect/authorize` 上依据账户直接分配的角色进行检查，这发生在组织解析之前，因此一个只有组织范围角色才能满足其 `AllowedRoles` 的作用域会在授权时被丢弃；如果所请求的作用域无一保留，则以 `access_denied` 拒绝。刷新时，同样的检查依据已解析主体的角色运行，而这些角色确实包含组织的角色。在两者达成一致之前，请让作用域依据租户角色进行限制。
-- **本库中没有组织品牌定制。**`Organization.BrandingJson` 被存储下来，供宿主将其合并到租户的品牌配置之上；本库中没有任何组件读取它。当宿主的启动载荷携带 `organization`（`{ id, slug, name }`）时，登录应用会显示组织名称（“正在登录 {name}”）；除了通过 `organization` 参数、只含一个条目的客户端限制、组织范围的连接，或宿主的 `ITenantContext.OrganizationId` 之外，本库本身在身份验证之前不会解析任何组织。
-- **没有组织管理 REST API。**接口面是 `IOrganizationStore` 和 `IOrganizationMembershipStore`；需要端点的宿主自行构建。列出组织或成员的宿主应使用 `ListPageAsync` / `ListByOrganizationPageAsync`（见下文）。
 
 ## 创建组织 {#creating-an-organization}
 
@@ -72,16 +69,17 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 
 ### 邀请 {#invitations}
 
-`invited` 行携带 `InvitedByUserId`、`InvitedAt`，以及向被邀请者提供的任何角色。本库从不发送邀请；它会在两种情况下将该行提升为 `active`（保留角色、邀请者和邀请时间，并标记 `JoinedAt`）：
+`invited` 行带有 `InvitedByUserId`、`InvitedAt` 以及提供给受邀者的角色。管理 API 在邀请某人加入组织时会写入这样一行([邀请用户](#inviting-people)),主机也可以自行写入。库在以下三种情况下把该行提升为 `active`(保留角色、邀请人和邀请时间,并设置 `JoinedAt`):
 
+- **接受邀请时。** 通过邀请链接设置密码会确认邮箱地址,库的激活钩子会把该用户所有 `invited` 成员关系改为 `active`,并写入 `organization.member.joined`。
 - **通过组织范围的 SAML 或 OIDC 连接登录。**由该组织自己的 IdP 为此人担保，即视为接受邀请（`FederatedOrganizationBinding`，0.30.2）。否则，一个只通过 SSO 登录的被邀请者会被成员资格检查拒绝签发令牌。
 - **自动成员资格**（见下文），当用户符合条件时。
 
-`suspended` 行永远不会被上述任一途径提升，也永远不会因登录而被修改。
+`suspended` 行不会被上述任何途径提升,也不会被任何登录修改。
 
 ### 已验证域名与自动成员资格 {#verified-domains-and-automatic-membership}
 
-`Organization.Domains` 保存组织已声明的邮箱域名，每个都是一个 `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`。`Domain` 以小写、去除首尾空白、不带末尾点号的形式存储。本库存储该声明并读取 `VerifiedAt`；证明对域名的控制权（通常是一条携带 `VerificationToken` 的 DNS TXT 记录）是宿主的工作，宿主在证明成功后标记 `VerifiedAt`。
+`Organization.Domains` 保存组织已申领的邮箱域名,每一项是 `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`。`Domain` 以小写存储,不含空格和末尾的点。管理 API 存储被申领的域名,通过携带 `VerificationToken` 的 DNS TXT 记录证明控制权,并设置 `VerifiedAt`([域名验证](#domain-verification));拥有自己验证流程的主机可以自行设置 `VerifiedAt`。
 
 `Organization.AllowAutoMembership`（默认关闭）允许用户无需邀请即可加入。当组织被**显式**选中（携带而来的刷新授权、`organization` 参数、组织范围的连接，或恰好被限制到该组织的客户端），且用户没有活跃的成员资格时，如果以下条件**全部**成立，用户就会成为成员：
 
@@ -93,13 +91,86 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 
 ### 来自 SCIM 令牌的成员资格 {#membership-from-a-scim-token}
 
-使用 `organizationId` 签发的 SCIM 令牌会把该值作为 `org_id` 标记在它创建的每个用户上。当该 ID 指向一个已存在的组织时，创建操作还会写入一条不带角色的 `active` 成员资格，并审计 `scim.organization_member_added`。不指向任何组织的 ID 仍只是一个单纯的标记。仅在创建时生效：之后的同步不会重新标记或添加成员。参见 [SCIM](scim#tagging-a-connectors-users-with-an-organization)。
+使用 `organizationId` 签发的 SCIM 令牌会把该值作为 `org_id` 标记在它创建的每个用户上。与 SSO 连接一样,`POST /api/v1/scim/tokens` 会以 `400 unknown_organization` 拒绝不指向任何组织的 `organizationId`(格式错误的则返回 `400 invalid_request`),因此通过管理 API 签发的令牌绝不会带有没有任何组织列出的标签。当该 id 指向某个组织时,创建时还会写入一条无角色的 `active` 成员关系,并记录审计 `scim.organization_member_added`。已经带有不指向任何组织的 id 的令牌仍然只是一个标签。仅在创建时生效:之后的同步不会重新打标签或添加成员。参见 [SCIM](scim#tagging-a-connectors-users-with-an-organization)。
 
 ### 列出与删除 {#listing-and-deleting}
 
 `IOrganizationStore.ListPageAsync(cursor, limit)` 和 `IOrganizationMembershipStore.ListByOrganizationPageAsync(organizationId, cursor, limit)` 返回一页结果（`Items` 和一个不透明的 `NextCursor`，最后一页时为 null）。`limit` 会被限制在 1..200 之间，格式错误的游标会抛出 `ArgumentException`。游标基于键集，因此在两次读取之间添加或删除的行永远不会导致页面错位或重复。两者都有基于不分页列表的默认实现，因此自定义存储仍能编译通过；Azure Table 存储则以服务器端范围查询重写了它们。
 
 通过管理端的 `DELETE /api/v1/profile/{userId}`、SCIM 的 `DELETE /scim/v2/Users/{id}` 或 SCIM 回收路径删除用户时，也会删除该用户持有的每一条成员资格（使用带 `IOrganizationMembershipStore` 的 `AccountArtefactPurge.PurgeAsync`；三存储参数的重载不会清除任何成员资格）。拥有自己删除路径的宿主也必须传入成员资格存储，否则组织会继续列出已删除的成员。
+
+## 通过 HTTP 管理组织 {#administering-over-http}
+
+管理 API(`AdminApi:Enabled`,管理范围)负责管理组织、成员关系、域名和邀请。[管理 API](admin-api#organizations) 页面给出了每个请求、每个成功状态和每个错误码;概览如下:
+
+| 路由 | 用途 |
+|---|---|
+| `GET /api/v1/organizations`、`POST /api/v1/organizations` | 列出(分页)与创建 |
+| `GET /api/v1/organizations/{idOrSlug}`、`PUT /api/v1/organizations/{id}`、`DELETE /api/v1/organizations/{id}` | 读取、更新、删除(成员随之删除) |
+| `GET /api/v1/organizations/{id}/members`、`POST /api/v1/organizations/{id}/members`、`PUT /api/v1/organizations/{id}/members/{userId}`、`DELETE /api/v1/organizations/{id}/members/{userId}` | 列出、添加、更改状态和角色、移除 |
+| `POST /api/v1/organizations/{id}/domains`、`POST /api/v1/organizations/{id}/domains/{domain}/verify`、`DELETE /api/v1/organizations/{id}/domains/{domain}` | 申领、证明并释放一个邮箱域名 |
+| `POST /api/v1/organizations/backfill` | 把旧的 `OrganizationId` 值转换为组织 |
+| `GET /api/v1/profile/{userId}/organizations` | 某个用户所属的组织 |
+| `POST /api/v1/profile/invite`、`POST /api/v1/profile/{userId}/resend-invite` | 通过邮件邀请某人、重新发送邀请 |
+
+失败时返回 `{ "error": "<code>", "error_description": "..." }`,状态为 `400`(输入无效)、`404`(未找到)、`409`(冲突)或 `502`(`invite_email_failed`)。
+
+## 域名验证 {#domain-verification}
+
+`POST /api/v1/organizations/{id}/domains`,请求体为 `{ "domain": "acme.com" }`,会申领该域名(未验证),并返回 `201` 以及需要发布的记录:`recordName`(`_authagonal-org.acme.com`)和 `recordValue`(`authagonal-org-verify=<token>`)。令牌是 256 位随机数,每次申领一个。请在该名称下发布一条值完全相同的 TXT 记录,然后调用 `POST /api/v1/organizations/{id}/domains/acme.com/verify`。
+
+匹配时会设置 `VerifiedAt` 并写入 `organization.domain_verified`。失败是 `409 verification_failed`,绝不会是带 `verified: false` 的 `200`,其描述会写明需要发布的记录名称和值,以及实际找到的内容。验证已验证的域名会原样返回。一个域名最多只属于一个组织,无论是否已验证(`domain_taken`)。移除域名会停止今后的自动加入,不会移除任何人。
+
+DNS 读取通过 `ITxtResolver`(`Authagonal.Core.Services`)进行:`ResolveTxtAsync(name, ct)` 返回在某个名称下发布的 TXT 值,没有时返回空列表,查询失败时抛出异常(报告为 `verification_failed`;异常文本绝不会返回)。默认实现通过 DnsClient 读取真实 DNS,并把一条记录的各个字符串拼接成一个值。它以 `TryAdd` 注册,因此你在 `AddAuthagonal()` 之前注册的解析器(内部解析器、DNS over HTTPS)优先生效。
+
+## 回填 {#backfill}
+
+在有组织之前,`AuthUser.OrganizationId` 是自由文本。`POST /api/v1/organizations/backfill` 按该字符串的完全相同值对用户分组,为每个不同的值创建一个组织,并为每个用户创建一条 `active`(无角色)的成员关系。slug 是该值的小写形式,其他字符的每一段连续字符折叠为一个连字符(冲突时依次为 `-2`、`-3`),显示名称就是该值本身,组织还会带上元数据键 `legacyOrganizationId` 作为标记。请求体为 `{ "dryRun": true }`;**默认是试运行**,即使没有请求体也是如此,试运行不会写入任何内容。
+
+重复运行是幂等的:已经为某个值标记过的组织会被复用,即使之后改过名,已有成员关系的用户计入 `usersSkipped`。响应包含 `dryRun`、`organizationsCreated`、`membershipsCreated`、`usersSkipped`、`organizations`(前 50 个,每个带有 `legacyValue`、`slug` 和 `users`)以及 `truncated`。一次运行最多扫描 50,000 个用户;`truncated: true` 表示需要再次运行。真正的运行会写入 `organization.backfill`。
+
+## 邀请用户 {#inviting-people}
+
+`POST /api/v1/profile/invite` 接受 `email`(必填)、`firstName`、`lastName`、`locale`、`organizationId` 和 `organizationRoles`。它会立即创建账户(未确认,没有可用的密码),并通过邮件发送一个链接;响应为 `200`,内容为 `{ "userId", "email" }`。提供 `organizationId` 时,它还会写入一条带有角色、`InvitedByUserId`(调用的管理员)和 `InvitedAt` 的 `invited` 成员关系,邮件会写明组织名称并采用该组织的品牌([品牌定制](branding#organisation-branding-in-invitation-emails))。与组织有关的所有检查都在账户存在之前完成,因此被拒绝的邀请不会留下孤立的用户。只能邀请新账户:已存在的地址返回 `409 user_already_exists`,已有的用户请通过 `POST /api/v1/organizations/{id}/members` 添加。
+
+链接携带一个一次性的 `password_reset` 授权,有效期七天,由现有的 `POST /api/auth/reset-password` 兑换;没有第二个兑换端点。设置密码会确认邮箱地址并触发 `IAuthHook.OnEmailConfirmedAsync`,库自身的激活钩子会把该用户所有 `invited` 成员关系改为 `active`(保留角色、邀请人和邀请时间,并设置 `JoinedAt`),并以新成员为操作者写入 `organization.member.joined`。`suspended` 或 `active` 的行不会被触及,存储故障只会被记录日志,绝不会让确认失败,并且该钩子是幂等的。只要库触发 `OnEmailConfirmedAsync`,它就会运行,无论你的主机注册了哪些钩子。
+
+`POST /api/v1/profile/{userId}/resend-invite` 生成新链接并发送:`404 user_not_found`;地址确认后为 `400 already_accepted`(请改用密码重置);发送抛出异常时为 `502 invite_email_failed`。首次邀请更宽容:发送失败只会记录日志,用户和链接仍然存在,因为邀请可以重新发送。当用户恰好有一条 `invited` 成员关系时,重新发送的邀请会写明组织名称。
+
+邮件通过 `IEmailService.SendUserInviteEmailAsync(toEmail, tenantName, acceptUrl, locale, ct, organization)` 发送,这是一个带默认实现的接口成员,其主体发送带有接受链接的密码重置邮件,因此拥有自己 `IEmailService` 的主机仍能送出可用的链接;重写它即可发送你自己的邀请。内置发送器在库支持时用发出邀请的管理员的语言撰写邀请(它识别的第一个 `Accept-Language`,否则用请求的 `locale`),否则用受邀者的语言,再否则用英语。
+
+`IInviteLinkBuilder`(`Authagonal.Core.Services`)决定链接指向哪里:`Task<string> BuildAcceptUrlAsync(string token, Organization? organization, CancellationToken ct = default)`。默认返回 `{issuer}/accept-invite?p=<token>`,对于加入组织的邀请会加上 `&organization=<slug>`,两者均经过转义。在 `AddAuthagonal()` 之前注册你自己的实现(以 `TryAdd` 添加),即可在别处提供该页面,例如组织自己的域名;邀请和重新发送都通过它构建所有链接。
+
+## 接受邀请页面 {#the-accept-invite-page}
+
+登录应用在主机根路径提供 `/accept-invite`,位于 `/login` 基础路径之外,独立服务器的 SPA 回退会提供它。页面从 `p` 读取令牌,要求输入两次新密码,按密码策略校验后提交到 `/api/auth/reset-password`。链接带有 `organization` 时,页面会显示该组织:如果主机的启动数据(`getOrganization()`)包含同一个组织,就显示其显示名称,否则显示链接中的 slug,独立服务器显示的就是 slug。没有令牌的链接会显示“无效或已过期”的消息,且不显示表单;令牌未知或已过期时,提交密码后会显示同样的消息。被服务器拒绝的密码(`weak_password`)会显示服务器返回的消息。文本提供全部十一种语言。基于 npm 包的主机从 `@authagonal/login` 导入 `AcceptInvite` 并将其挂载到 `/accept-invite`。
+
+## 在代码中调用服务 {#calling-the-services-from-code}
+
+端点很薄:`OrganizationOperations` 和 `UserInviteOperations`(`Authagonal.Server.Services`,以作用域方式和 `TryAdd` 注册)承载每一条规则、每一个错误码和每一行审计,因此主机自己的界面(门户路由、工具)可以调用它们并写入相同的行。`OrganizationOperations` 提供 `ListPageAsync`、`GetAsync`、`CreateAsync`、`UpdateAsync`、`DeleteAsync`、`ListMembersPageAsync`、`AddMemberAsync`、`UpdateMemberAsync`、`RemoveMemberAsync`、`AddDomainAsync`、`VerifyDomainAsync`、`RemoveDomainAsync`、`ListUserOrganizationsAsync` 和 `BackfillAsync`;`UserInviteOperations` 提供 `InviteAsync` 和 `ResendInviteAsync`。它们以字符串形式接收审计操作者,不使用任何 HTTP 类型;谁可以调用它们(谁可以邀请加入组织、邀请可以多频繁地重新发送)由主机的策略决定。
+
+每个方法都返回 `OperationResult<T>`:`Outcome`(`Ok`、`Invalid`、`NotFound`、`Conflict` 或 `Failed`)、`Value`、`Error`(错误码)、`Message`、`Fields` 和 `Succeeded`。管理 API 把结果映射为 `400`、`404`、`409` 和 `502`。列表返回 `ResultPage<T>`(`Items` 和 `NextCursor`)。`ListUserOrganizationsAsync` 和 `BackfillAsync` 直接返回其值。
+
+## 审计操作 {#audit-actions}
+
+每次写入都通过 `IAuditLogger`,实体类型为 `organization`(最后两项为 `user`),操作者为调用的管理员的 subject。
+
+| 操作 | 写入时机 | 详情 |
+|---|---|---|
+| `organization.created` | 创建组织 | slug |
+| `organization.updated` | 更新组织 | slug |
+| `organization.deleted` | 删除组织 | slug |
+| `organization.member.added` | 添加成员 | `user=<userId>` |
+| `organization.member.updated` | 成员的状态或角色改变 | `user=<userId>` |
+| `organization.member.removed` | 移除成员 | `user=<userId>` |
+| `organization.member.invited` | 邀请创建了 `invited` 成员关系 | `user=<userId>` |
+| `organization.member.joined` | `invited` 成员关系在邮箱确认时变为 `active`(操作者为该用户) | `user=<userId>` |
+| `organization.domain_added` | 申领域名 | `domain=<domain>` |
+| `organization.domain_verified` | 域名通过证明 | `domain=<domain>` |
+| `organization.domain_removed` | 释放域名 | `domain=<domain>` |
+| `organization.backfill` | 非试运行的回填 | `organizationsCreated=<n> membershipsCreated=<n>` |
+| `user.invited` | 邀请某人 | 本地部分被遮蔽的地址(`***@acme.com`) |
+| `user.invite_resent` | 重新发送邀请 | 同上 |
 
 ## 组织范围的角色 {#organization-scoped-roles}
 
@@ -168,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 每个条目都必须匹配组织 ID 的形式 `^[A-Za-z0-9._~-]{1,200}$`；对于空的或格式错误的条目，管理 API 会返回 `400 invalid_request`，因为一个列出了任何 `organization` 参数都无法发送的 ID 的限制什么也匹配不到，而什么也匹配不到的限制会拒绝每一个请求。`null` 列表会被规范化为空列表。
 
 空列表（所有现有客户端都是如此）表示不受限制。组织不在列表中的请求会以 `access_denied` 拒绝。只含一个条目的列表同时也会进行选择，即上文的规则 4。含有多个条目的列表只进行限制而不进行选择：请求仍必须指定其中一个，否则会以 `account_selection_required` 拒绝。
+
+## 登录页面上的组织 {#organizations-on-the-login-page}
+
+在任何人登录之前不存在用户，因此登录页面必须从请求本身得知它属于哪个组织。`PreAuthOrganizationResolver` 按下列顺序为登录页面完成这一解析；第一条指明组织的规则生效。
+
+1. **具有权威性的宿主绑定。** 宿主已将请求的域名绑定到某个组织，并将该绑定标记为具有权威性（参见[将宿主绑定到组织](#pinning-a-host-to-an-organization)）。指向不存在的组织（例如已被删除）的绑定不算绑定：解析继续进行。登录页面对此保持静默；只有 `/connect/authorize` 和 `/connect/par` 上的强制检查才会记录警告。
+2. **仅在 `/accept-invite` 上的 `organization`。**
+3. **授权请求的组织**：`returnUrl` 查询字符串中的 `organization`、`org_slug` 或 `org_id`，或其 `request_uri` 所指向的已推送请求内部的这些参数；此时该请求的参数和客户端会取代外层的参数和客户端。
+4. **已启用客户端的 `RestrictedToOrganizationIds` 中唯一的条目。**
+5. **不具有权威性的绑定**，排在最后。
+
+每个名称都先按 slug 解析，再按 id 解析，与[在授权请求中选择组织](#selecting-an-organization-on-an-authorization-request)相同。此解析不会检查组织是否已启用，因此已禁用组织的登录页面仍会显示其品牌配置；授权端点仍会拒绝该组织。任何失败都解析为没有组织，绝不会变成错误页面。
+
+### 将宿主绑定到组织 {#pinning-a-host-to-an-organization}
+
+宿主通过让 `ITenantContext.OrganizationIdIsAuthoritative`（默认接口成员，默认值为 `false`）返回 `true`，将它为请求解析出的组织标记为具有权威性。只有当该值为 `true` 且 `OrganizationId` 非空时，绑定才具有权威性。两者都未设置的宿主行为与以往一致：绑定排在最后，即上面的规则 5。
+
+独立服务器无需编写代码。在 `Organizations:PinnedHosts` 下将每个主机名映射到组织的 **id**（不是 slug）：
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+或者不使用文件：
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+主机名与请求的主机名比较时不区分大小写，端口会被忽略。匹配的条目会设置 `OrganizationId` 并使其具有权威性；没有条目或没有该配置节则不产生任何变化。不指向任何组织的 id 是悬空绑定，按上述方式处理。
+
+### 具有权威性的绑定会强制执行什么 {#what-an-authoritative-pin-enforces}
+
+在具有权威性的绑定下，`/connect/authorize` 和 `POST /connect/par`（不包括其他端点）被限定在所绑定的组织：
+
+- 未指明组织（`organization`、`org_slug` 或 `org_id`）的请求会被加上 `organization=<所绑定的 id>`：加到查询字符串中；对于 PAR，则加到表单正文中。携带 `request_uri` 的授权请求保持不变。
+- 通过 slug 或 id 指明所绑定组织的请求予以放行。
+- 指明任何其他组织或不存在的组织的请求会被拒绝，且绝不会被重定向：
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- 仅当 PAR 的正文为 `application/x-www-form-urlencoded` 时才会读取；任何其他正文都会被拒绝。声明的长度超过 32 KiB 时交由端点处理，端点返回 413；未声明长度的正文最多读取 32 KiB，超过则拒绝。读取后会恢复正文。
+
+在选定组织之后端点原本就会做出的拒绝（不是成员、客户端限制、组织已禁用）保持不变。
+
+### 组织品牌配置 {#organization-branding}
+
+`OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` 将 `Organization.BrandingJson` 逐字段合并到租户的品牌配置之上。它返回一个新的 `JsonObject`，不会修改其输入。规则如下：
+
+- 为 null 或缺失的键继承租户的值。
+- 未知的键会被忽略。键的匹配不区分大小写。
+- 某个键的值 JSON 类型错误时，仅该键保留租户的值。
+- `languages` 会替换租户的列表，而不是合并。
+- 格式错误或不是 JSON 对象的 `BrandingJson` 会得到租户的品牌配置。
+- 组织无法设置 `showRegistration`；它始终保留租户的值。
+
+组织可以设置的键是登录应用的品牌配置选项（参见[品牌定制](branding)）以及五个电子邮件颜色（`emailBg`、`emailHeaderColor`、`emailCardBg`、`emailFooterColor`、`emailLogoBg`）。
+
+### 登录启动载荷 {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` 为登录页面执行一次解析并返回 `{ branding, providers, organization }`：合并后的品牌配置（未解析出组织时为租户的品牌配置）、该组织的提供商列表，以及形如 `{ id, slug, name }` 或 `null` 的 `organization`。`MapAuthagonalLoginFallback()` 提供登录应用的 `index.html`，并将该载荷以 `<script type="application/json" id="authagonal-boot">` 的形式内联在 `</head>` 之前；独立服务器会调用它。参见[品牌定制](branding#organisation-name)。
 
 ## 声明 {#the-claims}
 

@@ -1,5 +1,44 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Organization admin API.** `/api/v1/organizations` (list, create, get by id or slug, update, delete), its members
+  (`/{id}/members`, `/{id}/members/{userId}`) and email domains (`/{id}/domains`, `/{id}/domains/{domain}/verify`,
+  `/{id}/domains/{domain}`), `POST /api/v1/organizations/backfill`, and `GET /api/v1/profile/{userId}/organizations`,
+  behind `AdminApi:Enabled` and the admin scope. Failures are `{ error, error_description }` at 400, 404, 409 or 502.
+  A domain is proved by a TXT record at `_authagonal-org.<domain>` read through the new `ITxtResolver` (DnsClient by
+  default, replaceable). Every write is audited (`organization.created` through `organization.backfill`).
+- **Invitations.** `POST /api/v1/profile/invite` creates an unconfirmed account, optionally with an `invited`
+  organization membership, and emails a seven-day link; `POST /api/v1/profile/{userId}/resend-invite` sends it again.
+  `IEmailService.SendUserInviteEmailAsync` is a default interface member (it sends the password-reset email with the
+  accept link), the built-in sender writes it in the inviting administrator's language wearing the organization's
+  `appName`, `logoUrl` and `primaryColor`, and `IInviteLinkBuilder` decides where the link points
+  (`{issuer}/accept-invite?p=<token>` by default). Setting a password through the link confirms the address and moves
+  the user's `invited` memberships to `active` (`organization.member.joined`).
+- **Accept-invite page.** The login app serves `/accept-invite` at the host root, outside `/login`, and exports
+  `AcceptInvite` for hosts built on `@authagonal/login`.
+- **Backfill.** `POST /api/v1/organizations/backfill` turns the legacy free-text `AuthUser.OrganizationId` into
+  organizations and `active` memberships; `dryRun` defaults to true and a run is idempotent.
+- **Services for hosts.** `OrganizationOperations` and `UserInviteOperations` (`Authagonal.Server.Services`) hold every
+  rule and error code the endpoints use and return `OperationResult<T>` and `ResultPage<T>`, so a host's own surface can
+  call them directly.
+- `Email:ResendApiUrl` sets the endpoint the built-in Resend sender posts to (default `https://api.resend.com/emails`).
+- **Organization login surface.** The library now resolves the organization for a login page before authentication, and carries it into the login UI.
+  - `ITenantContext.OrganizationIdIsAuthoritative`, a default interface member (`false`): a host marks its organization pin authoritative.
+  - `Organizations:PinnedHosts` configuration (host name to organization **id**; `Organizations__PinnedHosts__<host>` in the environment, `--Organizations:PinnedHosts:<host>=<id>` on the command line; host compared case-insensitively, port ignored) pins hosts in the standalone server.
+  - Under an authoritative pin, `/connect/authorize` and `POST /connect/par` inject `organization` when a request names none, and refuse another or an unknown organization with `400` `access_denied` ("The requested organization is not available on this domain."). PAR is read only when urlencoded, with a 32 KiB limit.
+  - `OrganizationBranding.Merge(JsonObject, Organization, ILogger)`: an organization's `BrandingJson` merged field by field over the tenant's branding. Null inherits, unknown keys are ignored, a wrong kind keeps the tenant's value, `languages` replaces, malformed gives the tenant's branding, and an organization cannot set `showRegistration`.
+  - `LoginBootPayloadBuilder` builds the login boot payload `{ branding, providers, organization }`, and `MapAuthagonalLoginFallback()` inlines it as `<script type="application/json" id="authagonal-boot">` before `</head>`.
+
+### Changed
+- `POST /api/v1/scim/tokens` refuses an `organizationId` that names no organization with `400 unknown_organization`.
+- `AddAuthagonal` registers `EnvPartitioner.Live`, so the standalone server starts on Table storage; it failed at
+  start for want of an `EnvPartitioner` before.
+- **`PreAuthOrganizationResolver` resolves a login page** in this order: an authoritative host pin, `organization` on `/accept-invite` only, the authorize request's organization (query, `returnUrl`, or a read-only peek at a pushed request), a single-entry client restriction, then a non-authoritative pin. Its existing entry point is unchanged.
+- **The standalone server serves the login page through `MapAuthagonalLoginFallback()`** instead of a plain fallback to `index.html`. `branding.json` is re-read on every request; any failure serves the plain `index.html`.
+- The documentation (`organizations`, `branding`, `installation`, in every locale) no longer says the library resolves no organization before authentication or reads no organization branding.
+
 ## [0.31.1], 2026-10-04
 
 ### Changed

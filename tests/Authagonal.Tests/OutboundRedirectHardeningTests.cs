@@ -43,8 +43,10 @@ public sealed class OutboundRedirectHardeningTests
     private static readonly string[] RegistrantSuppliedClients = ["BackChannelLogout", "AuthagonalJwks"];
 
     /// <summary>
-    /// Clients whose target is a compile-time constant. Nothing chooses it, so there is nothing for an
-    /// address check to decide.
+    /// Clients whose target no admin API, registrant or request chooses: a compile-time constant
+    /// (TurnstileVerifier) or a URL read only from the deployment's own configuration (Resend, from
+    /// <c>Email:ResendApiUrl</c>, api.resend.com by default). It is the operator's own choice, so there is
+    /// nothing for an address check to decide.
     /// </summary>
     /// <remarks>
     /// TurnstileVerifier is a TYPED client, so its name is the type's. It was absent from this list and from
@@ -333,12 +335,13 @@ public sealed class OutboundRedirectHardeningTests
     }
 
     /// <summary>
-    /// Resend carries no address guard either: its target is a <c>private const</c> (api.resend.com).
+    /// Resend carries no address guard either: its target is <c>Email:ResendApiUrl</c>, api.resend.com unless
+    /// the deployment sets another.
     /// </summary>
     /// <remarks>
-    /// No configuration and no registrant reaches it, so the guard has nothing to decide — and it would need
-    /// <c>UseProxy = false</c> to mean anything, which is how a deployment that egresses through a mandatory
-    /// proxy loses all of its email. The redirect refusal is the property that matters on this client and it
+    /// The URL comes only from the deployment's own configuration, never from an admin API, a registrant or a
+    /// request, so the guard has nothing to decide — and it would need <c>UseProxy = false</c> to mean
+    /// anything, which is how a deployment that egresses through a mandatory proxy loses all of its email. The redirect refusal is the property that matters on this client and it
     /// is asserted above: the request carries the mail API key in an Authorization header, and .NET only
     /// strips that when a redirect crosses origins.
     /// </remarks>

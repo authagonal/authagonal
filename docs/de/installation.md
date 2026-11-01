@@ -118,6 +118,14 @@ Alle Erweiterungspunkte beschreibt [Erweiterbarkeit](extensibility), ein vollst�
 
 Der eingebaute Versand über [Resend](https://resend.com) wird automatisch aktiv, sobald `Email:ResendApiKey` und `Email:SenderEmail` konfiguriert sind; eine Service-Registrierung ist nicht nötig. Ohne jedes `IEmailService` werden Bestätigungs- und Passwort-Reset-E-Mails **stillschweigend verworfen**, und weil die Anmeldung standardmäßig eine bestätigte E-Mail-Adresse voraussetzt, können sich selbst registrierte Benutzer nie anmelden (`UseAuthagonal` protokolliert beim Start eine Warnung). Setzen Sie entweder die `Email:*`-Schlüssel, registrieren Sie vor `AddAuthagonal()` ein eigenes `IEmailService` oder führen Sie Ihre Domains in `Auth:AutoConfirmEmailDomains` auf, um die Bestätigung zu überspringen (nur für Entwicklung und Tests). Siehe [Konfiguration → E-Mail](configuration#email).
 
+### Organisationen und Einladungen {#organizations-and-invitations}
+
+`AddAuthagonal()` registriert alles, was die Organisations-Admin-API braucht; ein Host, der nichts ändert, erhält sie also zusammen mit der übrigen Admin-API (`AdminApi:Enabled`): `/api/v1/organizations` sowie die Einladungsrouten `/api/v1/profile/invite` und `/api/v1/profile/{userId}/resend-invite`. Organisationen und Mitgliedschaften brauchen einen dauerhaften Speicher; jeder Provider bringt einen mit, und bei Azure Table Storage ist nichts weiter nötig. Siehe [Organisationen](organizations).
+
+- **Der Einladungslink öffnet `/accept-invite` beim Issuer.** Der SPA-Fallback des Standalone-Servers liefert die Seite aus. Ein Host, der die Login-SPA selbst einbindet, muss die App im Stammverzeichnis des Hosts ausliefern, damit `/accept-invite` sie außerhalb des Basispfads `/login` erreicht, oder `AcceptInvite` aus `@authagonal/login` importieren und dorthin routen. Soll der Link woanders hinführen, registrieren Sie vor `AddAuthagonal()` einen eigenen `IInviteLinkBuilder`.
+- **Einladungen brauchen einen E-Mail-Versand.** Der eingebaute Resend-Versand verschickt sie, sobald `Email:ResendApiKey` und `Email:SenderEmail` gesetzt sind. Ein Host mit eigenem `IEmailService` überschreibt `SendUserInviteEmailAsync`; ohne Überschreibung erhält die eingeladene Person die Passwort-zurücksetzen-E-Mail mit dem Annahme-Link.
+- **Der Domain-Nachweis liest DNS** über `ITxtResolver`; registrieren Sie vor `AddAuthagonal()` einen eigenen, um einen anderen Resolver zu verwenden.
+
 ## SQL-Backend {#sql-backend}
 
 Um auf Ihrer eigenen Datenbank statt auf einem Cloud-Dienst zu laufen, referenzieren Sie `Authagonal.SqlProvider` und registrieren es **vor** `AddAuthagonal()`; diese Registrierungen veranlassen `AddAuthagonal()`, seine Verdrahtung für Azure Table Storage zu überspringen:
@@ -179,6 +187,30 @@ Das Paket enthält kompiliertes JS und CSS; importieren Sie Komponenten und Styl
 ## Backend-for-Frontend (BFF) {#backend-for-frontend-bff}
 
 Wenn Ihre SPA APIs mit einem Bearer Token aufruft, verwahren Sie das Token in einem BFF statt im Browser. Das BFF wird als NuGet-Paket (`Authagonal.Bff`) und als npm-Paket (`@authagonal/bff`) veröffentlicht; keines von beiden ist Teil des Server-Images. Siehe [Backend-for-Frontend](bff).
+
+## Einen Host an eine Organisation binden {#pinning-a-host-to-an-organization}
+
+Um auf jeder Domain eine andere Organisation zu bedienen, ordnen Sie mit `Organizations:PinnedHosts` Hostnamen Organisations-**Ids** zu:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+Der Host wird ohne Beachtung der Groß-/Kleinschreibung verglichen; der Port wird ignoriert. Ein zugeordneter Host ist auf `/connect/authorize` und `/connect/par` an seine Organisation gebunden, und seine Login-Routen (zum Beispiel `/login`, nicht aber das nackte `/`, das als einfache `index.html` ausgeliefert wird) zeigen Namen und Branding dieser Organisation. Siehe [Organisationen](organizations#pinning-a-host-to-an-organization).
 
 ## Sicherheitscheckliste für die Produktion {#production-security-checklist}
 

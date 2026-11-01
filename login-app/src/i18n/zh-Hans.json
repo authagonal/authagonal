@@ -171,5 +171,15 @@
   "account.saving": "正在保存…",
   "emailVerified": "电子邮件已通过验证，请登录以继续操作。",
   "accountCreated": "账户已创建——请登录以继续操作。",
-  "oidcErrorGeneric": "登录未能完成，请重试。"
+  "oidcErrorGeneric": "登录未能完成，请重试。",
+  "invite.title": "设置您的账户",
+  "invite.titleOrganization": "加入 {{organization}}",
+  "invite.intro": "设置一个密码以完成账户设置。",
+  "invite.introOrganization": "您已受邀加入 {{organization}}。设置一个密码以完成账户设置。",
+  "invite.button": "创建账户",
+  "invite.creating": "正在设置…",
+  "invite.successTitle": "全部就绪",
+  "invite.successMessage": "您的密码已设置。现在即可登录。",
+  "invite.invalidTitle": "邀请无效",
+  "invite.invalidMessage": "此邀请链接无效或已过期。请联系邀请您的人重新发送一份。"
 }

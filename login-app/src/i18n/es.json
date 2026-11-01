@@ -171,5 +171,15 @@
   "account.saving": "Guardando…",
   "emailVerified": "El correo electrónico ha sido verificado; inicie sesión para continuar.",
   "accountCreated": "Cuenta creada: inicie sesión para continuar.",
-  "oidcErrorGeneric": "No se pudo completar el inicio de sesión. Vuelve a intentarlo."
+  "oidcErrorGeneric": "No se pudo completar el inicio de sesión. Vuelve a intentarlo.",
+  "invite.title": "Configura tu cuenta",
+  "invite.titleOrganization": "Únete a {{organization}}",
+  "invite.intro": "Elige una contraseña para terminar de configurar tu cuenta.",
+  "invite.introOrganization": "Te han invitado a unirte a {{organization}}. Elige una contraseña para terminar de configurar tu cuenta.",
+  "invite.button": "Crear cuenta",
+  "invite.creating": "Configurando…",
+  "invite.successTitle": "Todo listo",
+  "invite.successMessage": "Tu contraseña está establecida. Ya puedes iniciar sesión.",
+  "invite.invalidTitle": "Invitación no válida",
+  "invite.invalidMessage": "Este enlace de invitación no es válido o ha caducado. Pide a quien te invitó que te envíe uno nuevo."
 }

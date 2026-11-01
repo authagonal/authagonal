@@ -31,16 +31,19 @@ với một khách hàng), payload `authagonal-boot` có thể mang thành phầ
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
 `organization` là `null` (hoặc không có thành phần này) khi request không phân giải được tổ chức nào:
-một triển khai single-tenant, hoặc một triển khai không gắn tổ chức nào với tên miền tùy chỉnh của host này. Bản thân
-thư viện này không phân giải tổ chức cho một request ẩn danh, trước khi xác thực (`OrganizationSelector`
-cần một `AuthUser` đã đăng nhập); host nào có cơ chế phân giải trước xác thực riêng (Authagonal Cloud gắn
-một tổ chức cho mỗi tên miền tùy chỉnh) sẽ đặt `organization` khi lắp ráp boot payload.
+một triển khai single-tenant, hoặc một triển khai không gắn tổ chức nào với tên miền tùy chỉnh của host này. Bản thân thư viện phân giải tổ chức cho một request ẩn danh, trước khi xác thực, theo thứ tự nêu trong [Tổ chức](organizations#organizations-on-the-login-page): trước hết là ghim host có thẩm quyền, rồi tổ chức của request ủy quyền, rồi một giới hạn client chỉ có một mục. Host có cơ chế phân giải trước xác thực riêng (Authagonal Cloud gắn một tổ chức cho mỗi tên miền tùy chỉnh) đặt ghim đó qua `ITenantContext` (`OrganizationId` cùng với `OrganizationIdIsAuthoritative`), mà `LoginBootPayloadBuilder.BuildAsync` phân giải thông qua `PreAuthOrganizationResolver`, hoặc tự dựng một record `LoginBootPayload` rồi truyền cho `LoginBootPayloadBuilder.InjectIntoShell`. `BuildAsync` không nhận tham số tổ chức nào.
 
 Khi có `organization.name` và giá trị này khác `branding.appName` (không phân biệt hoa thường, đã cắt khoảng trắng,
 để một tổ chức trùng tên với tenant không tạo ra "Acme / Đang đăng nhập vào Acme"),
@@ -50,6 +53,20 @@ thẻ đăng nhập hiển thị một dòng phụ dưới tiêu đề: "Đang �
 mật khẩu, các trang thử thách và thiết lập MFA, trang thiết bị, chấp thuận và chấp thuận cho agent, grant,
 và tài khoản) đều hiển thị giống hệt nhau. Không có gì được hiển thị, và phần đầu giữ khoảng cách bình thường, khi
 `organization` vắng mặt, là `null`, hoặc tên của nó trùng với `branding.appName`.
+
+## Thương hiệu tổ chức {#organisation-branding}
+
+Khi request được phân giải tới một tổ chức, `BrandingJson` của tổ chức đó được trộn theo từng trường đè lên thương hiệu của tenant, và kết quả là thành viên `branding` của boot payload. Trường null hoặc không có sẽ kế thừa giá trị của tenant, khóa không xác định bị bỏ qua, giá trị sai kiểu giữ giá trị của tenant cho khóa đó, `languages` thay thế danh sách của tenant, và một tài liệu sai định dạng cho ra thương hiệu của tenant nguyên vẹn. Tổ chức không thể đặt `showRegistration`. Các quy tắc nằm trong [Tổ chức](organizations#organization-branding) (`OrganizationBranding.Merge`).
+
+Máy chủ độc lập dựng boot payload bằng `LoginBootPayloadBuilder` cho các route đăng nhập (`/login`, `/accept-invite` và các route SPA khác; đường dẫn gốc `/` được phục vụ dưới dạng `index.html` thuần, không có payload, nên không hiển thị tổ chức nào), và `MapAuthagonalLoginFallback()` nhúng nó dưới dạng `<script type="application/json" id="authagonal-boot">` ngay trước `</head>`. `branding.json` được đọc lại ở mỗi request, nên chỉnh sửa tệp đã mount có hiệu lực ngay; tệp không có hoặc sai định dạng được coi là `{}` (kèm cảnh báo nếu sai định dạng). Nếu có gì thất bại, `index.html` thuần được phục vụ và SPA lấy `/branding.json` như trước.
+
+## Thương hiệu của tổ chức trong email lời mời {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` là một đối tượng JSON thuộc về host. Ngoài trang đăng nhập ([ở trên](#organisation-branding)), thư viện đọc nó trong email lời mời (`IEmailService.SendUserInviteEmailAsync`, xem [Tổ chức](organizations#inviting-people)). Với lời mời vào một tổ chức, bộ gửi tích hợp lấy từ đó `appName`, `logoUrl` và `primaryColor`, từng trường một, đặt lên trên các giá trị mặc định của chính email: `Authagonal`, không có logo và `#2563eb` (các giá trị mặc định của ứng dụng đăng nhập). Một trường vắng mặt, rỗng hoặc không phải chuỗi được coi là chưa đặt; logo phải là URL `https` tuyệt đối và màu phải là một màu CSS đơn giản (thập lục phân, `rgb()`/`hsl()` hoặc từ khóa), nếu không cũng được coi là chưa đặt. JSON sai định dạng bị bỏ qua: một lời mời không bao giờ bị từ chối vì thương hiệu của tổ chức.
+
+Tiêu đề là tiêu đề lời mời đã bản địa hóa cùng tên ứng dụng, phần thân nêu tên tổ chức và mọi giá trị đều được mã hóa HTML. Một lời mời đơn giản (không có tổ chức) dùng các giá trị mặc định và nêu tên người gửi (`Email:SenderName`, nếu không thì `Authagonal`).
+
+Host có `IEmailService` riêng không bị ảnh hưởng. `SendUserInviteEmailAsync` mặc định của interface gửi email đặt lại mật khẩu kèm liên kết chấp nhận; hãy ghi đè để gửi lời mời mang thương hiệu của riêng bạn. Trang mà liên kết mở ra, `/accept-invite`, là một phần của ứng dụng đăng nhập và lấy `branding.json` của tenant như mọi trang khác, với thương hiệu của tổ chức mà tham số `organization` nêu tên được trộn đè lên ([ở trên](#organisation-branding)).
 
 ## Cấu hình {#configuration}
 

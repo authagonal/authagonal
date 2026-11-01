@@ -24,12 +24,9 @@ locale: ja
 - **組織選択画面はありません。** 複数の組織に所属するユーザーが、どの組織も指定していないリクエストを送ると、`account_selection_required` を受け取ります。これはリライングパーティーがパラメーターを付けて再試行することで対処できるエラーです。ユーザーに選択を求めるホスト型の画面はありません。
 - **組織の管理の委任はありません。** 顧客自身の管理者が自分たちのメンバーを管理できるようにする権限はありません。
 - **組織スコープの SCIM の分離はありません。** 組織に結び付けられた SCIM トークン (`ScimToken.OrganizationId`) は、それが作成するユーザーにタグを付け、ID が実在する組織を指している場合はそのユーザーを有効なメンバーにします ([SCIM トークンによるメンバーシップ](#membership-from-a-scim-token) を参照)。所有権のチェックは引き続き組織ではなく OAuth クライアントをキーとしているため、結び付けが決めるのはタグ付けであり、アクセスではありません。
-- **このライブラリには招待フローはありません。** 招待のエンドポイントも招待メールもありません。ホストが自分で `invited` メンバーシップを書き込みます。それが `active` になる経路は [招待](#invitations) で説明しています。
 - **組織スコープのグループはありません。** `groups` クレームと SCIM グループのメンバーシップはテナント全体のままです。組織スコープになるのはロールだけです。
 - **組織の Webhook イベントも、組織スコープの監査もありません。** `IAuthHook` には組織のライフサイクルのイベント (作成、メンバーシップの付与や取り消し) がなく、既存のフックのペイロードは `organizationId` を含まず、監査ログには組織の列もインデックスもありません。
 - **ロールで制限されたスコープは、認可時にテナントのロールに対してフィルタリングされます。** `Scope.AllowedRoles` は `/connect/authorize` で、組織が解決される前に、アカウントに直接割り当てられたロールに対して適用されます。そのため、`AllowedRoles` が組織スコープのロールでしか満たされないスコープは認可時に除外され、要求したスコープが 1 つも残らなければ `access_denied` で拒否されます。リフレッシュ時には同じ制限が、解決されたサブジェクトのロール (組織のロールを含みます) に対して実行されます。この 2 つが一致するまでは、スコープの制限はテナントのロールに基づいて行ってください。
-- **このライブラリには組織のブランディングはありません。** `Organization.BrandingJson` は、ホストがテナントのブランディングに重ねてマージするために保存されます。このライブラリにはそれを読み取るものはありません。ホストのブートペイロードが `organization` (`{ id, slug, name }`) を含む場合、ログインアプリは組織の名前 (「{name}にサインインしています」) を表示します。ライブラリ自体が認証前に組織を解決するのは、`organization` パラメーター、エントリが 1 つだけのクライアント制限、組織スコープの接続、またはホストの `ITenantContext.OrganizationId` による場合だけです。
-- **組織管理用の REST API はありません。** 提供されるのは `IOrganizationStore` と `IOrganizationMembershipStore` です。エンドポイントが欲しいホストは自分で構築します。組織やメンバーを一覧表示するホストは、`ListPageAsync` / `ListByOrganizationPageAsync` (後述) を使ってください。
 
 ## 組織の作成 {#creating-an-organization}
 
@@ -72,16 +69,17 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 
 ### 招待 {#invitations}
 
-`invited` の行は、`InvitedByUserId`、`InvitedAt`、そして招待された人に提示されたロールを持ちます。ライブラリが招待を送ることはありません。ライブラリがその行を `active` に昇格させる (ロール、招待者、招待日時を保持し、`JoinedAt` を記録する) のは次の 2 か所です。
+`invited` 行には `InvitedByUserId`、`InvitedAt`、被招待者に提示されたロールが入ります。管理 API は組織に誰かを招待するときにこの行を書き込みます([ユーザーを招待する](#inviting-people))。ホストが自前で書き込むこともできます。ライブラリは次の 3 つの場合に、この行を `active` に昇格させます(ロール、招待者、招待日時は保持し、`JoinedAt` を設定します)。
 
+- **招待を受け入れたとき。** 招待リンクからパスワードを設定するとメールアドレスが確認され、ライブラリのアクティベーションフックがそのユーザーの `invited` メンバーシップをすべて `active` に変更し、`organization.member.joined` を書き込みます。
 - **組織スコープの SAML または OIDC 接続によるサインイン。** 組織自身の IdP がその人を保証することで、招待が受諾されます (`FederatedOrganizationBinding`、0.30.2)。これがなければ、SSO でしかサインインしない招待者は、メンバーシップによる制限でトークンを拒否されてしまいます。
 - **自動メンバーシップ** (後述)。ユーザーが条件を満たす場合です。
 
-`suspended` の行は、どちらの経路でも決して昇格されず、サインインによって変更されることもありません。
+`suspended` 行は、これらのどの経路でも昇格されることはなく、サインインによって変更されることもありません。
 
 ### 検証済みドメインと自動メンバーシップ {#verified-domains-and-automatic-membership}
 
-`Organization.Domains` は、組織が自分のものと主張したメールのドメインを保持します。各要素は `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }` です。`Domain` は小文字に変換され、前後の空白が除かれ、末尾のドットなしで保存されます。ライブラリは主張を保存し、`VerifiedAt` を読み取ります。管理権限の証明 (通常は `VerificationToken` を含む DNS の TXT レコード) はホストの役割であり、証明に成功したらホストが `VerifiedAt` を記録します。
+`Organization.Domains` は組織が申請したメールドメインを保持します。各要素は `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }` です。`Domain` は小文字で、空白と末尾のドットなしで保存されます。管理 API は申請されたドメインを保存し、`VerificationToken` を含む DNS TXT レコードで管理権限を証明し、`VerifiedAt` を設定します([ドメインの検証](#domain-verification))。独自の検証を持つホストは、自分で `VerifiedAt` を設定できます。
 
 `Organization.AllowAutoMembership` (既定では無効) を使うと、ユーザーは招待なしで参加できます。組織が**明示的に**選択され (引き継がれたリフレッシュグラント、`organization` パラメーター、組織スコープの接続、またはまさにその組織だけに制限されたクライアント)、ユーザーが有効なメンバーシップを持っていない場合、次の条件が**すべて**満たされればユーザーはメンバーになります。
 
@@ -93,13 +91,86 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 
 ### SCIM トークンによるメンバーシップ {#membership-from-a-scim-token}
 
-`organizationId` を指定して発行された SCIM トークンは、作成するすべてのユーザーにその値を `org_id` として記録します。ID が既存の組織を指している場合、作成時にはロールなしの `active` メンバーシップも書き込まれ、`scim.organization_member_added` が監査されます。どの組織も指していない ID は単なるタグのままです。作成時のみの動作であり、後の同期でタグが付け替えられたりメンバーが追加されたりすることはありません。[SCIM](scim#tagging-a-connectors-users-with-an-organization) を参照してください。
+`organizationId` 付きで発行された SCIM トークンは、その値を作成する各ユーザーの `org_id` として刻印します。`POST /api/v1/scim/tokens` は、SSO 接続と同様に、どの組織も指さない `organizationId` を `400 unknown_organization` で拒否し(形式が不正なものは `400 invalid_request`)、管理 API で発行したトークンが、どの組織にも載っていないタグを持つことはありません。ID が組織を指す場合、作成時にロールなしの `active` メンバーシップも書き込まれ、`scim.organization_member_added` が監査に記録されます。すでに何も指さない ID を持つトークンは、単なるタグのままです。作成時のみで、その後の同期でタグの付け直しやメンバーの追加は行われません。[SCIM](scim#tagging-a-connectors-users-with-an-organization) を参照してください。
 
 ### 一覧表示と削除 {#listing-and-deleting}
 
 `IOrganizationStore.ListPageAsync(cursor, limit)` と `IOrganizationMembershipStore.ListByOrganizationPageAsync(organizationId, cursor, limit)` は 1 ページ分 (`Items` と不透明な `NextCursor`。最後のページでは null) を返します。`limit` は 1..200 の範囲に収められ、不正な形式のカーソルは `ArgumentException` をスローします。カーソルはキーセットに基づくため、読み取りの合間に行が追加・削除されても、ページがずれたり重複したりすることはありません。どちらにもページングなしの一覧に基づく既定の実装があるため、独自のストアもそのままコンパイルできます。Azure Table のストアは、サーバー側の範囲クエリでこれらをオーバーライドしています。
 
 管理用の `DELETE /api/v1/profile/{userId}`、SCIM の `DELETE /scim/v2/Users/{id}`、または SCIM の再利用の経路でユーザーを削除すると、そのユーザーが持つすべてのメンバーシップも削除されます (`IOrganizationMembershipStore` を伴う `AccountArtefactPurge.PurgeAsync`。ストアを 3 つ取るオーバーロードはメンバーシップを何も消去しません)。独自の削除経路を持つホストもメンバーシップのストアを渡さなければなりません。そうしないと、組織は削除されたメンバーを一覧に表示し続けます。
+
+## HTTP で組織を管理する {#administering-over-http}
+
+管理 API(`AdminApi:Enabled`、管理スコープ)は、組織、メンバーシップ、ドメイン、招待を管理します。[管理 API](admin-api#organizations) のページに、すべてのリクエスト、成功ステータス、エラーコードがあります。概要は次のとおりです。
+
+| ルート | 目的 |
+|---|---|
+| `GET /api/v1/organizations`、`POST /api/v1/organizations` | 一覧(ページ分割)と作成 |
+| `GET /api/v1/organizations/{idOrSlug}`、`PUT /api/v1/organizations/{id}`、`DELETE /api/v1/organizations/{id}` | 取得、更新、削除(メンバーも一緒に削除) |
+| `GET /api/v1/organizations/{id}/members`、`POST /api/v1/organizations/{id}/members`、`PUT /api/v1/organizations/{id}/members/{userId}`、`DELETE /api/v1/organizations/{id}/members/{userId}` | 一覧、追加、ステータスとロールの変更、削除 |
+| `POST /api/v1/organizations/{id}/domains`、`POST /api/v1/organizations/{id}/domains/{domain}/verify`、`DELETE /api/v1/organizations/{id}/domains/{domain}` | メールドメインの申請、証明、解放 |
+| `POST /api/v1/organizations/backfill` | 従来の `OrganizationId` の値を組織に変換 |
+| `GET /api/v1/profile/{userId}/organizations` | ユーザーが所属する組織 |
+| `POST /api/v1/profile/invite`、`POST /api/v1/profile/{userId}/resend-invite` | メールで招待、招待の再送 |
+
+失敗時は `{ "error": "<code>", "error_description": "..." }` を、`400`(入力が不正)、`404`(見つからない)、`409`(競合)、または `502`(`invite_email_failed`)で返します。
+
+## ドメインの検証 {#domain-verification}
+
+`POST /api/v1/organizations/{id}/domains` に `{ "domain": "acme.com" }` を送ると、未検証のままドメインを申請し、公開すべきレコードを添えて `201` を返します。`recordName`(`_authagonal-org.acme.com`)と `recordValue`(`authagonal-org-verify=<token>`)です。トークンは 256 ビットの乱数で、申請ごとに 1 つです。その名前に、その値とまったく同じ内容の TXT レコードを公開してから、`POST /api/v1/organizations/{id}/domains/acme.com/verify` を呼び出します。
+
+一致すると `VerifiedAt` が設定され、`organization.domain_verified` が書き込まれます。失敗は `409 verification_failed` で、`verified: false` を伴う `200` になることはなく、その説明には公開すべきレコードの名前と値、および見つかったものが記されます。検証済みのドメインを検証すると、変更なしで返されます。ドメインは、検証済みかどうかにかかわらず、最大で 1 つの組織にしか属せません(`domain_taken`)。ドメインを削除すると、今後の自動参加は止まりますが、誰も除外されません。
+
+DNS の読み取りは `ITxtResolver`(`Authagonal.Core.Services`)を経由します。`ResolveTxtAsync(name, ct)` は、ある名前に公開された TXT の値を返し、何もなければ空のリストを返し、クエリが失敗したときは例外を投げます(`verification_failed` として報告され、例外のテキストは返されません)。既定は DnsClient で実際の DNS を読み取り、1 つのレコードの文字列を 1 つの値に連結します。`TryAdd` で登録されるため、`AddAuthagonal()` より前に登録したリゾルバー(社内のもの、DNS over HTTPS など)が優先されます。
+
+## バックフィル {#backfill}
+
+組織が導入される前、`AuthUser.OrganizationId` は自由テキストでした。`POST /api/v1/organizations/backfill` は、その文字列が完全に一致するユーザーをまとめ、異なる値ごとに組織を 1 つ作成し、各ユーザーに `active`(ロールなし)のメンバーシップを作ります。スラッグは値を小文字にし、それ以外の文字の連続をハイフン 1 つにまとめたものです(衝突した場合は `-2`、`-3` と続きます)。表示名は値そのもので、組織にはメタデータキー `legacyOrganizationId` の印が付きます。本文は `{ "dryRun": true }` です。**ドライランが既定**で、本文がない場合も同様であり、何も書き込みません。
+
+再実行しても冪等です。ある値ですでに印が付いた組織は、名前が変更されていても再利用され、すでにメンバーシップを持つユーザーは `usersSkipped` に数えられます。応答には `dryRun`、`organizationsCreated`、`membershipsCreated`、`usersSkipped`、`organizations`(最初の 50 件。それぞれ `legacyValue`、`slug`、`users` を持つ)、`truncated` が含まれます。1 回の実行で走査するのは最大 50,000 ユーザーで、`truncated: true` は再実行が必要という意味です。実際の実行では `organization.backfill` が書き込まれます。
+
+## ユーザーを招待する {#inviting-people}
+
+`POST /api/v1/profile/invite` は `email`(必須)、`firstName`、`lastName`、`locale`、`organizationId`、`organizationRoles` を受け付けます。アカウントを即座に作成し(未確認で、使えるパスワードはありません)、リンクをメールで送ります。応答は `200` で `{ "userId", "email" }` です。`organizationId` を指定すると、ロール、`InvitedByUserId`(呼び出した管理者)、`InvitedAt` を持つ `invited` メンバーシップも書き込み、メールには組織名とそのブランディングが使われます([ブランディング](branding#organisation-branding-in-invitation-emails))。組織に関するすべての確認はアカウントが作られる前に行われるため、拒否された招待が孤立したユーザーを残すことはありません。招待できるのは新しいアカウントだけです。既存のアドレスは `409 user_already_exists` となり、既存のユーザーは `POST /api/v1/organizations/{id}/members` で追加します。
+
+リンクには、有効期間 7 日の 1 回限りの `password_reset` グラントが含まれ、既存の `POST /api/auth/reset-password` が引き換えます。引き換え用の別のエンドポイントはありません。パスワードを設定するとアドレスが確認され、`IAuthHook.OnEmailConfirmedAsync` が発火し、ライブラリ自身のアクティベーションフックがそのユーザーの `invited` メンバーシップをすべて `active` に変更し(ロール、招待者、招待日時は保持し、`JoinedAt` を設定)、新しいメンバーを操作者として `organization.member.joined` を書き込みます。`suspended` または `active` の行には触れず、ストアの障害はログに記録されるだけで確認を失敗させることはなく、フックは冪等です。ホストがどのようなフックを登録していても、ライブラリが `OnEmailConfirmedAsync` を発火する場所ならどこでも実行されます。
+
+`POST /api/v1/profile/{userId}/resend-invite` は新しいリンクを生成して送信します。`404 user_not_found`、アドレスが確認済みの場合は `400 already_accepted`(代わりにパスワードリセットを使用)、送信が例外を投げた場合は `502 invite_email_failed` です。最初の招待はより寛容で、送信に失敗してもログに記録されるだけで、ユーザーとリンクは存在します(招待は再送できるため)。再送された招待は、ユーザーの `invited` メンバーシップがちょうど 1 つのときに組織名を含みます。
+
+メールは `IEmailService.SendUserInviteEmailAsync(toEmail, tenantName, acceptUrl, locale, ct, organization)` を経由します。これは既定の実装を持つインターフェースメンバーで、その本体は承認リンク付きのパスワードリセットメールを送信するため、独自の `IEmailService` を持つホストでも機能するリンクが届きます。独自の招待を送るにはオーバーライドしてください。組み込みの送信者は、ライブラリが対応している場合は招待する管理者の言語(認識できる最初の `Accept-Language`、なければリクエストの `locale`)で、なければ被招待者の言語で、それもなければ英語で招待を作成します。
+
+`IInviteLinkBuilder`(`Authagonal.Core.Services`)は、リンクの宛先を決めます。`Task<string> BuildAcceptUrlAsync(string token, Organization? organization, CancellationToken ct = default)` です。既定は `{issuer}/accept-invite?p=<token>` を返し、組織への招待では `&organization=<slug>` が付き、どちらもエスケープされます。ページを別の場所(組織独自のドメインなど)で提供するには、`AddAuthagonal()` より前に独自の実装を登録してください(`TryAdd` で追加されます)。招待と再送は、すべてのリンクをこれを通じて生成します。
+
+## 招待の承認ページ {#the-accept-invite-page}
+
+ログインアプリは `/accept-invite` を、`/login` のベースパスの外側、ホストのルートで提供し、スタンドアロンサーバーの SPA フォールバックがそれを配信します。トークンを `p` から読み取り、新しいパスワードを 2 回入力させ、パスワードポリシーで検証して `/api/auth/reset-password` に送信します。リンクに `organization` が含まれていると、ページはその組織の名前を表示します。ホストのブートデータ(`getOrganization()`)が同じ組織を保持していれば表示名で、そうでなければリンクのスラッグで表示され、スタンドアロンサーバーが表示するのはこのスラッグです。トークンがないリンクでは、「無効または期限切れ」というメッセージが表示され、フォームは表示されません。不明または期限切れのトークンでは、パスワードの送信時に同じメッセージが表示されます。サーバーが拒否したパスワード(`weak_password`)では、サーバーのメッセージが表示されます。文言は 11 言語すべてに用意されています。npm パッケージをベースにしたホストは、`@authagonal/login` から `AcceptInvite` をインポートして `/accept-invite` にマウントします。
+
+## コードからサービスを呼び出す {#calling-the-services-from-code}
+
+エンドポイントは薄く作られています。`OrganizationOperations` と `UserInviteOperations`(`Authagonal.Server.Services`、スコープ付きで `TryAdd` により登録)がすべてのルール、エラーコード、監査行を担うため、ホスト独自の画面(ポータルのルートやツール)からこれらを呼び出して、同じ行を書き込めます。`OrganizationOperations` には `ListPageAsync`、`GetAsync`、`CreateAsync`、`UpdateAsync`、`DeleteAsync`、`ListMembersPageAsync`、`AddMemberAsync`、`UpdateMemberAsync`、`RemoveMemberAsync`、`AddDomainAsync`、`VerifyDomainAsync`、`RemoveDomainAsync`、`ListUserOrganizationsAsync`、`BackfillAsync` があり、`UserInviteOperations` には `InviteAsync` と `ResendInviteAsync` があります。監査の操作者は文字列として受け取り、HTTP の型は一切使いません。誰がこれらを呼び出せるか(誰が組織に招待できるか、招待をどのくらいの頻度で再送できるか)は、ホストのポリシーです。
+
+それぞれ `OperationResult<T>` を返します。`Outcome`(`Ok`、`Invalid`、`NotFound`、`Conflict`、`Failed` のいずれか)、`Value`、`Error`(コード)、`Message`、`Fields`、`Succeeded` です。管理 API は結果を `400`、`404`、`409`、`502` に対応付けます。一覧は `ResultPage<T>`(`Items` と `NextCursor`)を返します。`ListUserOrganizationsAsync` と `BackfillAsync` は値をそのまま返します。
+
+## 監査アクション {#audit-actions}
+
+すべての書き込みは `IAuditLogger` を通り、エンティティ種別は `organization`(最後の 2 つは `user`)、操作者は呼び出した管理者の subject です。
+
+| アクション | 書き込まれるとき | 詳細 |
+|---|---|---|
+| `organization.created` | 組織が作成されたとき | スラッグ |
+| `organization.updated` | 組織が更新されたとき | スラッグ |
+| `organization.deleted` | 組織が削除されたとき | スラッグ |
+| `organization.member.added` | メンバーが追加されたとき | `user=<userId>` |
+| `organization.member.updated` | メンバーのステータスまたはロールが変更されたとき | `user=<userId>` |
+| `organization.member.removed` | メンバーが削除されたとき | `user=<userId>` |
+| `organization.member.invited` | 招待によって `invited` メンバーシップが作られたとき | `user=<userId>` |
+| `organization.member.joined` | メール確認時に `invited` メンバーシップが `active` になったとき(操作者はそのユーザー) | `user=<userId>` |
+| `organization.domain_added` | ドメインが申請されたとき | `domain=<domain>` |
+| `organization.domain_verified` | ドメインが証明されたとき | `domain=<domain>` |
+| `organization.domain_removed` | ドメインが解放されたとき | `domain=<domain>` |
+| `organization.backfill` | ドライランではないバックフィル | `organizationsCreated=<n> membershipsCreated=<n>` |
+| `user.invited` | 誰かが招待されたとき | ローカル部をマスクしたアドレス(`***@acme.com`) |
+| `user.invite_resent` | 招待が再送されたとき | 同上 |
 
 ## 組織スコープのロール {#organization-scoped-roles}
 
@@ -168,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 各エントリは組織 ID の形式 `^[A-Za-z0-9._~-]{1,200}$` に一致しなければなりません。空または不正な形式のエントリに対して、管理 API は `400 invalid_request` を返します。どの `organization` パラメーターでも送信できない ID を列挙した制限は何にも一致せず、何にも一致しない制限はすべてのリクエストを拒否するからです。`null` のリストは空に正規化されます。
 
 空 (既存のすべてのクライアントがこれです) は制限なしを意味します。組織がリストにないリクエストは `access_denied` で拒否されます。エントリが 1 つのリストは、前述のルール 4 により選択も兼ねます。複数のエントリを持つリストは制限はしますが選択はしません。リクエストはそのうちの 1 つを指定しなければならず、指定しなければ `account_selection_required` で拒否されます。
+
+## ログインページでの組織 {#organizations-on-the-login-page}
+
+誰もサインインしていない段階ではユーザーが存在しないため、ログインページは、どの組織向けのページかをリクエストそのものから判断する必要があります。`PreAuthOrganizationResolver` は、ログインページについて次の順序でこれを行い、組織を特定した最初のルールが採用されます。
+
+1. **権威あるホストの固定。** ホストがリクエストのドメインを 1 つの組織に固定し、その固定を権威あるものとして示している場合です ([ホストを組織に固定する](#pinning-a-host-to-an-organization)を参照)。存在する組織を指さない固定 (削除された組織など) は固定として扱われません。解決は次のルールへ進みます。ログインページではこれは何も記録されずに行われ、警告がログに記録されるのは `/connect/authorize` と `/connect/par` での強制の場合だけです。
+2. **`/accept-invite` の場合に限り、`organization`。**
+3. **認可リクエストの組織**: `returnUrl` のクエリにある `organization`、`org_slug`、`org_id`、またはその `request_uri` が指すプッシュ済みリクエストの内部にあるもの。後者の場合、そのリクエストのパラメーターとクライアントが外側のものに置き換わります。
+4. **有効なクライアントの `RestrictedToOrganizationIds` にある唯一のエントリ。**
+5. **権威のない固定**。最後に評価されます。
+
+すべての名前は、[認可リクエストで組織を選択する](#selecting-an-organization-on-an-authorization-request)と同様に、まずスラッグとして、次に ID として解決されます。この解決では組織が有効かどうかは確認しません。そのため、無効化された組織のログインページもブランディングを表示しますが、認可エンドポイントは引き続きその組織を拒否します。失敗はすべて「組織なし」として扱われ、エラーページになることはありません。
+
+### ホストを組織に固定する {#pinning-a-host-to-an-organization}
+
+ホストは、`ITenantContext.OrganizationIdIsAuthoritative` (既定値が `false` の既定インターフェイスメンバー) から `true` を返すことで、リクエストに対して解決した組織を権威あるものとして示します。固定が権威あるものになるのは、これが `true` で、かつ `OrganizationId` が空でない場合に限られます。どちらも設定しないホストはこれまでどおり動作し、固定は上記のルール 5 のとおり最後に評価されます。
+
+スタンドアロンサーバーにコードは不要です。`Organizations:PinnedHosts` の下で、各ホスト名を組織の **ID** (スラッグではありません) に対応付けます。
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+ファイルを使わない場合:
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+ホストはリクエストのホスト名と大文字小文字を区別せずに比較され、ポートは無視されます。一致するエントリは `OrganizationId` を設定し、それを権威あるものにします。エントリもセクションもない場合は何も変わりません。どの組織も指さない ID は宙に浮いた固定であり、上記のとおり扱われます。
+
+### 権威ある固定が強制すること {#what-an-authoritative-pin-enforces}
+
+権威ある固定の下では、`/connect/authorize` と `POST /connect/par` (他のエンドポイントは対象外) が固定された組織に制限されます。
+
+- 組織を指定しないリクエスト (`organization`、`org_slug`、`org_id` のいずれもない) には、`organization=<固定された ID>` が追加されます。通常はクエリに、PAR ではフォーム本文に追加されます。`request_uri` を含む認可リクエストはそのままです。
+- 固定された組織を (スラッグまたは ID で) 指定するリクエストは通ります。
+- それ以外の組織、または存在しない組織を指定するリクエストは拒否され、リダイレクトされることはありません。
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR は、本文が `application/x-www-form-urlencoded` の場合にのみ読み取られ、それ以外の本文は拒否されます。宣言された長さが 32 KiB を超える場合はエンドポイントに任され、413 が返ります。長さが宣言されていない本文は 32 KiB まで読み取られ、それを超えると拒否されます。本文は読み取り後に元に戻されます。
+
+組織が選ばれた後にエンドポイントがすでに行っていた拒否 (メンバーシップがない、クライアント制限、無効化された組織) は変わりません。
+
+### 組織のブランディング {#organization-branding}
+
+`Organization.BrandingJson` は、`OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` によって、テナントのブランディングの上にフィールド単位でマージされます。新しい `JsonObject` を返し、入力は変更しません。ルールは次のとおりです。
+
+- null または存在しないキーは、テナントの値を継承します。
+- 不明なキーは無視されます。キーは大文字小文字を区別せずに照合されます。
+- キーに対して JSON の種類が誤っている値は、そのキーに限ってテナントの値が維持されます。
+- `languages` はテナントのリストを置き換えます。マージはされません。
+- 不正な形式、または JSON オブジェクトではない `BrandingJson` は、テナントのブランディングになります。
+- `showRegistration` は組織では設定できません。常にテナントの値が維持されます。
+
+組織が設定できるキーは、ログインアプリのブランディングオプション ([ブランディング](branding)を参照) と、5 つのメールの色 (`emailBg`、`emailHeaderColor`、`emailCardBg`、`emailFooterColor`、`emailLogoBg`) です。
+
+### ログインのブートペイロード {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` はログインページ向けの解決を 1 回行い、`{ branding, providers, organization }` を返します。マージ済みのブランディング (組織が解決されなかった場合はテナントのもの)、その組織のプロバイダー一覧、そして `{ id, slug, name }` または `null` としての `organization` です。`MapAuthagonalLoginFallback()` は、このペイロードを `<script type="application/json" id="authagonal-boot">` として `</head>` の直前にインラインで埋め込んだログインアプリの `index.html` を返します。スタンドアロンサーバーはこれを呼び出します。[ブランディング](branding#organisation-name)を参照してください。
 
 ## クレーム {#the-claims}
 

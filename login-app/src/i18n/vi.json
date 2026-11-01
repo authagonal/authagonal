@@ -171,5 +171,15 @@
   "account.saving": "Đang lưu…",
   "emailVerified": "Hộp thư điện tử đã được xác thực; hãy đăng nhập để tiếp tục.",
   "accountCreated": "Tài khoản đã được tạo – hãy đăng nhập để tiếp tục.",
-  "oidcErrorGeneric": "Không thể hoàn tất đăng nhập. Vui lòng thử lại."
+  "oidcErrorGeneric": "Không thể hoàn tất đăng nhập. Vui lòng thử lại.",
+  "invite.title": "Thiết lập tài khoản của bạn",
+  "invite.titleOrganization": "Tham gia {{organization}}",
+  "invite.intro": "Chọn một mật khẩu để hoàn tất thiết lập tài khoản của bạn.",
+  "invite.introOrganization": "Bạn đã được mời tham gia {{organization}}. Chọn một mật khẩu để hoàn tất thiết lập tài khoản của bạn.",
+  "invite.button": "Tạo tài khoản",
+  "invite.creating": "Đang thiết lập…",
+  "invite.successTitle": "Bạn đã sẵn sàng",
+  "invite.successMessage": "Mật khẩu của bạn đã được thiết lập. Bạn có thể đăng nhập ngay bây giờ.",
+  "invite.invalidTitle": "Lời mời không hợp lệ",
+  "invite.invalidMessage": "Liên kết lời mời này không hợp lệ hoặc đã hết hạn. Hãy nhờ người đã mời bạn gửi một liên kết mới."
 }

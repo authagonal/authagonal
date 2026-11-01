@@ -29,14 +29,34 @@ locale: ja
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
-リクエストがどの組織にも解決されなかった場合 (シングルテナントのデプロイや、このホストにカスタムドメインの固定がないデプロイ)、`organization` は `null` になります (またはメンバー自体が存在しません)。このライブラリ自体は、匿名の認証前リクエストに対して組織を解決しません (`OrganizationSelector` にはサインイン済みの `AuthUser` が必要です)。独自の認証前の解決手段を持つホスト (Authagonal Cloud はカスタムドメインごとに 1 つの組織を固定します) は、ブートペイロードを組み立てる際に `organization` を設定します。
+リクエストがどの組織にも解決されなかった場合 (シングルテナントのデプロイや、このホストにカスタムドメインの固定がないデプロイ)、`organization` は `null` になります (またはメンバー自体が存在しません)。ライブラリ自体が、匿名の認証前リクエストに対して組織を解決します。順序は [組織](organizations#organizations-on-the-login-page)に記載のとおりで、まず権威あるホストの固定、次に認可リクエストの組織、次にエントリが 1 つだけのクライアント制限です。独自の認証前の解決手段を持つホスト (Authagonal Cloud はカスタムドメインごとに 1 つの組織を固定します) は、`ITenantContext` (`OrganizationId` と `OrganizationIdIsAuthoritative`) でその固定を設定します。これは `LoginBootPayloadBuilder.BuildAsync` が `PreAuthOrganizationResolver` を通じて解決します。あるいは、自分で `LoginBootPayload` レコードを構築して `LoginBootPayloadBuilder.InjectIntoShell` に渡します。`BuildAsync` は組織の引数を取りません。
 
 `organization.name` が存在し、かつ `branding.appName` と異なる場合 (大文字小文字を区別せず、前後の空白を除いて比較するため、テナントと同じ名前の組織で「Acme / Acmeにサインインしています」のような表示にはなりません)、ログインカードは見出しの下に「{name}にサインインしています」というサブタイトルを表示します (`data-testid="login-org-name"`、i18n キー `login.signingInTo`)。これは共有の `AuthLayout` ヘッダーで 1 回だけ描画されるため、それを通じてマウントされるすべてのルート (サインイン、登録、パスワードを忘れた場合/リセット、MFA のチャレンジとセットアップのページ、デバイスページ、同意とエージェント同意、グラント、アカウント) で同じように表示されます。`organization` が存在しない、`null` である、またはその名前が `branding.appName` と一致する場合は何も描画されず、ヘッダーは通常の余白を保ちます。
+
+## 組織のブランディング {#organisation-branding}
+
+リクエストが組織に解決される場合、その組織の `BrandingJson` がテナントのブランディングの上にフィールド単位でマージされ、その結果がブートペイロードの `branding` メンバーになります。null または存在しないフィールドはテナントの値を継承し、不明なキーは無視され、種類が誤っている値はそのキーについてテナントの値が維持され、`languages` はテナントのリストを置き換え、不正な形式のドキュメントはテナントのブランディングをそのまま返します。組織は `showRegistration` を設定できません。ルールは [組織](organizations#organization-branding) (`OrganizationBranding.Merge`) にあります。
+
+スタンドアロンサーバーは、ログインのルート (`/login`、`/accept-invite`、その他の SPA ルート) に対して `LoginBootPayloadBuilder` でブートペイロードを構築し (ルートそのもの `/` はペイロードなしのプレーンな `index.html` として返されるため、組織は表示されません)、`MapAuthagonalLoginFallback()` がそれを `<script type="application/json" id="authagonal-boot">` として `</head>` の直前にインラインで埋め込みます。`branding.json` はリクエストのたびに再読み込みされるため、マウントしたファイルの編集は即座に反映されます。ファイルが存在しない、または不正な形式の場合は `{}` として扱われます (不正な形式の場合は警告が出ます)。何かが失敗した場合はプレーンな `index.html` が返され、SPA はこれまでどおり `/branding.json` を取得します。
+
+## 招待メールでの組織のブランディング {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` は、ホストが所有する JSON オブジェクトです。ライブラリはこれを、ログインページ([上記](#organisation-branding))に加えて、招待メール(`IEmailService.SendUserInviteEmailAsync`、[組織](organizations#inviting-people)を参照)でも読み取ります。組織への招待では、組み込みの送信者がそこから `appName`、`logoUrl`、`primaryColor` を、メール自体の既定値(`Authagonal`、ロゴなし、`#2563eb`。ログインアプリの既定値)の上にフィールドごとに取り込みます。存在しない、空、または文字列でないフィールドは未設定として扱われます。ロゴは絶対 `https` URL、色は単純な CSS の色(16 進、`rgb()`/`hsl()`、またはキーワード)である必要があり、そうでなければ同様に未設定として扱われます。不正な JSON は無視されます。組織のブランディングが原因で招待が拒否されることはありません。
+
+件名は、ローカライズされた招待のタイトルとアプリ名で、本文には組織名が入り、すべての値は HTML エンコードされます。単純な招待(組織なし)は既定値を使い、送信者の名前(`Email:SenderName`、なければ `Authagonal`)を表示します。
+
+独自の `IEmailService` を持つホストには影響しません。インターフェースの既定の `SendUserInviteEmailAsync` は、承認リンク付きのパスワードリセットメールを送信します。独自のブランディングを施した招待を送るには、オーバーライドしてください。リンクが開くページ `/accept-invite` はログインアプリの一部で、他のページと同様にテナントの `branding.json` を使用し、その上に `organization` パラメーターで指定された組織のブランディングがマージされます([上記](#organisation-branding))。
 
 ## 設定 {#configuration}
 

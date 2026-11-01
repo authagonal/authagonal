@@ -242,6 +242,50 @@ Content-Type: application/json
 DELETE /api/v1/profile/{userId}/identities/{provider}/{externalUserId}
 ```
 
+### Liệt kê tổ chức của một người dùng {#list-a-users-organizations}
+
+```
+GET /api/v1/profile/{userId}/organizations
+```
+
+Trả về `{ "items": [ { "organizationId", "slug", "name", "status", "roles" } ] }`: mọi tổ chức mà người dùng có tư cách thành viên, ở bất kỳ trạng thái nào. Một tư cách thành viên mà tổ chức không còn tồn tại sẽ bị bỏ qua.
+
+### Mời người dùng {#invite-user}
+
+```
+POST /api/v1/profile/invite
+Content-Type: application/json
+
+{
+  "email": "ada@acme.com",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "locale": "en",
+  "organizationId": "org_0123456789abcdef0123456789abcdef",
+  "organizationRoles": ["Auditor"]
+}
+```
+
+Chỉ `email` là bắt buộc. Tạo tài khoản (chưa xác nhận, chưa có mật khẩu dùng được) và gửi qua email một liên kết dùng một lần, có hiệu lực 7 ngày, tới `/accept-invite`. Với `organizationId` (id của tổ chức, không phải slug), lời mời là vào tổ chức đó: một tư cách thành viên `invited` được ghi với `organizationRoles`, chuyển sang `active` khi người được mời đặt mật khẩu. Email được soạn bằng `Accept-Language` đầu tiên trong yêu cầu của bạn mà thư viện có, nếu không thì bằng `locale`, và nếu không nữa thì bằng tiếng Anh. Xem [Tổ chức](organizations#inviting-people).
+
+Trả về `200` với `{ "userId": "...", "email": "ada@acme.com" }` (địa chỉ viết thường). Lỗi là `{ "error", "error_description" }`:
+
+| Trạng thái | `error` | Khi nào |
+|---|---|---|
+| 400 | `email_required` | thiếu `email` hoặc để trống |
+| 400 | `invalid_email` | `email` không phải địa chỉ dùng được |
+| 400 | `invalid_role` | một vai trò của tổ chức bắt đầu bằng `tenant:` hoặc `platform:` |
+| 404 | `organization_not_found` | `organizationId` không trỏ tới tổ chức nào |
+| 409 | `user_already_exists` | địa chỉ đã có tài khoản |
+
+### Gửi lại lời mời {#resend-invite}
+
+```
+POST /api/v1/profile/{userId}/resend-invite
+```
+
+Tạo một liên kết mới và gửi đi. Trả về `200` với `{ "sent": true }`. `404 user_not_found` với người dùng không rõ, `400 already_accepted` sau khi địa chỉ đã được xác nhận (hãy dùng đặt lại mật khẩu), và `502 invite_email_failed` khi không thể gửi email.
+
 ## Quản lý MFA {#mfa-management}
 
 ### Lấy trạng thái MFA {#get-mfa-status}
@@ -494,6 +538,167 @@ không đánh chỉ mục thành viên vai trò, cũng vì lý do đó: một da
 Các tài khoản được ghi trước khi có chỉ mục sẽ vô hình với nó cho tới khi được đánh chỉ mục lại
 (`IUserStore.ReindexUserAsync`, phương thức này upsert tư cách thành viên của người dùng mà không xóa bất kỳ mục nào).
 
+## Tổ chức {#organizations}
+
+Tổ chức, thành viên và miền email của chúng (xem [Tổ chức](organizations) để biết ý nghĩa). Lỗi có dạng `{ "error": "<code>", "error_description": "..." }` với trạng thái `400` (đầu vào không hợp lệ), `404` (không tìm thấy) hoặc `409` (xung đột).
+
+Danh sách được phân trang bằng `?cursor={cursor}&limit={limit}`: `limit` bị giới hạn trong 1..200 (mặc định 50) và phản hồi là `{ "items": [...], "nextCursor": "..." }`, với `nextCursor` là null ở trang cuối. Hãy gửi lại `nextCursor` nguyên vẹn; một cursor mà danh sách không phát ra là `400 invalid_cursor`.
+
+Một tổ chức có dạng `{ "id", "slug", "name", "brandingJson", "metadata", "enabled", "requireMembershipForTokens", "allowAutoMembership", "createdAt", "updatedAt", "domains" }`.
+
+### Liệt kê tổ chức {#list-organizations}
+
+```
+GET /api/v1/organizations?cursor={cursor}&limit={limit}
+```
+
+`200`, sắp xếp theo id. `400 invalid_cursor`.
+
+### Tạo tổ chức {#create-organization}
+
+```
+POST /api/v1/organizations
+Content-Type: application/json
+
+{
+  "slug": "acme",
+  "name": "Acme Corp",
+  "brandingJson": "{\"appName\":\"Acme\",\"primaryColor\":\"#1a56db\"}",
+  "enabled": true,
+  "requireMembershipForTokens": true,
+  "allowAutoMembership": false,
+  "metadata": { "plan": "enterprise" }
+}
+```
+
+`slug` và `name` là bắt buộc; phần còn lại là tùy chọn và giữ giá trị mặc định của tổ chức nếu bỏ qua. `brandingJson` là một chuỗi chứa đối tượng JSON. Trả về `201` cùng header `Location` và tổ chức; `id` của nó là `org_` theo sau là 32 chữ số thập lục phân.
+
+| Trạng thái | `error` | Khi nào |
+|---|---|---|
+| 400 | `slug_required` | thiếu `slug` hoặc để trống |
+| 400 | `slug_invalid` | `slug` không phải 1 đến 64 chữ thường, chữ số và dấu gạch ngang ở giữa |
+| 400 | `name_required` | thiếu `name` hoặc để trống |
+| 400 | `invalid_branding_json` | `brandingJson` không phải đối tượng JSON |
+| 409 | `slug_taken` | tổ chức khác đã có giá trị này làm slug hoặc id, kể cả khi tạo đồng thời |
+
+### Lấy một tổ chức {#get-organization}
+
+```
+GET /api/v1/organizations/{idOrSlug}
+```
+
+`200`, tìm theo id trước rồi theo slug. `404 organization_not_found`.
+
+### Cập nhật tổ chức {#update-organization}
+
+```
+PUT /api/v1/organizations/{id}
+Content-Type: application/json
+
+{ "name": "Acme Corporation", "enabled": true }
+```
+
+Mọi trường đều tùy chọn và chỉ thay đổi chính nó: `name`, `brandingJson`, `enabled`, `requireMembershipForTokens`, `allowAutoMembership` và `metadata` (được thay thế hoàn toàn; `{}` xóa mọi khóa trừ `legacyOrganizationId`, khóa do backfill ghi và tồn tại sau mọi lần thay thế). `slug` chỉ được chấp nhận để từ chối khi khác giá trị hiện có. Trả về `200` cùng tổ chức. `404 organization_not_found`, `400 slug_immutable`, `400 invalid_branding_json`.
+
+### Xóa tổ chức {#delete-organization}
+
+```
+DELETE /api/v1/organizations/{id}
+```
+
+Xóa mọi tư cách thành viên rồi xóa tổ chức. `204`; `404 organization_not_found`.
+
+### Liệt kê thành viên {#list-members}
+
+```
+GET /api/v1/organizations/{id}/members?cursor={cursor}&limit={limit}
+```
+
+Một trang, sắp xếp theo id người dùng, gồm `{ "organizationId", "userId", "email", "name", "status", "roles", "createdAt", "updatedAt" }`; `email` và `name` lấy từ bản ghi người dùng và là null khi bản ghi không còn. `404 organization_not_found`, `400 invalid_cursor`.
+
+### Thêm thành viên {#add-member}
+
+```
+POST /api/v1/organizations/{id}/members
+Content-Type: application/json
+
+{ "userId": "user-id", "status": "active", "roles": ["Auditor"] }
+```
+
+Chỉ định một người dùng đã có bằng `userId` (được kiểm tra trước) hoặc `email`. `status` là `invited`, `active` (mặc định) hoặc `suspended`; `roles` là tùy chọn. Trả về `201` cùng header `Location` và tư cách thành viên.
+
+| Trạng thái | `error` | Khi nào |
+|---|---|---|
+| 404 | `organization_not_found` | không có tổ chức đó |
+| 404 | `user_not_found` | cả `userId` lẫn `email` đều không trỏ tới người dùng nào |
+| 409 | `membership_exists` | người dùng đã là thành viên |
+| 400 | `invalid_role` | một vai trò bắt đầu bằng `tenant:` hoặc `platform:` |
+| 400 | `invalid_status` | `status` không phải một trong ba giá trị |
+
+### Cập nhật thành viên {#update-member}
+
+```
+PUT /api/v1/organizations/{id}/members/{userId}
+Content-Type: application/json
+
+{ "status": "suspended", "roles": [] }
+```
+
+Cả hai trường đều tùy chọn. Trả về `200` cùng tư cách thành viên. `404 membership_not_found`, `400 invalid_status`, `400 invalid_role`.
+
+### Gỡ thành viên {#remove-member}
+
+```
+DELETE /api/v1/organizations/{id}/members/{userId}
+```
+
+`204`; `404 membership_not_found`.
+
+### Thêm miền {#add-domain}
+
+```
+POST /api/v1/organizations/{id}/domains
+Content-Type: application/json
+
+{ "domain": "acme.com" }
+```
+
+Đăng ký miền, chưa xác minh. Miền được chuyển thành chữ thường và cắt khoảng trắng trước, và phải là một tên đơn giản như `acme.com`. Trả về `201` cùng header `Location` và `{ "domain", "verified", "verifiedAt", "createdAt", "recordName", "recordValue" }`; hãy công bố một bản ghi TXT tại `recordName` với giá trị `recordValue` (xem [Xác minh miền](organizations#domain-verification)).
+
+| Trạng thái | `error` | Khi nào |
+|---|---|---|
+| 404 | `organization_not_found` | không có tổ chức đó |
+| 400 | `domain_invalid` | không phải tên miền đơn giản |
+| 409 | `domain_exists` | tổ chức này đã đăng ký nó |
+| 409 | `domain_taken` | tổ chức khác đã đăng ký, dù đã xác minh hay chưa |
+
+### Xác minh miền {#verify-domain}
+
+```
+POST /api/v1/organizations/{id}/domains/{domain}/verify
+```
+
+Truy vấn bản ghi TXT. Trả về `200` cùng miền (`verified: true`), kể cả khi nó đã được xác minh. `404 organization_not_found`, `404 domain_not_found`, `409 domain_taken`, và `409 verification_failed` khi bản ghi thiếu hoặc sai; `error_description` của nó nêu tên và giá trị cần công bố cùng những gì đã tìm thấy.
+
+### Gỡ miền {#remove-domain}
+
+```
+DELETE /api/v1/organizations/{id}/domains/{domain}
+```
+
+`204`. Thành viên không bị đụng tới. `404 organization_not_found`, `404 domain_not_found`.
+
+### Tạo tổ chức bằng backfill {#backfill-organizations}
+
+```
+POST /api/v1/organizations/backfill
+Content-Type: application/json
+
+{ "dryRun": true }
+```
+
+Tạo tổ chức và tư cách thành viên từ `OrganizationId` cũ của người dùng. `dryRun` mặc định là true, có hay không có thân, và khi đó không ghi gì. Trả về `200` với `{ "dryRun", "organizationsCreated", "membershipsCreated", "usersSkipped", "organizations": [ { "legacyValue", "slug", "users" } ], "truncated" }`. Xem [Backfill](organizations#backfill).
+
 ## SCIM token {#scim-tokens}
 
 ### Tạo token {#generate-token}
@@ -510,6 +715,8 @@ Content-Type: application/json
 ```
 
 `description` và `expiresInDays` là tùy chọn (bỏ `expiresInDays` để có token không hết hạn). Trả về token thô một lần duy nhất. Hãy lưu giữ nó an toàn, không thể lấy lại token này.
+
+`organizationId` là tùy chọn và gắn nhãn cho mọi người dùng mà token tạo ra (xem [Tổ chức](organizations#membership-from-a-scim-token)). Nó phải trỏ tới một tổ chức đã có: nếu không kết quả là `400 unknown_organization`, và giá trị sai định dạng cho `400 invalid_request`.
 
 ### Liệt kê token {#list-tokens}
 
