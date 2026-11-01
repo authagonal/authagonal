@@ -118,6 +118,14 @@ Consulte [Extensibilidade](extensibility) para todos os pontos de substituição
 
 O remetente [Resend](https://resend.com) integrado é ativado automaticamente quando `Email:ResendApiKey` e `Email:SenderEmail` estão configurados, sem necessidade de registar nenhum serviço. Sem nenhum `IEmailService`, os emails de verificação e de redefinição da palavra-passe são **descartados sem aviso** e, como o início de sessão exige, por predefinição, um email confirmado, os utilizadores que se registaram por si próprios nunca conseguem iniciar sessão (`UseAuthagonal` regista um aviso no arranque). Defina as chaves `Email:*`, registe o seu próprio `IEmailService` antes de `AddAuthagonal()` ou indique os seus domínios em `Auth:AutoConfirmEmailDomains` para saltar a verificação (apenas em desenvolvimento/testes). Consulte [Configuração → Email](configuration#email).
 
+### Organizações e convites {#organizations-and-invitations}
+
+`AddAuthagonal()` registra tudo de que a API de administração de organizações precisa, então um host que não altera nada a obtém junto com o restante da API de administração (`AdminApi:Enabled`): `/api/v1/organizations` e as rotas de convite `/api/v1/profile/invite` e `/api/v1/profile/{userId}/resend-invite`. Organizações e associações precisam de um armazenamento durável; todo provedor inclui um e, no Azure Table Storage, nada mais é necessário. Veja [Organizações](organizations).
+
+- **O link do convite abre `/accept-invite` no emissor.** O fallback de SPA do servidor autônomo a serve. Um host que monte por conta própria a SPA de login deve servir o aplicativo na raiz do host para que `/accept-invite` o alcance fora do caminho base `/login`, ou importar `AcceptInvite` de `@authagonal/login` e rotear para ele. Para que o link aponte para outro lugar, registre o seu próprio `IInviteLinkBuilder` antes de `AddAuthagonal()`.
+- **Os convites precisam de um remetente de e-mail.** O remetente integrado do Resend os envia assim que `Email:ResendApiKey` e `Email:SenderEmail` estão configurados. Um host com o próprio `IEmailService` sobrescreve `SendUserInviteEmailAsync`; sem sobrescrita, o convidado recebe o e-mail de redefinição de senha com o link de aceitação.
+- **A verificação de domínios lê o DNS** por meio de `ITxtResolver`; registre o seu antes de `AddAuthagonal()` para usar outro resolvedor.
+
 ## Backend SQL {#sql-backend}
 
 Para executar na sua própria base de dados em vez de num serviço na cloud, referencie `Authagonal.SqlProvider` e registe-o **antes** de `AddAuthagonal()`: são esses registos que fazem com que `AddAuthagonal()` ignore a sua ligação ao Azure Table Storage:

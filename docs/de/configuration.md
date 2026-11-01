@@ -515,6 +515,7 @@ Der eingebaute E-Mail-Versand verwendet [Resend](https://resend.com) und **wird 
 | Einstellung | Beschreibung |
 |---|---|
 | `Email:ResendApiKey` | Resend-API-Schlüssel. Ist er gesetzt, wird der eingebaute Resend-Versand verwendet. |
+| `Email:ResendApiUrl` | Der Endpunkt, an den der eingebaute Resend-Versand sendet. Standard ist `https://api.resend.com/emails`. Setzen Sie ihn, um über ein eigenes Relay zu senden. Er wird nur aus der Konfiguration gelesen, nie aus einer Admin-API oder einer Anfrage. |
 | `Email:SenderEmail` | E-Mail-Adresse des Absenders |
 | `Email:SenderName` | Anzeigename des Absenders (Standard ist `"Authagonal"`) |
 

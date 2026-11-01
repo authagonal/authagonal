@@ -241,6 +241,50 @@ Content-Type: application/json
 DELETE /api/v1/profile/{userId}/identities/{provider}/{externalUserId}
 ```
 
+### List a User's Organizations
+
+```
+GET /api/v1/profile/{userId}/organizations
+```
+
+Returns `{ "items": [ { "organizationId", "slug", "name", "status", "roles" } ] }`: every organization the user holds a membership of, whatever its status. A membership whose organization no longer exists is skipped.
+
+### Invite User
+
+```
+POST /api/v1/profile/invite
+Content-Type: application/json
+
+{
+  "email": "ada@acme.com",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "locale": "en",
+  "organizationId": "org_0123456789abcdef0123456789abcdef",
+  "organizationRoles": ["Auditor"]
+}
+```
+
+Only `email` is required. Creates the account (unconfirmed, no usable password) and emails a single-use link, valid for 7 days, to `/accept-invite`. With `organizationId` (the organization's id, not its slug) the invite is into that organization: an `invited` membership carrying `organizationRoles` is written, and it becomes `active` when the invitee sets a password. The email is written in the first `Accept-Language` of your request that the library ships, else `locale`, else English. See [Organizations](organizations#inviting-people).
+
+Returns `200` with `{ "userId": "...", "email": "ada@acme.com" }` (the address lowercased). A failure is `{ "error", "error_description" }`:
+
+| Status | `error` | When |
+|---|---|---|
+| 400 | `email_required` | `email` is missing or blank |
+| 400 | `invalid_email` | `email` is not a usable address |
+| 400 | `invalid_role` | an organization role begins `tenant:` or `platform:` |
+| 404 | `organization_not_found` | `organizationId` names no organization |
+| 409 | `user_already_exists` | the address already has an account |
+
+### Resend Invite
+
+```
+POST /api/v1/profile/{userId}/resend-invite
+```
+
+Mints a fresh link and sends it. Returns `200` with `{ "sent": true }`. `404 user_not_found` for an unknown user, `400 already_accepted` once the address is confirmed (use a password reset), and `502 invite_email_failed` when the email cannot be sent.
+
 ## MFA Management
 
 ### Get MFA Status
@@ -493,6 +537,167 @@ store does not index role membership, for the same reason: an empty membership l
 Accounts written before the index existed are invisible to it until reindexed
 (`IUserStore.ReindexUserAsync`, which upserts a user's memberships without removing any).
 
+## Organizations
+
+Organizations, their members and their email domains (see [Organizations](organizations) for what they mean). Failures are `{ "error": "<code>", "error_description": "..." }` with status `400` (invalid input), `404` (not found) or `409` (conflict).
+
+Lists are paged with `?cursor={cursor}&limit={limit}`: `limit` is clamped to 1..200 (default 50), and the answer is `{ "items": [...], "nextCursor": "..." }` with a null `nextCursor` on the last page. Pass `nextCursor` back unchanged; a cursor the listing did not issue is `400 invalid_cursor`.
+
+An organization is `{ "id", "slug", "name", "brandingJson", "metadata", "enabled", "requireMembershipForTokens", "allowAutoMembership", "createdAt", "updatedAt", "domains" }`.
+
+### List Organizations
+
+```
+GET /api/v1/organizations?cursor={cursor}&limit={limit}
+```
+
+`200`, in id order. `400 invalid_cursor`.
+
+### Create Organization
+
+```
+POST /api/v1/organizations
+Content-Type: application/json
+
+{
+  "slug": "acme",
+  "name": "Acme Corp",
+  "brandingJson": "{\"appName\":\"Acme\",\"primaryColor\":\"#1a56db\"}",
+  "enabled": true,
+  "requireMembershipForTokens": true,
+  "allowAutoMembership": false,
+  "metadata": { "plan": "enterprise" }
+}
+```
+
+`slug` and `name` are required; the rest is optional and keeps the organization's own default when omitted. `brandingJson` is a string holding a JSON object. Returns `201` with a `Location` header and the organization; its `id` is `org_` followed by 32 hex digits.
+
+| Status | `error` | When |
+|---|---|---|
+| 400 | `slug_required` | `slug` is missing or blank |
+| 400 | `slug_invalid` | `slug` is not 1 to 64 lowercase letters, digits and interior hyphens |
+| 400 | `name_required` | `name` is missing or blank |
+| 400 | `invalid_branding_json` | `brandingJson` is not a JSON object |
+| 409 | `slug_taken` | another organization holds the value as its slug or its id, including a concurrent create |
+
+### Get Organization
+
+```
+GET /api/v1/organizations/{idOrSlug}
+```
+
+`200`, looked up by id and then by slug. `404 organization_not_found`.
+
+### Update Organization
+
+```
+PUT /api/v1/organizations/{id}
+Content-Type: application/json
+
+{ "name": "Acme Corporation", "enabled": true }
+```
+
+Every field is optional and changes only itself: `name`, `brandingJson`, `enabled`, `requireMembershipForTokens`, `allowAutoMembership`, and `metadata` (replaced whole; `{}` clears it). `slug` is accepted only to be refused when it differs. Returns `200` with the organization. `404 organization_not_found`, `400 slug_immutable`, `400 invalid_branding_json`.
+
+### Delete Organization
+
+```
+DELETE /api/v1/organizations/{id}
+```
+
+Deletes every membership, then the organization. `204`; `404 organization_not_found`.
+
+### List Members
+
+```
+GET /api/v1/organizations/{id}/members?cursor={cursor}&limit={limit}
+```
+
+A page, in user id order, of `{ "organizationId", "userId", "email", "name", "status", "roles", "createdAt", "updatedAt" }`; `email` and `name` come from the user record and are null when it no longer exists. `404 organization_not_found`, `400 invalid_cursor`.
+
+### Add Member
+
+```
+POST /api/v1/organizations/{id}/members
+Content-Type: application/json
+
+{ "userId": "user-id", "status": "active", "roles": ["Auditor"] }
+```
+
+Names an existing user by `userId` (checked first) or `email`. `status` is `invited`, `active` (the default) or `suspended`; `roles` is optional. Returns `201` with a `Location` header and the membership.
+
+| Status | `error` | When |
+|---|---|---|
+| 404 | `organization_not_found` | no such organization |
+| 404 | `user_not_found` | neither `userId` nor `email` names a user |
+| 409 | `membership_exists` | the user is already a member |
+| 400 | `invalid_role` | a role begins `tenant:` or `platform:` |
+| 400 | `invalid_status` | `status` is none of the three |
+
+### Update Member
+
+```
+PUT /api/v1/organizations/{id}/members/{userId}
+Content-Type: application/json
+
+{ "status": "suspended", "roles": [] }
+```
+
+Both fields are optional. Returns `200` with the membership. `404 membership_not_found`, `400 invalid_status`, `400 invalid_role`.
+
+### Remove Member
+
+```
+DELETE /api/v1/organizations/{id}/members/{userId}
+```
+
+`204`; `404 membership_not_found`.
+
+### Add Domain
+
+```
+POST /api/v1/organizations/{id}/domains
+Content-Type: application/json
+
+{ "domain": "acme.com" }
+```
+
+Claims the domain, unverified. The domain is lowercased and trimmed first, and must be a bare name such as `acme.com`. Returns `201` with a `Location` header and `{ "domain", "verified", "verifiedAt", "createdAt", "recordName", "recordValue" }`; publish a TXT record at `recordName` holding `recordValue` (see [Domain verification](organizations#domain-verification)).
+
+| Status | `error` | When |
+|---|---|---|
+| 404 | `organization_not_found` | no such organization |
+| 400 | `domain_invalid` | not a bare domain name |
+| 409 | `domain_exists` | this organization already claims it |
+| 409 | `domain_taken` | another organization claims it, verified or not |
+
+### Verify Domain
+
+```
+POST /api/v1/organizations/{id}/domains/{domain}/verify
+```
+
+Looks up the TXT record. Returns `200` with the domain (`verified: true`), also when it was verified already. `404 organization_not_found`, `404 domain_not_found`, `409 domain_taken`, and `409 verification_failed` when the record is missing or wrong; its `error_description` gives the name and value to publish and what was found.
+
+### Remove Domain
+
+```
+DELETE /api/v1/organizations/{id}/domains/{domain}
+```
+
+`204`. Members are untouched. `404 organization_not_found`, `404 domain_not_found`.
+
+### Backfill Organizations
+
+```
+POST /api/v1/organizations/backfill
+Content-Type: application/json
+
+{ "dryRun": true }
+```
+
+Creates organizations and memberships from the legacy `OrganizationId` on users. `dryRun` defaults to true, with or without a body, and then nothing is written. Returns `200` with `{ "dryRun", "organizationsCreated", "membershipsCreated", "usersSkipped", "organizations": [ { "legacyValue", "slug", "users" } ], "truncated" }`. See [Backfill](organizations#backfill).
+
 ## SCIM Tokens
 
 ### Generate Token
@@ -509,6 +714,8 @@ Content-Type: application/json
 ```
 
 `description` and `expiresInDays` are optional (omit `expiresInDays` for a non-expiring token). Returns the raw token once. Store it securely, it cannot be retrieved again.
+
+`organizationId` is optional and tags every user the token creates (see [Organizations](organizations#membership-from-a-scim-token)). It must name an existing organization: one that does not is `400 unknown_organization`, and a malformed value is `400 invalid_request`.
 
 ### List Tokens
 

@@ -515,6 +515,7 @@ Bộ gửi email dựng sẵn dùng [Resend](https://resend.com) và **tự đ�
 | Thiết lập | Mô tả |
 |---|---|
 | `Email:ResendApiKey` | API key của Resend. Khi được đặt, bộ gửi Resend dựng sẵn được dùng. |
+| `Email:ResendApiUrl` | Endpoint mà bộ gửi Resend tích hợp gửi tới. Mặc định là `https://api.resend.com/emails`. Đặt giá trị này để gửi qua relay của riêng bạn. Chỉ được đọc từ cấu hình, không bao giờ từ API quản trị hay một yêu cầu. |
 | `Email:SenderEmail` | Địa chỉ email người gửi |
 | `Email:SenderName` | Tên hiển thị của người gửi (mặc định là `"Authagonal"`) |
 

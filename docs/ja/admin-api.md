@@ -223,6 +223,50 @@ Content-Type: application/json
 DELETE /api/v1/profile/{userId}/identities/{provider}/{externalUserId}
 ```
 
+### ユーザーの組織を一覧表示 {#list-a-users-organizations}
+
+```
+GET /api/v1/profile/{userId}/organizations
+```
+
+`{ "items": [ { "organizationId", "slug", "name", "status", "roles" } ] }` を返します。ユーザーがメンバーシップを持つすべての組織が、ステータスにかかわらず含まれます。組織がすでに存在しないメンバーシップは除外されます。
+
+### ユーザーを招待 {#invite-user}
+
+```
+POST /api/v1/profile/invite
+Content-Type: application/json
+
+{
+  "email": "ada@acme.com",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "locale": "en",
+  "organizationId": "org_0123456789abcdef0123456789abcdef",
+  "organizationRoles": ["Auditor"]
+}
+```
+
+必須なのは `email` だけです。アカウントを作成し(未確認で、使えるパスワードはなし)、`/accept-invite` への 1 回限りで 7 日間有効なリンクをメールで送ります。`organizationId`(組織の ID。スラッグではありません)を指定すると、その組織への招待となり、`organizationRoles` を持つ `invited` メンバーシップが書き込まれ、被招待者がパスワードを設定すると `active` になります。メールは、リクエストの `Accept-Language` のうちライブラリが対応する最初のもの、なければ `locale`、それもなければ英語で作成されます。[組織](organizations#inviting-people)を参照してください。
+
+`200` で `{ "userId": "...", "email": "ada@acme.com" }`(アドレスは小文字)を返します。失敗は `{ "error", "error_description" }` です。
+
+| ステータス | `error` | 条件 |
+|---|---|---|
+| 400 | `email_required` | `email` がない、または空白 |
+| 400 | `invalid_email` | `email` が使えるアドレスではない |
+| 400 | `invalid_role` | 組織ロールが `tenant:` または `platform:` で始まる |
+| 404 | `organization_not_found` | `organizationId` がどの組織も指さない |
+| 409 | `user_already_exists` | そのアドレスにはすでにアカウントがある |
+
+### 招待を再送 {#resend-invite}
+
+```
+POST /api/v1/profile/{userId}/resend-invite
+```
+
+新しいリンクを生成して送信します。`200` で `{ "sent": true }` を返します。不明なユーザーは `404 user_not_found`、アドレスが確認済みの場合は `400 already_accepted`(パスワードリセットを使用してください)、メールを送信できない場合は `502 invite_email_failed` です。
+
 ## MFA の管理 {#mfa-management}
 
 ### MFA 状態の取得 {#get-mfa-status}
@@ -468,6 +512,167 @@ GET /api/v1/roles/{roleName}/users?maxResults=200
 
 インデックスが導入される前に書き込まれたアカウントは、再インデックスされるまでインデックスからは見えません (`IUserStore.ReindexUserAsync`。ユーザーのメンバーシップを、何も削除せずにアップサートします)。
 
+## 組織 {#organizations}
+
+組織、そのメンバー、およびメールドメインです(意味については[組織](organizations)を参照)。失敗は `{ "error": "<code>", "error_description": "..." }` で、ステータスは `400`(入力が不正)、`404`(見つからない)、`409`(競合)のいずれかです。
+
+一覧は `?cursor={cursor}&limit={limit}` でページ分割されます。`limit` は 1..200 に制限され(既定は 50)、応答は `{ "items": [...], "nextCursor": "..." }` で、最後のページでは `nextCursor` が null になります。`nextCursor` はそのまま返してください。一覧が発行していないカーソルは `400 invalid_cursor` です。
+
+組織は `{ "id", "slug", "name", "brandingJson", "metadata", "enabled", "requireMembershipForTokens", "allowAutoMembership", "createdAt", "updatedAt", "domains" }` です。
+
+### 組織の一覧 {#list-organizations}
+
+```
+GET /api/v1/organizations?cursor={cursor}&limit={limit}
+```
+
+`200`。ID 順です。`400 invalid_cursor`。
+
+### 組織の作成 {#create-organization}
+
+```
+POST /api/v1/organizations
+Content-Type: application/json
+
+{
+  "slug": "acme",
+  "name": "Acme Corp",
+  "brandingJson": "{\"appName\":\"Acme\",\"primaryColor\":\"#1a56db\"}",
+  "enabled": true,
+  "requireMembershipForTokens": true,
+  "allowAutoMembership": false,
+  "metadata": { "plan": "enterprise" }
+}
+```
+
+`slug` と `name` は必須で、それ以外は任意です。省略した場合は組織の既定値のままになります。`brandingJson` は JSON オブジェクトを含む文字列です。`Location` ヘッダーと組織を伴って `201` を返します。`id` は `org_` に 32 桁の 16 進数が続く形式です。
+
+| ステータス | `error` | 条件 |
+|---|---|---|
+| 400 | `slug_required` | `slug` がない、または空白 |
+| 400 | `slug_invalid` | `slug` が、小文字、数字、内部のハイフンによる 1〜64 文字ではない |
+| 400 | `name_required` | `name` がない、または空白 |
+| 400 | `invalid_branding_json` | `brandingJson` が JSON オブジェクトではない |
+| 409 | `slug_taken` | 別の組織がその値をスラッグまたは ID として持っている(同時作成の場合も含む) |
+
+### 組織の取得 {#get-organization}
+
+```
+GET /api/v1/organizations/{idOrSlug}
+```
+
+`200`。まず ID で、次にスラッグで検索されます。`404 organization_not_found`。
+
+### 組織の更新 {#update-organization}
+
+```
+PUT /api/v1/organizations/{id}
+Content-Type: application/json
+
+{ "name": "Acme Corporation", "enabled": true }
+```
+
+すべてのフィールドは任意で、指定したものだけが変更されます。`name`、`brandingJson`、`enabled`、`requireMembershipForTokens`、`allowAutoMembership`、`metadata`(全体が置き換えられ、`{}` で空になります)です。`slug` は、異なる場合に拒否するためだけに受け付けられます。`200` で組織を返します。`404 organization_not_found`、`400 slug_immutable`、`400 invalid_branding_json`。
+
+### 組織の削除 {#delete-organization}
+
+```
+DELETE /api/v1/organizations/{id}
+```
+
+すべてのメンバーシップを削除してから、組織を削除します。`204`、`404 organization_not_found`。
+
+### メンバーの一覧 {#list-members}
+
+```
+GET /api/v1/organizations/{id}/members?cursor={cursor}&limit={limit}
+```
+
+ユーザー ID 順の 1 ページで、`{ "organizationId", "userId", "email", "name", "status", "roles", "createdAt", "updatedAt" }` が並びます。`email` と `name` はユーザーのレコードから取得され、ユーザーがもう存在しない場合は null です。`404 organization_not_found`、`400 invalid_cursor`。
+
+### メンバーの追加 {#add-member}
+
+```
+POST /api/v1/organizations/{id}/members
+Content-Type: application/json
+
+{ "userId": "user-id", "status": "active", "roles": ["Auditor"] }
+```
+
+既存のユーザーを `userId`(先に確認されます)または `email` で指定します。`status` は `invited`、`active`(既定)、`suspended` のいずれかで、`roles` は任意です。`Location` ヘッダーとメンバーシップを伴って `201` を返します。
+
+| ステータス | `error` | 条件 |
+|---|---|---|
+| 404 | `organization_not_found` | その組織がない |
+| 404 | `user_not_found` | `userId` も `email` もユーザーを指さない |
+| 409 | `membership_exists` | ユーザーはすでにメンバーである |
+| 400 | `invalid_role` | ロールが `tenant:` または `platform:` で始まる |
+| 400 | `invalid_status` | `status` が 3 つのいずれでもない |
+
+### メンバーの更新 {#update-member}
+
+```
+PUT /api/v1/organizations/{id}/members/{userId}
+Content-Type: application/json
+
+{ "status": "suspended", "roles": [] }
+```
+
+どちらのフィールドも任意です。`200` でメンバーシップを返します。`404 membership_not_found`、`400 invalid_status`、`400 invalid_role`。
+
+### メンバーの削除 {#remove-member}
+
+```
+DELETE /api/v1/organizations/{id}/members/{userId}
+```
+
+`204`、`404 membership_not_found`。
+
+### ドメインの追加 {#add-domain}
+
+```
+POST /api/v1/organizations/{id}/domains
+Content-Type: application/json
+
+{ "domain": "acme.com" }
+```
+
+未検証のままドメインを申請します。ドメインは先に小文字化され、空白が除去され、`acme.com` のような単純な名前である必要があります。`Location` ヘッダーと `{ "domain", "verified", "verifiedAt", "createdAt", "recordName", "recordValue" }` を伴って `201` を返します。`recordName` に値 `recordValue` の TXT レコードを公開してください([ドメインの検証](organizations#domain-verification)を参照)。
+
+| ステータス | `error` | 条件 |
+|---|---|---|
+| 404 | `organization_not_found` | その組織がない |
+| 400 | `domain_invalid` | 単純なドメイン名ではない |
+| 409 | `domain_exists` | この組織がすでに申請している |
+| 409 | `domain_taken` | 別の組織が申請している(検証済みかどうかを問わない) |
+
+### ドメインの検証 {#verify-domain}
+
+```
+POST /api/v1/organizations/{id}/domains/{domain}/verify
+```
+
+TXT レコードを照会します。すでに検証済みの場合も含め、`200` でドメイン(`verified: true`)を返します。`404 organization_not_found`、`404 domain_not_found`、`409 domain_taken`、およびレコードがない、または誤っている場合の `409 verification_failed` があります。その `error_description` には、公開すべき名前と値、および見つかったものが記されます。
+
+### ドメインの削除 {#remove-domain}
+
+```
+DELETE /api/v1/organizations/{id}/domains/{domain}
+```
+
+`204`。メンバーには触れません。`404 organization_not_found`、`404 domain_not_found`。
+
+### 組織のバックフィル {#backfill-organizations}
+
+```
+POST /api/v1/organizations/backfill
+Content-Type: application/json
+
+{ "dryRun": true }
+```
+
+ユーザーの従来の `OrganizationId` から、組織とメンバーシップを作成します。`dryRun` は、本文の有無にかかわらず既定で true であり、その場合は何も書き込まれません。`200` で `{ "dryRun", "organizationsCreated", "membershipsCreated", "usersSkipped", "organizations": [ { "legacyValue", "slug", "users" } ], "truncated" }` を返します。[バックフィル](organizations#backfill)を参照してください。
+
 ## SCIM トークン {#scim-tokens}
 
 ### トークンの生成 {#generate-token}
@@ -484,6 +689,8 @@ Content-Type: application/json
 ```
 
 `description` と `expiresInDays` はオプションです (有効期限のないトークンにするには `expiresInDays` を省略します)。生のトークンを 1 回だけ返します。再取得はできないので、安全に保管してください。
+
+`organizationId` は任意で、トークンが作成する各ユーザーにタグを付けます([組織](organizations#membership-from-a-scim-token)を参照)。既存の組織を指す必要があり、そうでない場合は `400 unknown_organization` となり、形式が不正な値は `400 invalid_request` になります。
 
 ### トークンの一覧表示 {#list-tokens}
 

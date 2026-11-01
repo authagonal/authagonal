@@ -117,6 +117,14 @@ See [Extensibility](extensibility) for all override points and [demos/custom-ser
 
 The built-in [Resend](https://resend.com) sender activates automatically when `Email:ResendApiKey` and `Email:SenderEmail` are configured, no service registration needed. Without any `IEmailService`, verification and password-reset emails are **silently discarded**, and because login requires a confirmed email by default, self-registered users can never sign in (`UseAuthagonal` logs a warning at startup). Either set the `Email:*` keys, register your own `IEmailService` before `AddAuthagonal()`, or list your domains in `Auth:AutoConfirmEmailDomains` to skip verification (dev/test only). See [Configuration → Email](configuration#email).
 
+### Organizations and invitations
+
+`AddAuthagonal()` registers everything the organization admin API needs, so a host that changes nothing gets it with the rest of the admin API (`AdminApi:Enabled`): `/api/v1/organizations` and the invite routes `/api/v1/profile/invite` and `/api/v1/profile/{userId}/resend-invite`. Organizations and memberships need a durable store; every provider ships one, and on Azure Table Storage nothing else is required. See [Organizations](organizations).
+
+- **The invitation link opens `/accept-invite` on the issuer.** The standalone server's SPA fallback serves it. A host that mounts the login SPA itself must serve the app at the host root so `/accept-invite` reaches it outside the `/login` basename, or import `AcceptInvite` from `@authagonal/login` and route to it. To point the link somewhere else, register your own `IInviteLinkBuilder` before `AddAuthagonal()`.
+- **Invitations need an email sender.** The built-in Resend sender sends them once `Email:ResendApiKey` and `Email:SenderEmail` are set. A host with its own `IEmailService` overrides `SendUserInviteEmailAsync`; without an override the invitee is sent the password-reset email carrying the accept link.
+- **Domain proof reads DNS** through `ITxtResolver`; register your own before `AddAuthagonal()` to use another resolver.
+
 ## SQL backend
 
 To run on your own database instead of a cloud service, reference `Authagonal.SqlProvider` and register it **before** `AddAuthagonal()`, those registrations are what make `AddAuthagonal()` skip its Azure Table Storage wiring:

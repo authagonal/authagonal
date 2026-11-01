@@ -51,6 +51,14 @@ mật khẩu, các trang thử thách và thiết lập MFA, trang thiết bị,
 và tài khoản) đều hiển thị giống hệt nhau. Không có gì được hiển thị, và phần đầu giữ khoảng cách bình thường, khi
 `organization` vắng mặt, là `null`, hoặc tên của nó trùng với `branding.appName`.
 
+## Thương hiệu của tổ chức trong email lời mời {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` là một đối tượng JSON thuộc về host. Thư viện chỉ đọc nó ở một nơi, email lời mời (`IEmailService.SendUserInviteEmailAsync`, xem [Tổ chức](organizations#inviting-people)). Với lời mời vào một tổ chức, bộ gửi tích hợp lấy từ đó `appName`, `logoUrl` và `primaryColor`, từng trường một, đặt lên trên các giá trị mặc định của chính email: `Authagonal`, không có logo và `#2563eb` (các giá trị mặc định của ứng dụng đăng nhập). Một trường vắng mặt, rỗng hoặc không phải chuỗi được coi là chưa đặt; logo phải là URL `https` tuyệt đối và màu phải là một màu CSS đơn giản (thập lục phân, `rgb()`/`hsl()` hoặc từ khóa), nếu không cũng được coi là chưa đặt. JSON sai định dạng bị bỏ qua: một lời mời không bao giờ bị từ chối vì thương hiệu của tổ chức.
+
+Tiêu đề là tiêu đề lời mời đã bản địa hóa cùng tên ứng dụng, phần thân nêu tên tổ chức và mọi giá trị đều được mã hóa HTML. Một lời mời đơn giản (không có tổ chức) dùng các giá trị mặc định và nêu tên người gửi (`Email:SenderName`, nếu không thì `Authagonal`). Trang đăng nhập không đọc `BrandingJson`: việc hợp nhất nó vào `branding.json` cho giao diện đăng nhập là việc của host.
+
+Host có `IEmailService` riêng không bị ảnh hưởng. `SendUserInviteEmailAsync` mặc định của interface gửi email đặt lại mật khẩu kèm liên kết chấp nhận; hãy ghi đè để gửi lời mời mang thương hiệu của riêng bạn. Trang mà liên kết mở ra, `/accept-invite`, là một phần của ứng dụng đăng nhập và lấy `branding.json` của tenant như mọi trang khác.
+
 ## Cấu hình {#configuration}
 
 Đặt tệp `branding.json` vào thư mục `wwwroot/` (hoặc mount nó vào container Docker):

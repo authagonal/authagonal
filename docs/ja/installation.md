@@ -118,6 +118,14 @@ app.Run();
 
 組み込みの [Resend](https://resend.com) 送信機能は、`Email:ResendApiKey` と `Email:SenderEmail` が構成されると自動的に有効になり、サービスの登録は不要です。`IEmailService` がまったくない場合、確認メールとパスワードリセットのメールは**何も通知されずに破棄されます**。また既定ではログインに確認済みのメールアドレスが必要なため、セルフ登録したユーザーはいつまでもサインインできません (`UseAuthagonal` は起動時に警告をログに出力します)。`Email:*` キーを設定するか、`AddAuthagonal()` より前に独自の `IEmailService` を登録するか、`Auth:AutoConfirmEmailDomains` にドメインを列挙して確認を省略してください (開発/テスト専用)。[構成 → メール](configuration#email) を参照してください。
 
+### 組織と招待 {#organizations-and-invitations}
+
+`AddAuthagonal()` は組織の管理 API に必要なものをすべて登録するため、何も変更しないホストでも、他の管理 API(`AdminApi:Enabled`)とともにそれが使えます。`/api/v1/organizations` と、招待ルートの `/api/v1/profile/invite`、`/api/v1/profile/{userId}/resend-invite` です。組織とメンバーシップには永続ストアが必要です。すべてのプロバイダーに用意されており、Azure Table Storage では追加の設定は不要です。[組織](organizations)を参照してください。
+
+- **招待リンクは発行者上の `/accept-invite` を開きます。** スタンドアロンサーバーの SPA フォールバックがこれを配信します。ログイン SPA を自前でマウントするホストは、`/login` のベースパスの外にある `/accept-invite` に届くよう、アプリをホストのルートで配信するか、`@authagonal/login` から `AcceptInvite` をインポートしてそこへルーティングする必要があります。リンクの宛先を変えるには、`AddAuthagonal()` より前に独自の `IInviteLinkBuilder` を登録してください。
+- **招待にはメール送信者が必要です。** 組み込みの Resend 送信者は、`Email:ResendApiKey` と `Email:SenderEmail` が設定されると招待を送信します。独自の `IEmailService` を持つホストは `SendUserInviteEmailAsync` をオーバーライドします。オーバーライドしない場合、被招待者には承認リンク付きのパスワードリセットメールが届きます。
+- **ドメインの検証は DNS を読み取ります**(`ITxtResolver` 経由)。別のリゾルバーを使うには、`AddAuthagonal()` より前に独自のものを登録してください。
+
 ## SQL バックエンド {#sql-backend}
 
 クラウドサービスの代わりに自前のデータベースで実行するには、`Authagonal.SqlProvider` を参照し、`AddAuthagonal()` より**前**に登録します。これらの登録があることで、`AddAuthagonal()` は Azure Table Storage の構成をスキップします。

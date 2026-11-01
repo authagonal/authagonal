@@ -512,6 +512,7 @@ OIDC 预置在每次启动时覆盖的内容比 SAML 预置更多。这些布尔
 | 设置 | 说明 |
 |---|---|
 | `Email:ResendApiKey` | Resend API 密钥。设置后使用内置的 Resend 发送器。 |
+| `Email:ResendApiUrl` | 内置 Resend 发送器所 POST 的端点。默认为 `https://api.resend.com/emails`。设置它即可通过你自己的中继发送。仅从配置中读取,绝不从管理 API 或请求中读取。 |
 | `Email:SenderEmail` | 发件人邮箱地址 |
 | `Email:SenderName` | 发件人显示名称（默认为 `"Authagonal"`） |
 

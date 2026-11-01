@@ -52,6 +52,14 @@ consentimiento y el consentimiento de agentes, las concesiones y la cuenta) lo m
 nada, y el encabezado conserva su espaciado normal, cuando `organization` no está presente, es `null` o su nombre
 coincide con `branding.appName`.
 
+## Personalización de marca de la organización en los correos de invitación {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` es un objeto JSON que pertenece al host. La biblioteca lo lee en un solo lugar, el correo de invitación (`IEmailService.SendUserInviteEmailAsync`, consulte [Organizaciones](organizations#inviting-people)). Para una invitación a una organización, el remitente integrado toma de él `appName`, `logoUrl` y `primaryColor`, campo a campo, sobre los valores predeterminados del propio correo: `Authagonal`, sin logotipo y `#2563eb` (los valores predeterminados de la aplicación de inicio de sesión). Un campo ausente, vacío o que no sea una cadena se considera sin definir; un logotipo debe ser una URL `https` absoluta y un color un color CSS sencillo (hexadecimal, `rgb()`/`hsl()` o una palabra clave); de lo contrario también se considera sin definir. El JSON mal formado se ignora: una invitación nunca se rechaza por la personalización de marca de una organización.
+
+El asunto es el título localizado de la invitación y el nombre de la aplicación, el cuerpo nombra la organización y cada valor se codifica como HTML. Una invitación simple (sin organización) usa los valores predeterminados y nombra al remitente (`Email:SenderName`, si no `Authagonal`). La página de inicio de sesión no lee `BrandingJson`: combinarlo sobre `branding.json` para la interfaz de inicio de sesión es tarea del host.
+
+Un host con su propio `IEmailService` no se ve afectado. El `SendUserInviteEmailAsync` predeterminado de la interfaz envía el correo de restablecimiento de contraseña con el enlace de aceptación; sobrescríbalo para enviar una invitación con su propia marca. La página que abre el enlace, `/accept-invite`, forma parte de la aplicación de inicio de sesión y toma el `branding.json` del inquilino como cualquier otra página.
+
 ## Configuración {#configuration}
 
 Coloque un archivo `branding.json` en el directorio `wwwroot/` (o móntelo en el contenedor Docker):

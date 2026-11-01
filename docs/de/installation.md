@@ -118,6 +118,14 @@ Alle Erweiterungspunkte beschreibt [Erweiterbarkeit](extensibility), ein vollst�
 
 Der eingebaute Versand über [Resend](https://resend.com) wird automatisch aktiv, sobald `Email:ResendApiKey` und `Email:SenderEmail` konfiguriert sind; eine Service-Registrierung ist nicht nötig. Ohne jedes `IEmailService` werden Bestätigungs- und Passwort-Reset-E-Mails **stillschweigend verworfen**, und weil die Anmeldung standardmäßig eine bestätigte E-Mail-Adresse voraussetzt, können sich selbst registrierte Benutzer nie anmelden (`UseAuthagonal` protokolliert beim Start eine Warnung). Setzen Sie entweder die `Email:*`-Schlüssel, registrieren Sie vor `AddAuthagonal()` ein eigenes `IEmailService` oder führen Sie Ihre Domains in `Auth:AutoConfirmEmailDomains` auf, um die Bestätigung zu überspringen (nur für Entwicklung und Tests). Siehe [Konfiguration → E-Mail](configuration#email).
 
+### Organisationen und Einladungen {#organizations-and-invitations}
+
+`AddAuthagonal()` registriert alles, was die Organisations-Admin-API braucht; ein Host, der nichts ändert, erhält sie also zusammen mit der übrigen Admin-API (`AdminApi:Enabled`): `/api/v1/organizations` sowie die Einladungsrouten `/api/v1/profile/invite` und `/api/v1/profile/{userId}/resend-invite`. Organisationen und Mitgliedschaften brauchen einen dauerhaften Speicher; jeder Provider bringt einen mit, und bei Azure Table Storage ist nichts weiter nötig. Siehe [Organisationen](organizations).
+
+- **Der Einladungslink öffnet `/accept-invite` beim Issuer.** Der SPA-Fallback des Standalone-Servers liefert die Seite aus. Ein Host, der die Login-SPA selbst einbindet, muss die App im Stammverzeichnis des Hosts ausliefern, damit `/accept-invite` sie außerhalb des Basispfads `/login` erreicht, oder `AcceptInvite` aus `@authagonal/login` importieren und dorthin routen. Soll der Link woanders hinführen, registrieren Sie vor `AddAuthagonal()` einen eigenen `IInviteLinkBuilder`.
+- **Einladungen brauchen einen E-Mail-Versand.** Der eingebaute Resend-Versand verschickt sie, sobald `Email:ResendApiKey` und `Email:SenderEmail` gesetzt sind. Ein Host mit eigenem `IEmailService` überschreibt `SendUserInviteEmailAsync`; ohne Überschreibung erhält die eingeladene Person die Passwort-zurücksetzen-E-Mail mit dem Annahme-Link.
+- **Der Domain-Nachweis liest DNS** über `ITxtResolver`; registrieren Sie vor `AddAuthagonal()` einen eigenen, um einen anderen Resolver zu verwenden.
+
 ## SQL-Backend {#sql-backend}
 
 Um auf Ihrer eigenen Datenbank statt auf einem Cloud-Dienst zu laufen, referenzieren Sie `Authagonal.SqlProvider` und registrieren es **vor** `AddAuthagonal()`; diese Registrierungen veranlassen `AddAuthagonal()`, seine Verdrahtung für Azure Table Storage zu überspringen:

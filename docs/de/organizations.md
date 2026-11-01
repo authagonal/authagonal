@@ -24,12 +24,10 @@ Eine `Organization` gibt ihr einen Datensatz: eine unveränderliche, opake ID, e
 - **Keine Organisationsauswahl.** Ein Benutzer, der mehreren Organisationen angehört, erhält bei einer Anfrage, die keine nennt, `account_selection_required`, einen Fehler, auf den die Relying Party reagieren kann, indem sie es mit einem Parameter erneut versucht. Es gibt keine gehostete Seite, die ihn zur Auswahl auffordert.
 - **Keine delegierte Verwaltung von Organisationen.** Es gibt keine Berechtigung, mit der der eigene Administrator eines Kunden dessen Mitglieder verwalten könnte.
 - **Keine organisationsbezogene SCIM-Isolation.** Ein an eine Organisation gebundenes SCIM-Token (`ScimToken.OrganizationId`) kennzeichnet die Benutzer, die es anlegt, und macht sie, wenn die ID eine reale Organisation bezeichnet, zu aktiven Mitgliedern (siehe [Mitgliedschaft über ein SCIM-Token](#membership-from-a-scim-token)). Die Prüfungen der Zugehörigkeit richten sich weiterhin nach dem OAuth-Client, nicht nach der Organisation; die Bindung entscheidet also über die Kennzeichnung, nicht über den Zugriff.
-- **Kein Einladungsablauf in dieser Bibliothek.** Es gibt keinen Einladungsendpunkt und keine Einladungs-E-Mail. Ein Host schreibt eine `invited`-Mitgliedschaft selbst; auf welchen Wegen sie `active` wird, steht unter [Einladungen](#invitations).
 - **Keine organisationsbezogenen Gruppen.** Der Claim `groups` und die SCIM-Gruppenmitgliedschaft bleiben mandantenweit; nur Rollen sind organisationsbezogen.
 - **Keine Webhook-Ereignisse für Organisationen und kein organisationsbezogenes Audit.** `IAuthHook` kennt keine Lebenszyklusereignisse von Organisationen (angelegt, Mitgliedschaft gewährt oder entzogen), bestehende Hook-Nutzlasten tragen kein `organizationId`, und das Audit-Log hat weder eine Organisationsspalte noch einen Organisationsindex.
 - **Rollengebundene Scopes werden bei der Autorisierung gegen Mandantenrollen gefiltert.** `Scope.AllowedRoles` wird an `/connect/authorize` gegen die dem Konto direkt zugewiesenen Rollen angewendet, bevor die Organisation aufgelöst ist. Ein Scope, dessen `AllowedRoles` nur durch eine organisationsbezogene Rolle erfüllt wird, wird bei der Autorisierung daher verworfen, oder mit `access_denied` abgelehnt, falls kein angeforderter Scope übrig bleibt. Beim Refresh läuft dieselbe Prüfung gegen die Rollen des aufgelösten Subjekts, die die der Organisation durchaus enthalten. Solange beide nicht übereinstimmen, binden Sie Scopes an Mandantenrollen.
-- **Kein Organisations-Branding in dieser Bibliothek.** `Organization.BrandingJson` wird gespeichert, damit der Host es über das Branding des Mandanten legen kann; nichts in dieser Bibliothek liest es. Die Login-App zeigt den Namen der Organisation („Anmeldung bei {name}“) an, wenn die Boot-Nutzlast des Hosts eine `organization` (`{ id, slug, name }`) enthält; die Bibliothek selbst löst vor der Authentifizierung keine Organisation auf, außer über den Parameter `organization`, eine Client-Beschränkung mit einem einzigen Eintrag, eine organisationsbezogene Verbindung oder das `ITenantContext.OrganizationId` eines Hosts.
-- **Keine Admin-REST-API für Organisationen.** `IOrganizationStore` und `IOrganizationMembershipStore` sind die Schnittstelle; ein Host, der Endpunkte möchte, baut sie selbst. Ein Host, der Organisationen oder Mitglieder auflistet, sollte `ListPageAsync` / `ListByOrganizationPageAsync` verwenden (siehe unten).
+- **Kein Organisations-Branding in dieser Bibliothek.** `Organization.BrandingJson` wird gespeichert, damit der Host es über das Branding des Mandanten legen kann; diese Bibliothek liest es nur an einer einzigen Stelle, in der Einladungs-E-Mail ([Branding](branding#organisation-branding-in-invitation-emails)). Die Login-App zeigt den Namen der Organisation („Anmeldung bei {name}“) an, wenn die Boot-Nutzlast des Hosts eine `organization` (`{ id, slug, name }`) enthält; die Bibliothek selbst löst vor der Authentifizierung keine Organisation auf, außer über den Parameter `organization`, eine Client-Beschränkung mit einem einzigen Eintrag, eine organisationsbezogene Verbindung oder das `ITenantContext.OrganizationId` eines Hosts.
 
 ## Eine Organisation anlegen {#creating-an-organization}
 
@@ -72,16 +70,17 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 
 ### Einladungen {#invitations}
 
-Eine `invited`-Zeile trägt `InvitedByUserId`, `InvitedAt` und alle Rollen, die der eingeladenen Person angeboten wurden. Die Bibliothek versendet die Einladung nie; sie stuft die Zeile an zwei Stellen auf `active` hoch (behält dabei Rollen, einladende Person und Einladungszeitpunkt bei und setzt `JoinedAt`):
+Eine `invited`-Zeile trägt `InvitedByUserId`, `InvitedAt` und alle Rollen, die der eingeladenen Person angeboten wurden. Die Admin-API schreibt eine solche Zeile, wenn sie jemanden in eine Organisation einlädt ([Personen einladen](#inviting-people)); ein Host kann sie auch selbst schreiben. Die Bibliothek stuft die Zeile an drei Stellen auf `active` hoch (behält dabei Rollen, einladende Person und Einladungszeitpunkt bei und setzt `JoinedAt`):
 
+- **Annahme der Einladung.** Wer über den Einladungslink ein Passwort festlegt, bestätigt damit die Adresse; der Aktivierungs-Hook der Bibliothek setzt dann jede `invited`-Mitgliedschaft dieses Benutzers auf `active` und schreibt `organization.member.joined`.
 - **Anmeldung über eine organisationsbezogene SAML- oder OIDC-Verbindung.** Wenn der eigene IdP der Organisation für die Person bürgt, gilt die Einladung als angenommen (`FederatedOrganizationBinding`, 0.30.2). Ohne das würde eine eingeladene Person, die sich immer nur per SSO anmeldet, von der Mitgliedschaftsprüfung kein Token erhalten.
 - **Automatische Mitgliedschaft** (unten), wenn der Benutzer die Voraussetzungen erfüllt.
 
-Eine `suspended`-Zeile wird auf keinem der beiden Wege hochgestuft und durch eine Anmeldung nie verändert.
+Eine `suspended`-Zeile wird auf keinem dieser Wege hochgestuft und durch eine Anmeldung nie verändert.
 
 ### Verifizierte Domains und automatische Mitgliedschaft {#verified-domains-and-automatic-membership}
 
-`Organization.Domains` enthält die E-Mail-Domains, die die Organisation beansprucht hat, jede als `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`. `Domain` wird in Kleinbuchstaben, ohne umgebende Leerzeichen und ohne abschließenden Punkt gespeichert. Die Bibliothek speichert den Anspruch und liest `VerifiedAt`; die Kontrolle nachzuweisen (typischerweise über einen DNS-TXT-Eintrag mit dem `VerificationToken`) ist Aufgabe des Hosts, und der Host setzt `VerifiedAt`, wenn das gelingt.
+`Organization.Domains` enthält die E-Mail-Domains, die die Organisation beansprucht hat, jede als `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`. `Domain` wird in Kleinbuchstaben, ohne umgebende Leerzeichen und ohne abschließenden Punkt gespeichert. Die Admin-API speichert den Anspruch, weist die Kontrolle über einen DNS-TXT-Eintrag mit dem `VerificationToken` nach und setzt `VerifiedAt` ([Domain-Verifizierung](#domain-verification)); ein Host mit eigenem Nachweis kann `VerifiedAt` selbst setzen.
 
 `Organization.AllowAutoMembership` (standardmäßig aus) lässt einen Benutzer ohne Einladung beitreten. Wenn die Organisation **explizit** ausgewählt ist (ein mitgeführter Refresh-Grant, der Parameter `organization`, eine organisationsbezogene Verbindung oder ein Client, der auf genau diese Organisation beschränkt ist) und der Benutzer keine aktive Mitgliedschaft hat, wird er Mitglied, wenn **alle** folgenden Bedingungen erfüllt sind:
 
@@ -93,13 +92,86 @@ Eine fehlende Zeile wird als `active` ohne Rollen angelegt; eine `invited`-Zeile
 
 ### Mitgliedschaft über ein SCIM-Token {#membership-from-a-scim-token}
 
-Ein mit `organizationId` erzeugtes SCIM-Token stempelt diesen Wert als `org_id` auf jeden Benutzer, den es anlegt. Bezeichnet die ID eine existierende Organisation, schreibt das Anlegen außerdem eine `active`-Mitgliedschaft ohne Rollen und protokolliert `scim.organization_member_added` im Audit-Log. Eine ID, die keine Organisation bezeichnet, bleibt eine bloße Kennzeichnung. Nur beim Anlegen: Eine spätere Synchronisierung kennzeichnet nicht neu und fügt keine Mitglieder hinzu. Siehe [SCIM](scim#tagging-a-connectors-users-with-an-organization).
+Ein mit `organizationId` erzeugtes SCIM-Token stempelt diesen Wert als `org_id` auf jeden Benutzer, den es anlegt. `POST /api/v1/scim/tokens` weist eine `organizationId`, die keine Organisation bezeichnet, mit `400 unknown_organization` ab (eine fehlerhaft geformte mit `400 invalid_request`), genau wie eine SSO-Verbindung; ein über die Admin-API erzeugtes Token trägt also nie eine Kennzeichnung, die keine Organisation auflistet. Bezeichnet die ID eine Organisation, schreibt das Anlegen außerdem eine `active`-Mitgliedschaft ohne Rollen und protokolliert `scim.organization_member_added` im Audit-Log. Ein Token, das bereits eine ID trägt, die nichts bezeichnet, bleibt eine bloße Kennzeichnung. Nur beim Anlegen: Eine spätere Synchronisierung kennzeichnet nicht neu und fügt keine Mitglieder hinzu. Siehe [SCIM](scim#tagging-a-connectors-users-with-an-organization).
 
 ### Auflisten und Löschen {#listing-and-deleting}
 
 `IOrganizationStore.ListPageAsync(cursor, limit)` und `IOrganizationMembershipStore.ListByOrganizationPageAsync(organizationId, cursor, limit)` liefern eine Seite (`Items` und einen opaken `NextCursor`, auf der letzten Seite null). `limit` wird auf 1..200 begrenzt, und ein fehlerhafter Cursor löst `ArgumentException` aus. Der Cursor ist schlüsselbasiert (Keyset), sodass eine zwischen zwei Lesevorgängen hinzugefügte oder entfernte Zeile nie eine Seite verschiebt oder wiederholt. Beide haben Standardimplementierungen auf Basis der nicht paginierten Auflistungen, sodass ein eigener Store weiterhin kompiliert; die Azure-Table-Stores überschreiben sie mit einer serverseitigen Bereichsabfrage.
 
 Das Löschen eines Benutzers über das Admin-`DELETE /api/v1/profile/{userId}`, SCIM-`DELETE /scim/v2/Users/{id}` oder den SCIM-Reclaim-Pfad löscht auch jede Mitgliedschaft, die er hält (`AccountArtefactPurge.PurgeAsync` mit einem `IOrganizationMembershipStore`; die Überladung mit drei Stores entfernt keine). Ein Host mit eigenem Löschpfad muss den Mitgliedschafts-Store ebenfalls übergeben, sonst listen Organisationen das gelöschte Mitglied weiterhin auf.
+
+## Organisationen über HTTP verwalten {#administering-over-http}
+
+Die Admin-API (`AdminApi:Enabled`, der Admin-Scope) verwaltet Organisationen, Mitgliedschaften, Domains und Einladungen. Die Seite [Admin-API](admin-api#organizations) nennt jede Anfrage, jeden Erfolgsstatus und jeden Fehlercode; in Kürze:
+
+| Routen | Zweck |
+|---|---|
+| `GET /api/v1/organizations`, `POST /api/v1/organizations` | Auflisten (paginiert) und Anlegen |
+| `GET /api/v1/organizations/{idOrSlug}`, `PUT /api/v1/organizations/{id}`, `DELETE /api/v1/organizations/{id}` | Lesen, Aktualisieren, Löschen (die Mitglieder werden mitgelöscht) |
+| `GET /api/v1/organizations/{id}/members`, `POST /api/v1/organizations/{id}/members`, `PUT /api/v1/organizations/{id}/members/{userId}`, `DELETE /api/v1/organizations/{id}/members/{userId}` | Auflisten, Hinzufügen, Status und Rollen ändern, Entfernen |
+| `POST /api/v1/organizations/{id}/domains`, `POST /api/v1/organizations/{id}/domains/{domain}/verify`, `DELETE /api/v1/organizations/{id}/domains/{domain}` | Eine E-Mail-Domain beanspruchen, nachweisen und freigeben |
+| `POST /api/v1/organizations/backfill` | Alte `OrganizationId`-Werte in Organisationen überführen |
+| `GET /api/v1/profile/{userId}/organizations` | Die Organisationen, denen ein Benutzer angehört |
+| `POST /api/v1/profile/invite`, `POST /api/v1/profile/{userId}/resend-invite` | Jemanden per E-Mail einladen, die Einladung erneut senden |
+
+Ein Fehler wird als `{ "error": "<code>", "error_description": "..." }` beantwortet, mit `400` (ungültige Eingabe), `404` (nicht gefunden), `409` (Konflikt) oder `502` (`invite_email_failed`).
+
+## Domain-Verifizierung {#domain-verification}
+
+`POST /api/v1/organizations/{id}/domains` mit `{ "domain": "acme.com" }` beansprucht die Domain (zunächst unverifiziert) und antwortet mit `201` und dem zu veröffentlichenden Eintrag: `recordName` (`_authagonal-org.acme.com`) und `recordValue` (`authagonal-org-verify=<token>`). Das Token besteht aus 256 Zufallsbits, eines pro Anspruch. Veröffentlichen Sie einen TXT-Eintrag unter diesem Namen mit genau diesem Wert und rufen Sie dann `POST /api/v1/organizations/{id}/domains/acme.com/verify` auf.
+
+Ein Treffer setzt `VerifiedAt` und schreibt `organization.domain_verified`. Ein Fehlschlag ist `409 verification_failed`, nie ein `200` mit `verified: false`; seine Beschreibung nennt Namen und Wert des zu veröffentlichenden Eintrags und was dort gefunden wurde. Eine bereits verifizierte Domain wird unverändert zurückgegeben. Eine Domain gehört höchstens einer Organisation, verifiziert oder nicht (`domain_taken`). Das Entfernen einer Domain beendet künftige automatische Beitritte und wirft niemanden hinaus.
+
+Der DNS-Zugriff läuft über `ITxtResolver` (`Authagonal.Core.Services`): `ResolveTxtAsync(name, ct)` liefert die unter einem Namen veröffentlichten TXT-Werte, eine leere Liste, wenn es keine gibt, und löst eine Ausnahme aus, wenn die Abfrage fehlschlägt (gemeldet als `verification_failed`; der Text der Ausnahme selbst wird nie zurückgegeben). Der Standard liest echtes DNS über DnsClient und fügt die Zeichenketten eines Eintrags zu einem Wert zusammen. Er wird mit `TryAdd` registriert; ein Resolver, den Sie vor `AddAuthagonal()` registrieren (ein interner, DNS-over-HTTPS), hat also Vorrang.
+
+## Backfill {#backfill}
+
+Vor den Organisationen war `AuthUser.OrganizationId` Freitext. `POST /api/v1/organizations/backfill` gruppiert die Benutzer nach genau dieser Zeichenkette und legt für jeden verschiedenen Wert eine Organisation an, mit einer `active`-Mitgliedschaft (ohne Rollen) für jeden Benutzer. Der Slug ist der Wert in Kleinbuchstaben, wobei jede Folge anderer Zeichen zu einem Bindestrich zusammengezogen wird (bei einer Kollision `-2`, `-3` und so weiter); der Anzeigename ist der Wert selbst, und die Organisation erhält den Metadatenschlüssel `legacyOrganizationId`. Der Body ist `{ "dryRun": true }`; **ein Probelauf ist der Standard**, auch ganz ohne Body, und schreibt nichts.
+
+Ein erneuter Lauf ist idempotent: Eine bereits für einen Wert gekennzeichnete Organisation wird wiederverwendet, auch nach einer Umbenennung, und ein Benutzer, der schon eine Mitgliedschaft hat, wird in `usersSkipped` gezählt. Die Antwort enthält `dryRun`, `organizationsCreated`, `membershipsCreated`, `usersSkipped`, `organizations` (die ersten 50, je mit `legacyValue`, `slug` und `users`) und `truncated`. Ein Lauf durchsucht höchstens 50.000 Benutzer; `truncated: true` bedeutet, dass er erneut ausgeführt werden muss. Ein echter Lauf schreibt `organization.backfill`.
+
+## Personen einladen {#inviting-people}
+
+`POST /api/v1/profile/invite` nimmt `email` (erforderlich), `firstName`, `lastName`, `locale`, `organizationId` und `organizationRoles` entgegen. Es legt das Konto sofort an, unbestätigt und ohne verwendbares Passwort, und versendet einen Link per E-Mail; die Antwort ist `200` mit `{ "userId", "email" }`. Mit `organizationId` schreibt es außerdem eine `invited`-Mitgliedschaft mit den Rollen, `InvitedByUserId` (der aufrufende Administrator) und `InvitedAt`, und die E-Mail nennt die Organisation und trägt deren Branding ([Branding](branding#organisation-branding-in-invitation-emails)). Alles, was die Organisation betrifft, wird geprüft, bevor das Konto existiert; eine abgelehnte Einladung hinterlässt also keinen verwaisten Benutzer. Eingeladen werden können nur neue Konten: Eine bereits vorhandene Adresse ergibt `409 user_already_exists`, und ein vorhandener Benutzer tritt über `POST /api/v1/organizations/{id}/members` bei.
+
+Der Link enthält einen einmal verwendbaren `password_reset`-Grant mit sieben Tagen Lebensdauer, der vom bestehenden `POST /api/auth/reset-password` eingelöst wird; es gibt keinen zweiten Einlöse-Endpunkt. Das Festlegen des Passworts bestätigt die Adresse und löst `IAuthHook.OnEmailConfirmedAsync` aus; der Aktivierungs-Hook der Bibliothek setzt dann jede `invited`-Mitgliedschaft des Benutzers auf `active` (Rollen, einladende Person und Einladungszeitpunkt bleiben erhalten, `JoinedAt` wird gesetzt) und schreibt `organization.member.joined`, mit dem neuen Mitglied als Akteur. Eine `suspended`- oder `active`-Zeile bleibt unberührt, ein Speicherfehler wird protokolliert und lässt die Bestätigung nie scheitern, und der Hook ist idempotent. Er läuft überall dort, wo die Bibliothek `OnEmailConfirmedAsync` auslöst, welche Hooks Ihr Host auch registriert.
+
+`POST /api/v1/profile/{userId}/resend-invite` erzeugt einen neuen Link und sendet ihn: `404 user_not_found`, `400 already_accepted`, sobald die Adresse bestätigt ist (verwenden Sie stattdessen eine Passwortzurücksetzung), und `502 invite_email_failed`, wenn der Versand eine Ausnahme auslöst. Die erste Einladung ist nachsichtiger: Ein fehlgeschlagener Versand wird protokolliert, und Benutzer und Link existieren, weil die Einladung erneut gesendet werden kann. Eine erneut gesendete Einladung nennt die Organisation, wenn der Benutzer genau eine `invited`-Mitgliedschaft hat.
+
+Die E-Mail läuft über `IEmailService.SendUserInviteEmailAsync(toEmail, tenantName, acceptUrl, locale, ct, organization)`, ein Standard-Schnittstellenmember, dessen Rumpf die Passwort-zurücksetzen-E-Mail mit dem Annahme-Link sendet; ein Host mit eigenem `IEmailService` liefert also weiterhin einen funktionierenden Link. Überschreiben Sie ihn, um eine eigene Einladung zu versenden. Der eingebaute Versand schreibt die Einladung in der Sprache des einladenden Administrators, sofern die Bibliothek sie mitbringt (das erste erkannte `Accept-Language`, sonst das `locale` der Anfrage), sonst in der Sprache der eingeladenen Person, sonst auf Englisch.
+
+Wohin der Link zeigt, bestimmt `IInviteLinkBuilder` (`Authagonal.Core.Services`): `Task<string> BuildAcceptUrlAsync(string token, Organization? organization, CancellationToken ct = default)`. Der Standard liefert `{issuer}/accept-invite?p=<token>`, bei einer Organisationseinladung mit `&organization=<slug>`, beides maskiert. Registrieren Sie vor `AddAuthagonal()` einen eigenen (er wird mit `TryAdd` hinzugefügt), um die Seite anderswo auszuliefern, etwa auf der eigenen Domain einer Organisation; Einladung und erneutes Senden erzeugen jeden Link darüber.
+
+## Die Seite zum Annehmen der Einladung {#the-accept-invite-page}
+
+Die Login-App liefert `/accept-invite` im Stammverzeichnis des Hosts aus, außerhalb des Basispfads `/login`, und der SPA-Fallback des Standalone-Servers liefert sie aus. Sie liest das Token aus `p`, nennt die Organisation, wenn der Link eine trägt, fragt zweimal nach einem neuen Passwort, prüft es gegen die Passwortrichtlinie und sendet es an `/api/auth/reset-password`. Ein Link ohne Token oder mit einem unbekannten oder abgelaufenen Token zeigt eine Meldung „ungültig oder abgelaufen“ und kein Formular; ein vom Server abgelehntes Passwort (`weak_password`) zeigt die Meldung des Servers. Die Texte liegen in allen elf Sprachen vor. Ein Host auf Basis des npm-Pakets importiert `AcceptInvite` aus `@authagonal/login` und bindet es unter `/accept-invite` ein.
+
+## Die Dienste aus dem Code aufrufen {#calling-the-services-from-code}
+
+Die Endpunkte sind dünn: `OrganizationOperations` und `UserInviteOperations` (`Authagonal.Server.Services`, scoped mit `TryAdd` registriert) besitzen jede Regel, jeden Fehlercode und jede Audit-Zeile, sodass eine eigene Oberfläche des Hosts (eine Portal-Route, ein Werkzeug) sie aufrufen und dieselben Zeilen schreiben kann. `OrganizationOperations` bietet `ListPageAsync`, `GetAsync`, `CreateAsync`, `UpdateAsync`, `DeleteAsync`, `ListMembersPageAsync`, `AddMemberAsync`, `UpdateMemberAsync`, `RemoveMemberAsync`, `AddDomainAsync`, `VerifyDomainAsync`, `RemoveDomainAsync`, `ListUserOrganizationsAsync` und `BackfillAsync`; `UserInviteOperations` bietet `InviteAsync` und `ResendInviteAsync`. Sie nehmen den Audit-Akteur als Zeichenkette und keinen HTTP-Typ entgegen; wer sie aufrufen darf (wer in eine Organisation einladen darf, wie oft eine Einladung erneut gesendet werden darf), ist Richtlinie des Hosts.
+
+Jede liefert `OperationResult<T>`: `Outcome` (`Ok`, `Invalid`, `NotFound`, `Conflict` oder `Failed`), `Value`, `Error` (der Code), `Message`, `Fields` und `Succeeded`. Die Admin-API bildet die Ergebnisse auf `400`, `404`, `409` und `502` ab. Eine Liste liefert `ResultPage<T>` (`Items` und `NextCursor`). `ListUserOrganizationsAsync` und `BackfillAsync` liefern ihren Wert direkt.
+
+## Audit-Aktionen {#audit-actions}
+
+Jeder Schreibvorgang läuft über `IAuditLogger`, mit dem Entitätstyp `organization` (`user` bei den letzten beiden) und dem Subject des aufrufenden Administrators als Akteur.
+
+| Aktion | Geschrieben, wenn | Detail |
+|---|---|---|
+| `organization.created` | eine Organisation angelegt wird | der Slug |
+| `organization.updated` | eine Organisation aktualisiert wird | der Slug |
+| `organization.deleted` | eine Organisation gelöscht wird | der Slug |
+| `organization.member.added` | ein Mitglied hinzugefügt wird | `user=<userId>` |
+| `organization.member.updated` | Status oder Rollen eines Mitglieds geändert werden | `user=<userId>` |
+| `organization.member.removed` | ein Mitglied entfernt wird | `user=<userId>` |
+| `organization.member.invited` | eine Einladung die `invited`-Mitgliedschaft anlegt | `user=<userId>` |
+| `organization.member.joined` | eine `invited`-Mitgliedschaft bei der E-Mail-Bestätigung `active` wird (Akteur ist der Benutzer) | `user=<userId>` |
+| `organization.domain_added` | eine Domain beansprucht wird | `domain=<domain>` |
+| `organization.domain_verified` | eine Domain nachgewiesen wird | `domain=<domain>` |
+| `organization.domain_removed` | eine Domain freigegeben wird | `domain=<domain>` |
+| `organization.backfill` | ein Backfill, der kein Probelauf ist | `organizationsCreated=<n> membershipsCreated=<n>` |
+| `user.invited` | jemand eingeladen wird | die Adresse mit maskiertem lokalem Teil (`***@acme.com`) |
+| `user.invite_resent` | eine Einladung erneut gesendet wird | dasselbe |
 
 ## Organisationsbezogene Rollen {#organization-scoped-roles}
 

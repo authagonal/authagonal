@@ -53,6 +53,14 @@ MFA-Abfrage und MFA-Einrichtung, die Geräteseite, Zustimmung und Agenten-Zustim
 identisch anzeigt. Nichts wird gerendert, und die Kopfzeile behält ihre normalen Abstände, wenn
 `organization` fehlt, `null` ist oder der Name mit `branding.appName` übereinstimmt.
 
+## Organisations-Branding in Einladungs-E-Mails {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` ist ein JSON-Objekt, das dem Host gehört. Die Bibliothek liest es an einer einzigen Stelle, in der Einladungs-E-Mail (`IEmailService.SendUserInviteEmailAsync`, siehe [Organisationen](organizations#inviting-people)). Bei einer Einladung in eine Organisation übernimmt der eingebaute Versand `appName`, `logoUrl` und `primaryColor` daraus, Feld für Feld, über den eigenen Standardwerten der E-Mail: `Authagonal`, kein Logo und `#2563eb` (die Standardwerte der Login-App). Ein fehlendes, leeres oder nicht als Zeichenkette angegebenes Feld gilt als nicht gesetzt; ein Logo muss eine absolute `https`-URL sein und eine Farbe eine einfache CSS-Farbe (Hex, `rgb()`/`hsl()` oder ein Schlüsselwort), sonst gilt sie ebenfalls als nicht gesetzt. Fehlerhaftes JSON wird ignoriert: Eine Einladung wird nie wegen des Brandings einer Organisation abgelehnt.
+
+Der Betreff besteht aus dem lokalisierten Einladungstitel und dem Anwendungsnamen, der Text nennt die Organisation, und jeder Wert wird HTML-kodiert. Eine einfache Einladung (ohne Organisation) verwendet die Standardwerte und nennt den Absender (`Email:SenderName`, sonst `Authagonal`). Die Anmeldeseite liest `BrandingJson` nicht: Es über `branding.json` für die Login-Oberfläche zu legen, ist Aufgabe des Hosts.
+
+Ein Host mit eigenem `IEmailService` ist nicht betroffen. Das standardmäßige `SendUserInviteEmailAsync` der Schnittstelle sendet die Passwort-zurücksetzen-E-Mail mit dem Annahme-Link; überschreiben Sie es, um eine Einladung mit eigenem Branding zu versenden. Die Seite, die der Link öffnet, `/accept-invite`, gehört zur Login-App und übernimmt das `branding.json` des Mandanten wie jede andere Seite.
+
 ## Konfiguration {#configuration}
 
 Legen Sie eine Datei `branding.json` im Verzeichnis `wwwroot/` ab (oder binden Sie sie in den Docker-Container ein):

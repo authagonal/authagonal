@@ -50,6 +50,14 @@ palavra-passe, as páginas de desafio e de configuração de MFA, a página de d
 consentimento de agentes, as concessões e a conta) o mostram de forma idêntica. Nada é apresentado, e o cabeçalho mantém
 o espaçamento normal, quando `organization` está ausente, é `null` ou o seu nome coincide com `branding.appName`.
 
+## Personalização de marca da organização nos e-mails de convite {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` é um objeto JSON que pertence ao host. A biblioteca o lê em um único lugar, o e-mail de convite (`IEmailService.SendUserInviteEmailAsync`, veja [Organizações](organizations#inviting-people)). Para um convite a uma organização, o remetente integrado tira dele `appName`, `logoUrl` e `primaryColor`, campo a campo, sobre os padrões do próprio e-mail: `Authagonal`, sem logotipo e `#2563eb` (os padrões do aplicativo de login). Um campo ausente, vazio ou que não seja uma cadeia é tratado como não definido; um logotipo deve ser uma URL `https` absoluta e uma cor, uma cor CSS simples (hexadecimal, `rgb()`/`hsl()` ou palavra-chave); caso contrário também é tratado como não definido. Um JSON malformado é ignorado: um convite nunca é recusado por causa da personalização de marca de uma organização.
+
+O assunto é o título localizado do convite e o nome do aplicativo, o corpo nomeia a organização e cada valor é codificado em HTML. Um convite simples (sem organização) usa os padrões e nomeia o remetente (`Email:SenderName`, senão `Authagonal`). A página de login não lê `BrandingJson`: mesclá-lo em `branding.json` para a interface de login é responsabilidade do host.
+
+Um host com o próprio `IEmailService` não é afetado. O `SendUserInviteEmailAsync` padrão da interface envia o e-mail de redefinição de senha com o link de aceitação; sobrescreva-o para enviar um convite com a sua própria marca. A página que o link abre, `/accept-invite`, faz parte do aplicativo de login e usa o `branding.json` do tenant como qualquer outra página.
+
 ## Configuração {#configuration}
 
 Coloque um ficheiro `branding.json` no diretório `wwwroot/` (ou monte-o no contentor Docker):

@@ -242,6 +242,50 @@ Content-Type: application/json
 DELETE /api/v1/profile/{userId}/identities/{provider}/{externalUserId}
 ```
 
+### Organisationen eines Benutzers auflisten {#list-a-users-organizations}
+
+```
+GET /api/v1/profile/{userId}/organizations
+```
+
+Liefert `{ "items": [ { "organizationId", "slug", "name", "status", "roles" } ] }`: jede Organisation, in der der Benutzer eine Mitgliedschaft hat, unabhängig vom Status. Eine Mitgliedschaft, deren Organisation nicht mehr existiert, wird übersprungen.
+
+### Benutzer einladen {#invite-user}
+
+```
+POST /api/v1/profile/invite
+Content-Type: application/json
+
+{
+  "email": "ada@acme.com",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "locale": "en",
+  "organizationId": "org_0123456789abcdef0123456789abcdef",
+  "organizationRoles": ["Auditor"]
+}
+```
+
+Nur `email` ist erforderlich. Legt das Konto an (unbestätigt, ohne verwendbares Passwort) und versendet per E-Mail einen einmal verwendbaren, 7 Tage gültigen Link zu `/accept-invite`. Mit `organizationId` (die ID der Organisation, nicht ihr Slug) gilt die Einladung für diese Organisation: Es wird eine `invited`-Mitgliedschaft mit `organizationRoles` geschrieben, die `active` wird, sobald die eingeladene Person ein Passwort festlegt. Die E-Mail wird im ersten `Accept-Language` Ihrer Anfrage verfasst, das die Bibliothek mitbringt, sonst in `locale`, sonst auf Englisch. Siehe [Organisationen](organizations#inviting-people).
+
+Liefert `200` mit `{ "userId": "...", "email": "ada@acme.com" }` (die Adresse in Kleinbuchstaben). Ein Fehler ist `{ "error", "error_description" }`:
+
+| Status | `error` | Wann |
+|---|---|---|
+| 400 | `email_required` | `email` fehlt oder ist leer |
+| 400 | `invalid_email` | `email` ist keine verwendbare Adresse |
+| 400 | `invalid_role` | eine Organisationsrolle beginnt mit `tenant:` oder `platform:` |
+| 404 | `organization_not_found` | `organizationId` bezeichnet keine Organisation |
+| 409 | `user_already_exists` | die Adresse hat bereits ein Konto |
+
+### Einladung erneut senden {#resend-invite}
+
+```
+POST /api/v1/profile/{userId}/resend-invite
+```
+
+Erzeugt einen neuen Link und sendet ihn. Liefert `200` mit `{ "sent": true }`. `404 user_not_found` bei einem unbekannten Benutzer, `400 already_accepted`, sobald die Adresse bestätigt ist (verwenden Sie eine Passwortzurücksetzung), und `502 invite_email_failed`, wenn die E-Mail nicht gesendet werden kann.
+
 ## MFA-Verwaltung {#mfa-management}
 
 ### MFA-Status abrufen {#get-mfa-status}
@@ -494,6 +538,167 @@ Store die Rollenmitgliedschaft nicht indiziert, aus demselben Grund: Eine leere 
 Konten, die vor Einführung des Index geschrieben wurden, sind für ihn unsichtbar, bis sie neu indiziert werden
 (`IUserStore.ReindexUserAsync`, das die Mitgliedschaften eines Benutzers per Upsert schreibt, ohne welche zu entfernen).
 
+## Organisationen {#organizations}
+
+Organisationen, ihre Mitglieder und ihre E-Mail-Domains (was sie bedeuten, steht unter [Organisationen](organizations)). Fehler werden als `{ "error": "<code>", "error_description": "..." }` geliefert, mit dem Status `400` (ungültige Eingabe), `404` (nicht gefunden) oder `409` (Konflikt).
+
+Listen sind mit `?cursor={cursor}&limit={limit}` paginiert: `limit` wird auf 1..200 begrenzt (Standard 50), und die Antwort ist `{ "items": [...], "nextCursor": "..." }`, auf der letzten Seite mit `nextCursor` gleich null. Geben Sie `nextCursor` unverändert zurück; ein Cursor, den die Liste nicht ausgegeben hat, ergibt `400 invalid_cursor`.
+
+Eine Organisation ist `{ "id", "slug", "name", "brandingJson", "metadata", "enabled", "requireMembershipForTokens", "allowAutoMembership", "createdAt", "updatedAt", "domains" }`.
+
+### Organisationen auflisten {#list-organizations}
+
+```
+GET /api/v1/organizations?cursor={cursor}&limit={limit}
+```
+
+`200`, nach ID sortiert. `400 invalid_cursor`.
+
+### Organisation anlegen {#create-organization}
+
+```
+POST /api/v1/organizations
+Content-Type: application/json
+
+{
+  "slug": "acme",
+  "name": "Acme Corp",
+  "brandingJson": "{\"appName\":\"Acme\",\"primaryColor\":\"#1a56db\"}",
+  "enabled": true,
+  "requireMembershipForTokens": true,
+  "allowAutoMembership": false,
+  "metadata": { "plan": "enterprise" }
+}
+```
+
+`slug` und `name` sind erforderlich; alles andere ist optional und behält bei Weglassen den eigenen Standardwert der Organisation. `brandingJson` ist eine Zeichenkette, die ein JSON-Objekt enthält. Liefert `201` mit einem `Location`-Header und der Organisation; ihre `id` ist `org_` gefolgt von 32 Hexadezimalziffern.
+
+| Status | `error` | Wann |
+|---|---|---|
+| 400 | `slug_required` | `slug` fehlt oder ist leer |
+| 400 | `slug_invalid` | `slug` besteht nicht aus 1 bis 64 Kleinbuchstaben, Ziffern und inneren Bindestrichen |
+| 400 | `name_required` | `name` fehlt oder ist leer |
+| 400 | `invalid_branding_json` | `brandingJson` ist kein JSON-Objekt |
+| 409 | `slug_taken` | eine andere Organisation hält den Wert als Slug oder als ID, auch bei gleichzeitigem Anlegen |
+
+### Organisation abrufen {#get-organization}
+
+```
+GET /api/v1/organizations/{idOrSlug}
+```
+
+`200`, gesucht zuerst nach ID, dann nach Slug. `404 organization_not_found`.
+
+### Organisation aktualisieren {#update-organization}
+
+```
+PUT /api/v1/organizations/{id}
+Content-Type: application/json
+
+{ "name": "Acme Corporation", "enabled": true }
+```
+
+Jedes Feld ist optional und ändert nur sich selbst: `name`, `brandingJson`, `enabled`, `requireMembershipForTokens`, `allowAutoMembership` und `metadata` (wird vollständig ersetzt; `{}` leert es). `slug` wird nur akzeptiert, um abgelehnt zu werden, wenn er abweicht. Liefert `200` mit der Organisation. `404 organization_not_found`, `400 slug_immutable`, `400 invalid_branding_json`.
+
+### Organisation löschen {#delete-organization}
+
+```
+DELETE /api/v1/organizations/{id}
+```
+
+Löscht zuerst alle Mitgliedschaften, dann die Organisation. `204`; `404 organization_not_found`.
+
+### Mitglieder auflisten {#list-members}
+
+```
+GET /api/v1/organizations/{id}/members?cursor={cursor}&limit={limit}
+```
+
+Eine Seite, nach Benutzer-ID sortiert, mit `{ "organizationId", "userId", "email", "name", "status", "roles", "createdAt", "updatedAt" }`; `email` und `name` stammen aus dem Benutzerdatensatz und sind null, wenn er nicht mehr existiert. `404 organization_not_found`, `400 invalid_cursor`.
+
+### Mitglied hinzufügen {#add-member}
+
+```
+POST /api/v1/organizations/{id}/members
+Content-Type: application/json
+
+{ "userId": "user-id", "status": "active", "roles": ["Auditor"] }
+```
+
+Bezeichnet einen vorhandenen Benutzer über `userId` (wird zuerst geprüft) oder `email`. `status` ist `invited`, `active` (Standard) oder `suspended`; `roles` ist optional. Liefert `201` mit einem `Location`-Header und der Mitgliedschaft.
+
+| Status | `error` | Wann |
+|---|---|---|
+| 404 | `organization_not_found` | keine solche Organisation |
+| 404 | `user_not_found` | weder `userId` noch `email` bezeichnet einen Benutzer |
+| 409 | `membership_exists` | der Benutzer ist bereits Mitglied |
+| 400 | `invalid_role` | eine Rolle beginnt mit `tenant:` oder `platform:` |
+| 400 | `invalid_status` | `status` ist keiner der drei Werte |
+
+### Mitglied aktualisieren {#update-member}
+
+```
+PUT /api/v1/organizations/{id}/members/{userId}
+Content-Type: application/json
+
+{ "status": "suspended", "roles": [] }
+```
+
+Beide Felder sind optional. Liefert `200` mit der Mitgliedschaft. `404 membership_not_found`, `400 invalid_status`, `400 invalid_role`.
+
+### Mitglied entfernen {#remove-member}
+
+```
+DELETE /api/v1/organizations/{id}/members/{userId}
+```
+
+`204`; `404 membership_not_found`.
+
+### Domain hinzufügen {#add-domain}
+
+```
+POST /api/v1/organizations/{id}/domains
+Content-Type: application/json
+
+{ "domain": "acme.com" }
+```
+
+Beansprucht die Domain, unverifiziert. Die Domain wird zuvor in Kleinbuchstaben umgewandelt und von Leerzeichen befreit und muss ein einfacher Name wie `acme.com` sein. Liefert `201` mit einem `Location`-Header und `{ "domain", "verified", "verifiedAt", "createdAt", "recordName", "recordValue" }`; veröffentlichen Sie unter `recordName` einen TXT-Eintrag mit dem Wert `recordValue` (siehe [Domain-Verifizierung](organizations#domain-verification)).
+
+| Status | `error` | Wann |
+|---|---|---|
+| 404 | `organization_not_found` | keine solche Organisation |
+| 400 | `domain_invalid` | kein einfacher Domainname |
+| 409 | `domain_exists` | diese Organisation beansprucht sie bereits |
+| 409 | `domain_taken` | eine andere Organisation beansprucht sie, verifiziert oder nicht |
+
+### Domain verifizieren {#verify-domain}
+
+```
+POST /api/v1/organizations/{id}/domains/{domain}/verify
+```
+
+Fragt den TXT-Eintrag ab. Liefert `200` mit der Domain (`verified: true`), auch wenn sie bereits verifiziert war. `404 organization_not_found`, `404 domain_not_found`, `409 domain_taken` und `409 verification_failed`, wenn der Eintrag fehlt oder falsch ist; seine `error_description` nennt Name und Wert, die zu veröffentlichen sind, und was gefunden wurde.
+
+### Domain entfernen {#remove-domain}
+
+```
+DELETE /api/v1/organizations/{id}/domains/{domain}
+```
+
+`204`. Die Mitglieder bleiben unberührt. `404 organization_not_found`, `404 domain_not_found`.
+
+### Organisationen per Backfill anlegen {#backfill-organizations}
+
+```
+POST /api/v1/organizations/backfill
+Content-Type: application/json
+
+{ "dryRun": true }
+```
+
+Legt Organisationen und Mitgliedschaften aus der alten `OrganizationId` der Benutzer an. `dryRun` ist standardmäßig true, mit oder ohne Body, und dann wird nichts geschrieben. Liefert `200` mit `{ "dryRun", "organizationsCreated", "membershipsCreated", "usersSkipped", "organizations": [ { "legacyValue", "slug", "users" } ], "truncated" }`. Siehe [Backfill](organizations#backfill).
+
 ## SCIM-Tokens {#scim-tokens}
 
 ### Token erzeugen {#generate-token}
@@ -510,6 +715,8 @@ Content-Type: application/json
 ```
 
 `description` und `expiresInDays` sind optional (lassen Sie `expiresInDays` für ein Token ohne Ablaufdatum weg). Liefert das Rohtoken ein einziges Mal. Bewahren Sie es sicher auf; es lässt sich nicht erneut abrufen.
+
+`organizationId` ist optional und kennzeichnet jeden Benutzer, den das Token anlegt (siehe [Organisationen](organizations#membership-from-a-scim-token)). Sie muss eine vorhandene Organisation bezeichnen: Andernfalls ergibt sich `400 unknown_organization`, und ein fehlerhaft geformter Wert ergibt `400 invalid_request`.
 
 ### Tokens auflisten {#list-tokens}
 

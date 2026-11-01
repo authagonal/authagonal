@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Organization admin API.** `/api/v1/organizations` (list, create, get by id or slug, update, delete), its members
+  (`/{id}/members`, `/{id}/members/{userId}`) and email domains (`/{id}/domains`, `/{id}/domains/{domain}/verify`,
+  `/{id}/domains/{domain}`), `POST /api/v1/organizations/backfill`, and `GET /api/v1/profile/{userId}/organizations`,
+  behind `AdminApi:Enabled` and the admin scope. Failures are `{ error, error_description }` at 400, 404, 409 or 502.
+  A domain is proved by a TXT record at `_authagonal-org.<domain>` read through the new `ITxtResolver` (DnsClient by
+  default, replaceable). Every write is audited (`organization.created` through `organization.backfill`).
+- **Invitations.** `POST /api/v1/profile/invite` creates an unconfirmed account, optionally with an `invited`
+  organization membership, and emails a seven-day link; `POST /api/v1/profile/{userId}/resend-invite` sends it again.
+  `IEmailService.SendUserInviteEmailAsync` is a default interface member (it sends the password-reset email with the
+  accept link), the built-in sender writes it in the inviting administrator's language wearing the organization's
+  `appName`, `logoUrl` and `primaryColor`, and `IInviteLinkBuilder` decides where the link points
+  (`{issuer}/accept-invite?p=<token>` by default). Setting a password through the link confirms the address and moves
+  the user's `invited` memberships to `active` (`organization.member.joined`).
+- **Accept-invite page.** The login app serves `/accept-invite` at the host root, outside `/login`, and exports
+  `AcceptInvite` for hosts built on `@authagonal/login`.
+- **Backfill.** `POST /api/v1/organizations/backfill` turns the legacy free-text `AuthUser.OrganizationId` into
+  organizations and `active` memberships; `dryRun` defaults to true and a run is idempotent.
+- **Services for hosts.** `OrganizationOperations` and `UserInviteOperations` (`Authagonal.Server.Services`) hold every
+  rule and error code the endpoints use and return `OperationResult<T>` and `ResultPage<T>`, so a host's own surface can
+  call them directly.
+- `Email:ResendApiUrl` sets the endpoint the built-in Resend sender posts to (default `https://api.resend.com/emails`).
+
+### Changed
+- `POST /api/v1/scim/tokens` refuses an `organizationId` that names no organization with `400 unknown_organization`.
+- `AddAuthagonal` registers `EnvPartitioner.Live`, so the standalone server starts on Table storage; it failed at
+  start for want of an `EnvPartitioner` before.
+
 ## [0.31.1], 2026-10-04
 
 ### Changed

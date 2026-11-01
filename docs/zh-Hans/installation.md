@@ -118,6 +118,14 @@ app.Run();
 
 配置了 `Email:ResendApiKey` 和 `Email:SenderEmail` 后，内置的 [Resend](https://resend.com) 发送器会自动启用，无需注册服务。如果没有任何 `IEmailService`，验证邮件和密码重置邮件会被**静默丢弃**；又因为默认情况下登录要求邮箱已确认，自助注册的用户将永远无法登录（`UseAuthagonal` 会在启动时记录警告）。你可以设置 `Email:*` 键，或在 `AddAuthagonal()` 之前注册自己的 `IEmailService`，或在 `Auth:AutoConfirmEmailDomains` 中列出你的域名以跳过验证（仅限开发/测试）。参见[配置 → 邮件](configuration#email)。
 
+### 组织与邀请 {#organizations-and-invitations}
+
+`AddAuthagonal()` 会注册组织管理 API 所需的一切,因此不做任何改动的主机也会与其余管理 API(`AdminApi:Enabled`)一起获得它:`/api/v1/organizations` 以及邀请路由 `/api/v1/profile/invite` 和 `/api/v1/profile/{userId}/resend-invite`。组织和成员关系需要持久化存储;每个提供程序都自带一个,在 Azure Table Storage 上无需任何额外设置。参见[组织](organizations)。
+
+- **邀请链接在颁发者上打开 `/accept-invite`。** 独立服务器的 SPA 回退会提供它。自行挂载登录 SPA 的主机必须在主机根路径提供该应用,使 `/accept-invite` 能在 `/login` 基础路径之外访问到它,或者从 `@authagonal/login` 导入 `AcceptInvite` 并路由到它。若要让链接指向别处,请在 `AddAuthagonal()` 之前注册你自己的 `IInviteLinkBuilder`。
+- **邀请需要邮件发送器。** 配置了 `Email:ResendApiKey` 和 `Email:SenderEmail` 后,内置的 Resend 发送器就会发送邀请。拥有自己 `IEmailService` 的主机需重写 `SendUserInviteEmailAsync`;不重写时,受邀者会收到带有接受链接的密码重置邮件。
+- **域名检查会读取 DNS**,通过 `ITxtResolver` 进行;若要使用其他解析器,请在 `AddAuthagonal()` 之前注册你自己的。
+
 ## SQL 后端 {#sql-backend}
 
 要在你自己的数据库上运行而不是使用云服务，请引用 `Authagonal.SqlProvider`，并在 `AddAuthagonal()` **之前**注册它，正是这些注册让 `AddAuthagonal()` 跳过 Azure Table Storage 接线：

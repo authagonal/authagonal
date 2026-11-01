@@ -514,6 +514,7 @@ The built-in email sender uses [Resend](https://resend.com) and **activates auto
 | Setting | Description |
 |---|---|
 | `Email:ResendApiKey` | Resend API key. When set, the built-in Resend sender is used. |
+| `Email:ResendApiUrl` | The endpoint the built-in Resend sender posts to. Defaults to `https://api.resend.com/emails`. Set it to send through a relay of your own. It is read from configuration only, never from an admin API or a request. |
 | `Email:SenderEmail` | Sender email address |
 | `Email:SenderName` | Sender display name (defaults to `"Authagonal"`) |
 

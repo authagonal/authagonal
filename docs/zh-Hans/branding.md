@@ -38,6 +38,14 @@ locale: zh-Hans
 
 当 `organization.name` 存在且与 `branding.appName` 不同时（比较时忽略大小写并去除首尾空白，因此与租户同名的组织不会显示成“Acme / 正在登录 Acme”），登录卡片会在标题下方渲染一行副标题：“正在登录 {name}”（`data-testid="login-org-name"`，i18n 键 `login.signingInTo`）。它只由共享的 `AuthLayout` 页眉渲染一次，因此所有通过它挂载的路由（登录、注册、忘记/重置密码、MFA 质询和设置页面、设备页面、同意和智能体同意、授权以及账户页面）都会以相同方式显示它。当 `organization` 不存在、为 `null` 或其名称与 `branding.appName` 相同时，不会渲染任何内容，页眉保持正常间距。
 
+## 邀请邮件中的组织品牌 {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` 是归主机所有的 JSON 对象。库仅在一处读取它,即邀请邮件(`IEmailService.SendUserInviteEmailAsync`,参见[组织](organizations#inviting-people))。对于加入组织的邀请,内置发送器会从中取出 `appName`、`logoUrl` 和 `primaryColor`,逐字段叠加在邮件自身的默认值之上:`Authagonal`、无徽标和 `#2563eb`(登录应用的默认值)。缺失、为空或不是字符串的字段视为未设置;徽标必须是绝对的 `https` URL,颜色必须是简单的 CSS 颜色(十六进制、`rgb()`/`hsl()` 或关键字),否则同样视为未设置。格式错误的 JSON 会被忽略:邀请绝不会因为组织的品牌设置而被拒绝。
+
+主题是本地化的邀请标题和应用名称,正文写明组织名称,所有值都经过 HTML 编码。简单邀请(无组织)使用默认值,并写明发件人(`Email:SenderName`,否则为 `Authagonal`)。登录页面不读取 `BrandingJson`:为登录界面把它合并到 `branding.json` 是主机的工作。
+
+拥有自己 `IEmailService` 的主机不受影响。接口默认的 `SendUserInviteEmailAsync` 发送带有接受链接的密码重置邮件;重写它即可发送带有你自己品牌的邀请。链接打开的页面 `/accept-invite` 属于登录应用,与其他页面一样使用租户的 `branding.json`。
+
 ## 配置 {#configuration}
 
 将 `branding.json` 文件放在 `wwwroot/` 目录中（或将其挂载到 Docker 容器中）：

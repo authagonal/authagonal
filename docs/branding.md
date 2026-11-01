@@ -50,6 +50,14 @@ password, the MFA challenge and setup pages, the device page, consent and agent-
 and account) shows it identically. Nothing renders, and the header keeps its normal spacing, when
 `organization` is absent, `null`, or its name matches `branding.appName`.
 
+## Organisation Branding in Invitation Emails
+
+`Organization.BrandingJson` is a JSON object the host owns. The library reads it in one place, the invitation email (`IEmailService.SendUserInviteEmailAsync`, see [Organizations](organizations#inviting-people)). For an invite into an organization, the built-in sender takes `appName`, `logoUrl` and `primaryColor` from it, field by field, over the email's own defaults: `Authagonal`, no logo and `#2563eb` (the login app's defaults). A field that is missing, empty or not a string is unset; a logo must be an absolute `https` URL and a colour a simple CSS colour (hex, `rgb()`/`hsl()` or a keyword), otherwise it is unset too. Malformed JSON is ignored: an invitation is never refused for an organization's branding.
+
+The subject is the localized invite title and the app name, the body names the organization, and every value is HTML-encoded. A plain invite (no organization) uses the defaults and names the sender (`Email:SenderName`, else `Authagonal`). The sign-in page does not read `BrandingJson`: merging it over `branding.json` for the login UI is the host's job.
+
+A host with its own `IEmailService` is unaffected. The interface's default `SendUserInviteEmailAsync` sends the password-reset email with the accept link; override it to send an invitation that wears your own branding. The page the link opens, `/accept-invite`, is part of the login app and takes the tenant's `branding.json` like every other page.
+
 ## Configuration
 
 Place a `branding.json` file in the `wwwroot/` directory (or mount it into the Docker container):

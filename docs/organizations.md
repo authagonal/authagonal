@@ -23,12 +23,10 @@ An `Organization` gives it a record: an immutable opaque id, an immutable tenant
 - **No organization picker.** A user who belongs to several organizations, on a request that names none, gets `account_selection_required`, an error the relying party can act on by retrying with a parameter. There is no hosted screen that asks them to choose.
 - **No delegated organization administration.** There is no permission that lets a customer's own administrator manage their members.
 - **No organization-scoped SCIM isolation.** A SCIM token bound to an organization (`ScimToken.OrganizationId`) tags the users it creates and, when the id names a real organization, makes them active members (see [Membership from a SCIM token](#membership-from-a-scim-token)). Ownership checks still key on the OAuth client, not the organization, so the binding decides tagging, not access.
-- **No invitation flow in this library.** There is no invite endpoint and no invitation email. A host writes an `invited` membership itself; the ways it becomes `active` are in [Invitations](#invitations).
 - **No organization-scoped groups.** The `groups` claim and SCIM group membership stay tenant-wide; only roles are organization-scoped.
 - **No organization webhook events, and no organization-scoped audit.** `IAuthHook` has no organization lifecycle events (created, membership granted or revoked), existing hook payloads carry no `organizationId`, and there is no organization column or index on the audit log.
 - **Role-gated scopes are filtered against tenant roles at authorize.** `Scope.AllowedRoles` is applied on `/connect/authorize` against the account's directly-assigned roles, before the organization is resolved, so a scope whose `AllowedRoles` is satisfied only by an organization-scoped role is dropped at authorize, or refused with `access_denied` if no requested scope survives. On refresh the same gate runs against the resolved subject's roles, which do include the organization's. Until the two agree, gate scopes on tenant roles.
-- **No organization branding in this library.** `Organization.BrandingJson` is stored for the host to merge over the tenant's branding; nothing in this library reads it. The login app shows the organization's name ("Signing in to {name}") when the host's boot payload carries an `organization` (`{ id, slug, name }`); the library itself resolves no organization before authentication except through the `organization` parameter, a single-entry client restriction, an organization-scoped connection, or a host's `ITenantContext.OrganizationId`.
-- **No organization admin REST API.** `IOrganizationStore` and `IOrganizationMembershipStore` are the surface; a host that wants endpoints builds them. A host that lists organizations or members should use `ListPageAsync` / `ListByOrganizationPageAsync` (below).
+- **No organization branding in this library.** `Organization.BrandingJson` is stored for the host to merge over the tenant's branding; this library reads it in one place only, the invitation email ([Branding](branding#organisation-branding-in-invitation-emails)). The login app shows the organization's name ("Signing in to {name}") when the host's boot payload carries an `organization` (`{ id, slug, name }`); the library itself resolves no organization before authentication except through the `organization` parameter, a single-entry client restriction, an organization-scoped connection, or a host's `ITenantContext.OrganizationId`.
 
 ## Creating an organization
 
@@ -71,16 +69,17 @@ await membershipStore.UpsertAsync(new OrganizationMembership
 
 ### Invitations
 
-An `invited` row carries `InvitedByUserId`, `InvitedAt`, and any roles the invitee was offered. The library never sends the invitation; it promotes the row to `active` (keeping roles, inviter and invitation time, and stamping `JoinedAt`) in two places:
+An `invited` row carries `InvitedByUserId`, `InvitedAt`, and any roles the invitee was offered. The admin API writes one when it invites someone into an organization ([Inviting people](#inviting-people)), and a host may write one itself. The library promotes the row to `active` (keeping roles, inviter and invitation time, and stamping `JoinedAt`) in three places:
 
+- **Accepting the invitation.** Setting a password through the invitation link confirms the address, and the library's activation hook moves every `invited` membership of that user to `active` and writes `organization.member.joined`.
 - **Signing in through an organization-scoped SAML or OIDC connection.** The organization's own IdP vouching for the person accepts the invitation (`FederatedOrganizationBinding`, 0.30.2). Without it an invitee who only ever signs in through SSO would be refused a token by the membership gate.
 - **Automatic membership** (below), when the user qualifies.
 
-A `suspended` row is never promoted by either route and never modified by a sign-in.
+A `suspended` row is never promoted by any of these routes and never modified by a sign-in.
 
 ### Verified domains and automatic membership
 
-`Organization.Domains` holds the email domains the organization has claimed, each an `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`. `Domain` is stored lowercase, trimmed, with no trailing dot. The library stores the claim and reads `VerifiedAt`; proving control (typically a DNS TXT record carrying `VerificationToken`) is the host's job, and the host stamps `VerifiedAt` when it succeeds.
+`Organization.Domains` holds the email domains the organization has claimed, each an `OrganizationDomain { Domain, VerificationToken, CreatedAt, VerifiedAt }`. `Domain` is stored lowercase, trimmed, with no trailing dot. The admin API stores the claim, proves control with a DNS TXT record carrying `VerificationToken`, and stamps `VerifiedAt` ([Domain verification](#domain-verification)); a host with its own proof can stamp `VerifiedAt` itself.
 
 `Organization.AllowAutoMembership` (off by default) lets a user join without an invitation. When the organization is **explicitly** selected (a carried refresh grant, the `organization` parameter, an organization-scoped connection, or a client restricted to exactly that organization) and the user has no active membership, they are made a member if **all** of these hold:
 
@@ -92,13 +91,86 @@ A missing row is created `active` with no roles; an `invited` row is promoted; a
 
 ### Membership from a SCIM token
 
-A SCIM token minted with `organizationId` stamps that value as `org_id` on every user it creates. When the id names an existing organization, the create also writes an `active` membership with no roles and audits `scim.organization_member_added`. An id that names no organization stays a bare tag. Creation only: a later sync does not re-tag or add members. See [SCIM](scim#tagging-a-connectors-users-with-an-organization).
+A SCIM token minted with `organizationId` stamps that value as `org_id` on every user it creates. `POST /api/v1/scim/tokens` refuses an `organizationId` that names no organization with `400 unknown_organization` (a malformed one with `400 invalid_request`), the same refusal an SSO connection gets, so a token minted through the admin API never carries a tag no organization lists. When the id names an organization, the create also writes an `active` membership with no roles and audits `scim.organization_member_added`. A token that already carries an id naming nothing stays a bare tag. Creation only: a later sync does not re-tag or add members. See [SCIM](scim#tagging-a-connectors-users-with-an-organization).
 
 ### Listing and deleting
 
 `IOrganizationStore.ListPageAsync(cursor, limit)` and `IOrganizationMembershipStore.ListByOrganizationPageAsync(organizationId, cursor, limit)` return a page (`Items` and an opaque `NextCursor`, null on the last page). `limit` is clamped to 1..200 and a malformed cursor throws `ArgumentException`. The cursor is keyset-based, so a row added or removed between reads never shifts or repeats a page. Both have default implementations over the unpaged listings, so a custom store keeps compiling; the Azure Table stores override them with a server-side range query.
 
 Deleting a user through the admin `DELETE /api/v1/profile/{userId}`, SCIM `DELETE /scim/v2/Users/{id}` or the SCIM reclaim path also deletes every membership they hold (`AccountArtefactPurge.PurgeAsync` with an `IOrganizationMembershipStore`; the three-store overload purges none). A host with its own delete path must pass the membership store too, or organizations keep listing the deleted member.
+
+## Administering organizations over HTTP
+
+The admin API (`AdminApi:Enabled`, the admin scope) manages organizations, memberships, domains and invitations. The [Admin API](admin-api#organizations) page gives every request, success status and error code; in short:
+
+| Routes | Purpose |
+|---|---|
+| `GET /api/v1/organizations`, `POST /api/v1/organizations` | List (paged) and create |
+| `GET /api/v1/organizations/{idOrSlug}`, `PUT /api/v1/organizations/{id}`, `DELETE /api/v1/organizations/{id}` | Read, update, delete (the members go with it) |
+| `GET /api/v1/organizations/{id}/members`, `POST /api/v1/organizations/{id}/members`, `PUT /api/v1/organizations/{id}/members/{userId}`, `DELETE /api/v1/organizations/{id}/members/{userId}` | List, add, change status and roles, remove |
+| `POST /api/v1/organizations/{id}/domains`, `POST /api/v1/organizations/{id}/domains/{domain}/verify`, `DELETE /api/v1/organizations/{id}/domains/{domain}` | Claim, prove and release an email domain |
+| `POST /api/v1/organizations/backfill` | Turn legacy `OrganizationId` values into organizations |
+| `GET /api/v1/profile/{userId}/organizations` | The organizations one user belongs to |
+| `POST /api/v1/profile/invite`, `POST /api/v1/profile/{userId}/resend-invite` | Invite someone by email, send the invitation again |
+
+A failure answers `{ "error": "<code>", "error_description": "..." }` with `400` (invalid input), `404` (not found), `409` (conflict) or `502` (`invite_email_failed`).
+
+## Domain verification
+
+`POST /api/v1/organizations/{id}/domains` with `{ "domain": "acme.com" }` claims the domain, unverified, and answers `201` with the record to publish: `recordName` (`_authagonal-org.acme.com`) and `recordValue` (`authagonal-org-verify=<token>`). The token is 256 random bits, one per claim. Publish a TXT record at that name with exactly that value, then call `POST /api/v1/organizations/{id}/domains/acme.com/verify`.
+
+A match stamps `VerifiedAt` and writes `organization.domain_verified`. A miss is `409 verification_failed`, never a `200` with `verified: false`, and its description spells out the record name and value to publish and what was found there. Verifying a verified domain returns it unchanged. One domain belongs to at most one organization, verified or not (`domain_taken`). Removing a domain stops future auto-joins and evicts nobody.
+
+The DNS read goes through `ITxtResolver` (`Authagonal.Core.Services`): `ResolveTxtAsync(name, ct)` returns the TXT values published at a name, an empty list when there are none, and throws when the lookup fails (reported as `verification_failed`; the exception's own text is never returned). The default reads real DNS through DnsClient and joins the character-strings of a record into one value. It is registered with `TryAdd`, so a resolver you register before `AddAuthagonal()` (an internal one, DNS-over-HTTPS) wins.
+
+## Backfill
+
+Before organizations, `AuthUser.OrganizationId` was free text. `POST /api/v1/organizations/backfill` groups users by that exact string and creates one organization per distinct value, with an `active` membership (no roles) for each user. The slug is the value lowercased with every run of other characters collapsed to a hyphen (`-2`, `-3` and so on on a collision), the display name is the value itself, and the organization is stamped with the `legacyOrganizationId` metadata key. The body is `{ "dryRun": true }`; **a dry run is the default**, also with no body at all, and writes nothing.
+
+Running it again is idempotent: an organization already stamped for a value is reused, even after a rename, and a user who already has a membership is counted in `usersSkipped`. The response carries `dryRun`, `organizationsCreated`, `membershipsCreated`, `usersSkipped`, `organizations` (the first 50, each `legacyValue`, `slug` and `users`) and `truncated`. One run scans at most 50,000 users; `truncated: true` means run it again. A real run writes `organization.backfill`.
+
+## Inviting people
+
+`POST /api/v1/profile/invite` takes `email` (required), `firstName`, `lastName`, `locale`, `organizationId` and `organizationRoles`. It creates the account at once, unconfirmed and with no usable password, and emails a link; the answer is `200` with `{ "userId", "email" }`. With `organizationId` it also writes an `invited` membership carrying the roles, `InvitedByUserId` (the calling administrator) and `InvitedAt`, and the email names the organization and wears its branding ([Branding](branding#organisation-branding-in-invitation-emails)). Everything about the organization is checked before the account exists, so a refused invite leaves no stray user. Only new accounts can be invited: an existing address is `409 user_already_exists`, and an existing user joins through `POST /api/v1/organizations/{id}/members`.
+
+The link carries a single-use `password_reset` grant that lives seven days and is redeemed by the existing `POST /api/auth/reset-password`; there is no second redeem endpoint. Setting the password confirms the address and fires `IAuthHook.OnEmailConfirmedAsync`, and the library's own activation hook then moves every `invited` membership of the user to `active` (roles, inviter and invitation time kept, `JoinedAt` stamped) and writes `organization.member.joined`, with the new member as the actor. A `suspended` or `active` row is left alone, a store failure is logged and never fails the confirmation, and the hook is idempotent. It runs wherever the library fires `OnEmailConfirmedAsync`, whatever hooks your host registers.
+
+`POST /api/v1/profile/{userId}/resend-invite` mints a fresh link and sends it: `404 user_not_found`, `400 already_accepted` once the address is confirmed (use a password reset instead), and `502 invite_email_failed` when the send throws. The first invite is more forgiving: a failed send is logged and the user and link exist, because the invite can be resent. A resent invite names the organization when the user holds exactly one `invited` membership.
+
+The email goes through `IEmailService.SendUserInviteEmailAsync(toEmail, tenantName, acceptUrl, locale, ct, organization)`, a default interface member whose body sends the password-reset email with the accept link, so a host with its own `IEmailService` still delivers a link that works; override it to send an invitation of your own. The built-in sender writes the invitation in the inviting administrator's language when the library ships it (the first `Accept-Language` it recognises, else the request's `locale`), else the invitee's, else English.
+
+Where the link points is `IInviteLinkBuilder` (`Authagonal.Core.Services`): `Task<string> BuildAcceptUrlAsync(string token, Organization? organization, CancellationToken ct = default)`. The default returns `{issuer}/accept-invite?p=<token>`, with `&organization=<slug>` for an organization invite, both escaped. Register your own before `AddAuthagonal()` (it is added with `TryAdd`) to serve the page elsewhere, such as an organization's own domain; invite and resend build every link through it.
+
+## The accept-invite page
+
+The login app serves `/accept-invite` at the host root, outside the `/login` basename, and the standalone server's SPA fallback serves it. It reads the token from `p`, names the organization when the link carries one, asks for a new password twice, checks it against the password policy and posts it to `/api/auth/reset-password`. A link with no token, or a token that is unknown or expired, shows an invalid-or-expired message and no form; a password the server refuses (`weak_password`) shows the server's message. The copy is in all eleven locales. A host built on the npm package imports `AcceptInvite` from `@authagonal/login` and mounts it at `/accept-invite`.
+
+## Calling the services from code
+
+The endpoints are thin: `OrganizationOperations` and `UserInviteOperations` (`Authagonal.Server.Services`, registered scoped with `TryAdd`) own every rule, error code and audit row, so a host surface of its own (a portal route, a tool) can call them and write the same rows. `OrganizationOperations` has `ListPageAsync`, `GetAsync`, `CreateAsync`, `UpdateAsync`, `DeleteAsync`, `ListMembersPageAsync`, `AddMemberAsync`, `UpdateMemberAsync`, `RemoveMemberAsync`, `AddDomainAsync`, `VerifyDomainAsync`, `RemoveDomainAsync`, `ListUserOrganizationsAsync` and `BackfillAsync`; `UserInviteOperations` has `InviteAsync` and `ResendInviteAsync`. They take the audit actor as a string and no HTTP type, and who may call them (who may invite into an organization, how often an invite may be resent) is the host's policy.
+
+Each returns `OperationResult<T>`: `Outcome` (`Ok`, `Invalid`, `NotFound`, `Conflict` or `Failed`), `Value`, `Error` (the code), `Message`, `Fields` and `Succeeded`. The admin API maps the outcomes to `400`, `404`, `409` and `502`. A list returns `ResultPage<T>` (`Items` and `NextCursor`). `ListUserOrganizationsAsync` and `BackfillAsync` return their value directly.
+
+## Audit actions
+
+Every write goes through `IAuditLogger`, with entity type `organization` (`user` for the last two) and the admin caller's subject as the actor.
+
+| Action | Written when | Detail |
+|---|---|---|
+| `organization.created` | an organization is created | the slug |
+| `organization.updated` | an organization is updated | the slug |
+| `organization.deleted` | an organization is deleted | the slug |
+| `organization.member.added` | a member is added | `user=<userId>` |
+| `organization.member.updated` | a member's status or roles change | `user=<userId>` |
+| `organization.member.removed` | a member is removed | `user=<userId>` |
+| `organization.member.invited` | an invitation creates the `invited` membership | `user=<userId>` |
+| `organization.member.joined` | an `invited` membership becomes `active` on email confirmation (the actor is the user) | `user=<userId>` |
+| `organization.domain_added` | a domain is claimed | `domain=<domain>` |
+| `organization.domain_verified` | a domain is proved | `domain=<domain>` |
+| `organization.domain_removed` | a domain is released | `domain=<domain>` |
+| `organization.backfill` | a backfill that is not a dry run | `organizationsCreated=<n> membershipsCreated=<n>` |
+| `user.invited` | someone is invited | the address with its local part masked (`***@acme.com`) |
+| `user.invite_resent` | an invitation is sent again | the same |
 
 ## Organization-scoped roles
 

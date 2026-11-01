@@ -514,6 +514,7 @@ L'expéditeur d'e-mails intégré utilise [Resend](https://resend.com) et **s'ac
 | Paramètre | Description |
 |---|---|
 | `Email:ResendApiKey` | Clé d'API Resend. Lorsqu'elle est définie, l'expéditeur Resend intégré est utilisé. |
+| `Email:ResendApiUrl` | Le point de terminaison auquel l'expéditeur Resend intégré envoie ses requêtes. Par défaut `https://api.resend.com/emails`. À définir pour envoyer via un relais propre. Lu uniquement depuis la configuration, jamais depuis une API d'administration ni une requête. |
 | `Email:SenderEmail` | Adresse e-mail de l'expéditeur |
 | `Email:SenderName` | Nom d'affichage de l'expéditeur (`"Authagonal"` par défaut) |
 

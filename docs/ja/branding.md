@@ -38,6 +38,14 @@ locale: ja
 
 `organization.name` が存在し、かつ `branding.appName` と異なる場合 (大文字小文字を区別せず、前後の空白を除いて比較するため、テナントと同じ名前の組織で「Acme / Acmeにサインインしています」のような表示にはなりません)、ログインカードは見出しの下に「{name}にサインインしています」というサブタイトルを表示します (`data-testid="login-org-name"`、i18n キー `login.signingInTo`)。これは共有の `AuthLayout` ヘッダーで 1 回だけ描画されるため、それを通じてマウントされるすべてのルート (サインイン、登録、パスワードを忘れた場合/リセット、MFA のチャレンジとセットアップのページ、デバイスページ、同意とエージェント同意、グラント、アカウント) で同じように表示されます。`organization` が存在しない、`null` である、またはその名前が `branding.appName` と一致する場合は何も描画されず、ヘッダーは通常の余白を保ちます。
 
+## 招待メールでの組織のブランディング {#organisation-branding-in-invitation-emails}
+
+`Organization.BrandingJson` は、ホストが所有する JSON オブジェクトです。ライブラリはこれを招待メール(`IEmailService.SendUserInviteEmailAsync`、[組織](organizations#inviting-people)を参照)の 1 か所だけで読み取ります。組織への招待では、組み込みの送信者がそこから `appName`、`logoUrl`、`primaryColor` を、メール自体の既定値(`Authagonal`、ロゴなし、`#2563eb`。ログインアプリの既定値)の上にフィールドごとに取り込みます。存在しない、空、または文字列でないフィールドは未設定として扱われます。ロゴは絶対 `https` URL、色は単純な CSS の色(16 進、`rgb()`/`hsl()`、またはキーワード)である必要があり、そうでなければ同様に未設定として扱われます。不正な JSON は無視されます。組織のブランディングが原因で招待が拒否されることはありません。
+
+件名は、ローカライズされた招待のタイトルとアプリ名で、本文には組織名が入り、すべての値は HTML エンコードされます。単純な招待(組織なし)は既定値を使い、送信者の名前(`Email:SenderName`、なければ `Authagonal`)を表示します。ログインページは `BrandingJson` を読み取りません。ログイン UI 向けにこれを `branding.json` にマージするのは、ホストの役割です。
+
+独自の `IEmailService` を持つホストには影響しません。インターフェースの既定の `SendUserInviteEmailAsync` は、承認リンク付きのパスワードリセットメールを送信します。独自のブランディングを施した招待を送るには、オーバーライドしてください。リンクが開くページ `/accept-invite` はログインアプリの一部で、他のページと同様にテナントの `branding.json` を使用します。
+
 ## 設定 {#configuration}
 
 `branding.json` ファイルを `wwwroot/` ディレクトリに置きます (または Docker コンテナにマウントします)。
