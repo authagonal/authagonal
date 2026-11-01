@@ -329,6 +329,19 @@ public sealed class InviteEmailTests
     }
 
     [Theory]
+    [InlineData("""{"primaryColor":"#ffeb3b"}""", "color: #10211f")]
+    [InlineData("""{"primaryColor":"#0a7c3e"}""", "color: #ffffff")]
+    [InlineData("""{"primaryColor":"yellow"}""", "color: #ffffff")]
+    public async Task TheButtonTextColour_IsChosenFromTheBackgroundLuminance(string branding, string textColour)
+    {
+        var (email, capture) = Create();
+
+        await email.SendUserInviteEmailAsync("a@invite.test", "Tenant", "https://auth.test/accept-invite?p=t", "en", default, Org(branding));
+
+        Assert.Contains(textColour + ";", Html(capture), StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("""{"primaryColor":"red;background:url(//evil.test/x)"}""")]
     [InlineData("""{"primaryColor":"\"><script>"}""")]
     [InlineData("""{"primaryColor":""}""")]

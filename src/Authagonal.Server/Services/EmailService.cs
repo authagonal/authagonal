@@ -230,7 +230,7 @@ public sealed class EmailService(
                     {header}
                     <h2>{Enc(localizer["Email_Invite_Heading"].Value)}</h2>
                     <p>{Enc(localizer["Email_Invite_Body", invitedTo].Value)}</p>
-                    <p><a href="{Enc(acceptUrl)}" style="display: inline-block; padding: 12px 24px; background: {Enc(branding.PrimaryColor)}; color: white; text-decoration: none; border-radius: 6px;">{Enc(localizer["Email_Invite_Button"].Value)}</a></p>
+                    <p><a href="{Enc(acceptUrl)}" style="display: inline-block; padding: 12px 24px; background: {Enc(branding.PrimaryColor)}; color: {ReadableText(branding.PrimaryColor)}; text-decoration: none; border-radius: 6px;">{Enc(localizer["Email_Invite_Button"].Value)}</a></p>
                     <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">{Enc(localizer["Email_Invite_Footer"].Value)}</p>
                 </div>
                 """;
@@ -240,6 +240,21 @@ public sealed class EmailService(
         {
             CultureInfo.CurrentUICulture = previous;
         }
+    }
+
+    /// <summary>Near-black on a light background, white otherwise, so the invite button stays readable
+    /// whatever primary colour an organisation picks. Only a 6 digit hex can be measured; anything else
+    /// (shorthand, rgb(), a keyword) keeps white.</summary>
+    private static string ReadableText(string background)
+    {
+        if (background.Length != 7 || background[0] != '#'
+            || !int.TryParse(background.AsSpan(1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r)
+            || !int.TryParse(background.AsSpan(3, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g)
+            || !int.TryParse(background.AsSpan(5, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
+            return "#ffffff";
+
+        var luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
+        return luminance > 0.6 ? "#10211f" : "#ffffff";
     }
 
     private async Task SendAsync(string toEmail, string subject, string html, CancellationToken ct)
