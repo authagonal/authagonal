@@ -233,7 +233,9 @@ public sealed class PreAuthOrganizationResolver(
             && FirstValue(parameters, "request_uri") is { } requestUri
             && await PeekPushedAuthorizationAsync(grantStore, requestUri, clientId, ct) is { } pushed)
         {
-            parameters = ToCaseInsensitive(pushed.Parameters);
+            // Exactly as /connect/authorize reads the stored record (ParRequestParameters): an
+            // uppercase name there names no organisation, so it must not here either.
+            parameters = pushed.Parameters.ToDictionary(p => p.Key, p => p.Value ?? [], StringComparer.Ordinal);
             clientId = pushed.ClientId;
         }
 

@@ -909,20 +909,27 @@ public class OrganizationBrandingTests
         Assert.Equal("Org_7fA2", resolved.Organization!.Id);
     }
 
-    /// <summary>Parameter names are read without regard to case, on the return URL and in a pushed record.</summary>
+    /// <summary>
+    /// Names are read without regard to case on the return URL, but a pushed record is read exactly, as
+    /// /connect/authorize reads it: an uppercase pushed name names no organisation.
+    /// </summary>
     [Fact]
-    public async Task Resolve_ReadsParameterNamesWithoutRegardToCase()
+    public async Task Resolve_ReadsQueryNamesWithoutRegardToCase_AndPushedNamesExactly()
     {
         var organizations = new StubOrganizationStore().Add(OrganizationWith("""{"appName":"Acme Europe"}"""));
-        var grants = new StubGrantStore().Add(PushedAuthorizationGrant(
+        var upper = new StubGrantStore().Add(PushedAuthorizationGrant(
             PushedRequestUri, "app", new Dictionary<string, string[]> { ["ORG_SLUG"] = ["acme-eu"] }));
+        var exact = new StubGrantStore().Add(PushedAuthorizationGrant(
+            PushedRequestUri, "app", new Dictionary<string, string[]> { ["org_slug"] = ["acme-eu"] }));
 
         var onReturnUrl = await ResolveAsync(
             LoginRequest("/connect/authorize?client_id=app&Organization=acme-eu"), organizations);
-        var inPushedRequest = await ResolveAsync(PushedLoginRequest(), organizations, grantStore: grants);
+        var upperPushed = await ResolveAsync(PushedLoginRequest(), organizations, grantStore: upper);
+        var exactPushed = await ResolveAsync(PushedLoginRequest(), organizations, grantStore: exact);
 
         Assert.Equal("Org_7fA2", onReturnUrl.Organization!.Id);
-        Assert.Equal("Org_7fA2", inPushedRequest.Organization!.Id);
+        Assert.Null(upperPushed.Organization);
+        Assert.Equal("Org_7fA2", exactPushed.Organization!.Id);
     }
 
     /// <summary>
