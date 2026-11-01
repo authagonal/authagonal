@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>حاول شخص ما التسجيل باستخدام هذا البريد الإلكتروني، لكن الحساب موجود بالفعل. سجّل الدخول بدلاً من ذلك، أو أعد تعيين كلمة المرور إذا نسيتها.</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>تسجيل الدخول</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>إذا لم تكن أنت من قام بذلك، يمكنك تجاهل هذه الرسالة بأمان.</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>تمت دعوتك</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>تمت دعوتك</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>تمت دعوتك إلى {0}. عيّن كلمة مرور لتفعيل حسابك والبدء.</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>تعيين كلمة المرور</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>تنتهي صلاحية رابط الدعوة هذا خلال 7 أيام. إذا لم تكن تتوقع هذه الدعوة، يمكنك تجاهل هذا البريد الإلكتروني بأمان.</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>تم تسجيل الخروج</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>تسجيل الخروج</value></data>
 </root>

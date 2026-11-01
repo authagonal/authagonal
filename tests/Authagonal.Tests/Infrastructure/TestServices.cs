@@ -17,9 +17,17 @@ public sealed class TestTenantContext(string issuer) : ITenantContext
 }
 
 
+/// <summary>
+/// An <see cref="IEmailService"/> written before invitations existed: it implements only the original
+/// members, so an invite reaches it through the default <c>SendUserInviteEmailAsync</c> and is recorded as a
+/// password reset carrying the accept link.
+/// </summary>
 public sealed class TestEmailService : IEmailService
 {
     public List<(string Email, string CallbackUrl, string Type)> SentEmails { get; } = [];
+
+    /// <summary>When set, a password-reset send throws it, as a mail provider does when it is down.</summary>
+    public Exception? FailPasswordResetWith { get; set; }
 
     public Task SendVerificationEmailAsync(string email, string callbackUrl, CancellationToken ct = default)
     {
@@ -29,6 +37,7 @@ public sealed class TestEmailService : IEmailService
 
     public Task SendPasswordResetEmailAsync(string email, string callbackUrl, CancellationToken ct = default)
     {
+        if (FailPasswordResetWith is not null) throw FailPasswordResetWith;
         SentEmails.Add((email, callbackUrl, "password_reset"));
         return Task.CompletedTask;
     }

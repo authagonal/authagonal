@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>किसी ने इस ईमेल से साइन अप करने की कोशिश की, लेकिन खाता पहले से मौजूद है। इसके बजाय साइन इन करें, या पासवर्ड भूल गए हों तो उसे रीसेट करें।</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>साइन इन करें</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>यदि यह आप नहीं थे, तो आप इस ईमेल को अनदेखा कर सकते हैं।</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>आपको आमंत्रित किया गया है</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>आपको आमंत्रित किया गया है</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>आपको {0} में आमंत्रित किया गया है। अपना खाता सक्रिय करने और शुरू करने के लिए पासवर्ड सेट करें।</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>अपना पासवर्ड सेट करें</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>यह आमंत्रण लिंक 7 दिनों में समाप्त हो जाएगा। यदि आपको इस आमंत्रण की अपेक्षा नहीं थी, तो आप इस ईमेल को अनदेखा कर सकते हैं।</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>साइन आउट हो गए</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>साइन आउट</value></data>
 </root>

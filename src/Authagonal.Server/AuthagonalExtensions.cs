@@ -422,10 +422,12 @@ public static class AuthagonalExtensions
         services.AddHttpClient("BackChannelLogout")
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(10))
             .ConfigurePrimaryHttpMessageHandler(RegistrantSuppliedOutboundHandler);
-        // Resend posts to a compile-time constant (api.resend.com) — no configuration, no registrant input,
-        // nothing for an address check to decide. So no ConnectCallback, and the ambient proxy is left
-        // alone: attaching the socket guard here would buy nothing and would need UseProxy = false to mean
-        // anything, which is how a deployment that egresses through a mandatory proxy loses all its email.
+        // Resend posts to Email:ResendApiUrl, api.resend.com unless the deployment sets another (a relay or
+        // proxy of its own). That URL comes only from the deployment's own configuration — never from an admin
+        // API, a registrant or a request — so it is the operator's choice and there is nothing for an address
+        // check to decide. So no ConnectCallback, and the ambient proxy is left alone: a guard here would need
+        // UseProxy = false to mean anything, and a deployment that egresses through a mandatory proxy would
+        // lose all its email.
         // The redirect refusal is what matters on this client and it stays — the request carries the mail
         // API key in an Authorization header, and .NET only strips that when a redirect crosses origins.
         services.AddHttpClient("Resend")
@@ -553,6 +555,11 @@ public static class AuthagonalExtensions
         // Organisation and membership administration (the admin API's /api/v1/organizations and any host
         // surface doing the same job). Scoped for the same reason; TryAdd so a host may substitute it.
         services.TryAddScoped<OrganizationOperations>();
+        // Inviting someone by email and resending the invite, the same way: scoped, TryAdd so a host may
+        // substitute it. The link the email carries is built by IInviteLinkBuilder, whose default is the
+        // issuer's own /accept-invite page; a host serving the accept page elsewhere registers its own.
+        services.TryAddScoped<UserInviteOperations>();
+        services.TryAddScoped<IInviteLinkBuilder, DefaultInviteLinkBuilder>();
         // How the organisation email-domain proof reads DNS TXT records. Singleton: DnsClient's LookupClient is
         // thread-safe and meant to be shared. TryAdd so a host's own resolver wins (and the tests' fake).
         services.TryAddSingleton<ITxtResolver, DnsTxtResolver>();
@@ -622,6 +629,10 @@ public static class AuthagonalExtensions
         // NullAuthHook is only added if no hooks are registered by the host.
         if (!services.Any(s => s.ServiceType == typeof(IAuthHook)))
             services.AddSingleton<IAuthHook, NullAuthHook>();
+        // After the check above, so it keeps its meaning (a host with no hooks of its own gets NullAuthHook):
+        // the library's own hook that activates a user's invited organisation memberships when their address
+        // is confirmed, which is what accepting an invite does. Appended, so it runs after the host's hooks.
+        services.AddSingleton<IAuthHook, OrganizationInviteActivationHook>();
 
         // Secret provider: defaults to plaintext; set SecretProvider:VaultUri to use Key Vault.
         // UseAuthagonal warns at startup when the plaintext default is what a non-Development host
@@ -1443,6 +1454,7 @@ public static class AuthagonalExtensions
             app.MapScimTokenAdminEndpoints();
             app.MapAgentAdminEndpoints();
             app.MapOrganizationAdminEndpoints();
+            app.MapUserInviteAdminEndpoints();
         }
 
         app.MapScimUserEndpoints();

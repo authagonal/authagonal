@@ -127,6 +127,13 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     /// </summary>
     public HttpMessageHandler? BackChannelLogoutHttpHandler { get; set; }
 
+    /// <summary>
+    /// Set before starting the factory, together with <c>Configuration["Email:ResendApiUrl"]</c>, to answer the
+    /// real sender's request in process instead of over a socket, so a test reads exactly what the library
+    /// put on the wire.
+    /// </summary>
+    public HttpMessageHandler? ResendHttpHandler { get; set; }
+
     /// <summary>Set to an Azurite connection string to enable SAML/OIDC state storage.</summary>
     public string? AzuriteConnectionString { get; set; }
 
@@ -372,7 +379,21 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
         services.AddSingleton<Authagonal.Core.Services.ITenantContext>(TenantContext);
 
         // Extensibility test doubles. Every one of these is a TryAdd or a gate in the real registration.
-        services.AddSingleton<IEmailService>(EmailService);
+        // The recorder, unless a test names a Resend endpoint of its own (Email:ResendApiUrl): then the real
+        // sender runs against that endpoint, through AddAuthagonalCore's own `Email:ResendApiKey` branch, so
+        // what reaches the wire (From, To, Subject, Html, the Bearer header) is the library's, not a double's.
+        if (string.IsNullOrWhiteSpace(builder.Configuration["Email:ResendApiUrl"]))
+        {
+            services.AddSingleton<IEmailService>(EmailService);
+        }
+        else
+        {
+            // `??=` is not enough: appsettings may carry the keys as empty strings.
+            if (string.IsNullOrWhiteSpace(builder.Configuration["Email:ResendApiKey"]))
+                builder.Configuration["Email:ResendApiKey"] = "re_test_key";
+            if (string.IsNullOrWhiteSpace(builder.Configuration["Email:SenderEmail"]))
+                builder.Configuration["Email:SenderEmail"] = "noreply@authagonal.test";
+        }
         services.AddSingleton<IAuthHook>(AuthHook);
         // AddAuthagonalCore TryAddSingletons NullAuditLogger; the suite records instead, so an admin write
         // can be asserted to leave an attributable trail.
@@ -452,6 +473,7 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
                      ("OidcDiscovery", OidcHttpHandler),
                      ("AuthagonalJwks", JwksHttpHandler),
                      ("BackChannelLogout", BackChannelLogoutHttpHandler),
+                     ("Resend", ResendHttpHandler),
                  })
         {
             if (handler is not null)

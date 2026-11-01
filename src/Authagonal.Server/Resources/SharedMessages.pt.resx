@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>Alguém tentou se cadastrar com este e-mail, mas já existe uma conta. Entre na sua conta ou redefina sua senha caso a tenha esquecido.</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>Entrar</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>Se não foi você, pode ignorar este e-mail.</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>Você foi convidado</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>Você foi convidado</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>Você foi convidado para {0}. Defina uma senha para ativar sua conta e começar.</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>Definir sua senha</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>Este link de convite expira em 7 dias. Se você não esperava este convite, pode ignorar este e-mail.</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Sessão encerrada</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Sair</value></data>
 </root>

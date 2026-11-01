@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>有人尝试使用此邮箱注册，但该账户已存在。请直接登录，如果忘记了密码，也可以重置密码。</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>登录</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>如果这不是您本人的操作，可以放心忽略此邮件。</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>您已受邀</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>您已受邀</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>您已受邀加入 {0}。请设置密码以激活您的账户并开始使用。</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>设置密码</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>此邀请链接将在 7 天后失效。如果您并未预期收到此邀请，可以放心忽略这封邮件。</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>已退出登录</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>退出登录</value></data>
 </root>

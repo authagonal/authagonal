@@ -115,6 +115,8 @@ namespace Authagonal.Server;
 [JsonSerializable(typeof(OrganizationDomainDto))]
 [JsonSerializable(typeof(BackfillResultDto))]
 [JsonSerializable(typeof(OperationErrorResponse))]
+[JsonSerializable(typeof(InvitedUser))]
+[JsonSerializable(typeof(SentResult))]
 // Email
 [JsonSerializable(typeof(ResendEmailRequest))]
 // Token response

@@ -117,6 +117,11 @@
   <data name="Email_Exists_Body" xml:space="preserve"><value>Alguien intentó registrarse con este correo electrónico, pero ya existe una cuenta. Inicia sesión o restablece tu contraseña si la olvidaste.</value></data>
   <data name="Email_Exists_Button" xml:space="preserve"><value>Iniciar sesión</value></data>
   <data name="Email_Exists_Footer" xml:space="preserve"><value>Si no fuiste tú, puedes ignorar este correo.</value></data>
+  <data name="Email_Invite_Subject" xml:space="preserve"><value>Has sido invitado</value></data>
+  <data name="Email_Invite_Heading" xml:space="preserve"><value>Has sido invitado</value></data>
+  <data name="Email_Invite_Body" xml:space="preserve"><value>Has sido invitado a {0}. Establece una contraseña para activar tu cuenta y empezar.</value></data>
+  <data name="Email_Invite_Button" xml:space="preserve"><value>Establecer contraseña</value></data>
+  <data name="Email_Invite_Footer" xml:space="preserve"><value>Este enlace de invitación caduca en 7 días. Si no esperabas esta invitación, puedes ignorar este correo.</value></data>
   <data name="EndSession_TitleSignedOut" xml:space="preserve"><value>Sesión cerrada</value></data>
   <data name="EndSession_TitleConfirm" xml:space="preserve"><value>Cerrar sesión</value></data>
 </root>
