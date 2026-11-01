@@ -27,7 +27,6 @@ Une `Organization` lui donne un enregistrement : un identifiant opaque immuable
 - **Pas de groupes limités à une organisation.** La revendication `groups` et l'appartenance aux groupes SCIM restent à l'échelle du locataire ; seuls les rôles sont propres à une organisation.
 - **Pas d'événements webhook d'organisation, ni d'audit par organisation.** `IAuthHook` n'a aucun événement de cycle de vie des organisations (création, attribution ou révocation d'une appartenance), les contenus des hooks existants ne portent aucun `organizationId`, et le journal d'audit n'a ni colonne ni index d'organisation.
 - **Les scopes soumis à des rôles sont filtrés sur les rôles du locataire à l'autorisation.** `Scope.AllowedRoles` est appliqué sur `/connect/authorize` aux rôles attribués directement au compte, avant que l'organisation ne soit résolue : un scope dont les `AllowedRoles` ne sont satisfaits que par un rôle propre à une organisation est donc écarté à l'autorisation, ou refusé avec `access_denied` si aucun scope demandé ne subsiste. Au rafraîchissement, le même contrôle s'exécute sur les rôles du sujet résolu, qui incluent bien ceux de l'organisation. Tant que les deux ne concordent pas, conditionnez les scopes à des rôles du locataire.
-- **Pas de personnalisation par organisation dans cette bibliothèque.** `Organization.BrandingJson` est conservé pour que l'hôte le fusionne avec la personnalisation du locataire ; cette bibliothèque ne le lit qu'à un seul endroit, l'e-mail d'invitation ([Personnalisation de la marque](branding#organisation-branding-in-invitation-emails)). L'application de connexion affiche le nom de l'organisation (« Connexion à {name} ») lorsque le contenu de démarrage fourni par l'hôte comporte une `organization` (`{ id, slug, name }`) ; la bibliothèque elle-même ne résout aucune organisation avant l'authentification, sauf par le paramètre `organization`, une restriction de client à une seule entrée, une connexion limitée à une organisation, ou le `ITenantContext.OrganizationId` d'un hôte.
 
 ## Créer une organisation {#creating-an-organization}
 
@@ -240,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 Chaque entrée doit correspondre à la forme d'identifiant d'organisation `^[A-Za-z0-9._~-]{1,200}$` ; l'API d'administration répond `400 invalid_request` pour une entrée vide ou mal formée, car une restriction qui liste un identifiant qu'aucun paramètre `organization` ne peut envoyer ne correspond à rien, et une restriction qui ne correspond à rien refuse toutes les requêtes. Une liste `null` est normalisée en liste vide.
 
 Une liste vide (ce qu'ont tous les clients existants) signifie aucune restriction. Une requête dont l'organisation ne figure pas dans la liste est refusée avec `access_denied`. Une liste d'une seule entrée sélectionne aussi l'organisation, selon la règle 4 ci-dessus. Une liste de plusieurs entrées restreint sans sélectionner : la requête doit tout de même en désigner une, sinon elle est refusée avec `account_selection_required`.
+
+## Organisations sur la page de connexion {#organizations-on-the-login-page}
+
+Tant que personne n'est connecté, il n'y a pas d'utilisateur : la page de connexion doit donc déduire de la requête elle-même pour quelle organisation elle est affichée. `PreAuthOrganizationResolver` le fait pour la page de connexion dans l'ordre ci-dessous ; la première règle qui désigne une organisation l'emporte.
+
+1. **Un rattachement d'hôte faisant autorité.** L'hôte a rattaché le domaine de la requête à une organisation et déclaré ce rattachement comme faisant autorité (voir [Rattacher un hôte à une organisation](#pinning-a-host-to-an-organization)). Un rattachement qui ne désigne aucune organisation existante (une organisation supprimée) n'en est pas un : un avertissement est journalisé et la résolution se poursuit.
+2. **`organization` sur `/accept-invite` uniquement.**
+3. **L'organisation de la demande d'autorisation** : `organization`, `org_slug` ou `org_id` dans la query de `returnUrl`, ou dans la demande poussée que désigne son `request_uri` ; les paramètres et le client de cette demande remplacent alors ceux de la demande extérieure.
+4. **L'unique entrée de `RestrictedToOrganizationIds` d'un client activé.**
+5. **Un rattachement qui ne fait pas autorité**, en dernier.
+
+Chaque nom est résolu d'abord comme slug, puis comme id, comme dans [Sélectionner une organisation dans une demande d'autorisation](#selecting-an-organization-on-an-authorization-request). Cette résolution ne vérifie pas que l'organisation est activée : la page de connexion d'une organisation désactivée affiche donc toujours sa personnalisation, tandis que le point de terminaison d'autorisation la refuse toujours. Tout échec se résout en « aucune organisation », jamais en page d'erreur.
+
+### Rattacher un hôte à une organisation {#pinning-a-host-to-an-organization}
+
+Un hôte déclare faisant autorité l'organisation qu'il a résolue pour une requête en renvoyant `true` depuis `ITenantContext.OrganizationIdIsAuthoritative`, un membre d'interface à implémentation par défaut qui vaut `false`. Un rattachement ne fait autorité que si cette valeur est `true` et que `OrganizationId` n'est pas vide. Un hôte qui ne définit ni l'un ni l'autre se comporte comme avant : le rattachement passe en dernier, comme la règle 5 ci-dessus.
+
+Le serveur autonome n'exige aucun code. Associez chaque nom d'hôte à l'**id** d'une organisation (pas à un slug) sous `Organizations:PinnedHosts` :
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+ou, sans fichier :
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+L'hôte est comparé sans distinction de casse au nom d'hôte de la requête, et le port est ignoré. Une entrée correspondante définit `OrganizationId` et lui donne autorité ; sans entrée, ou sans section, rien ne change. Un id qui ne désigne aucune organisation est un rattachement orphelin, traité comme ci-dessus.
+
+### Ce qu'impose un rattachement faisant autorité {#what-an-authoritative-pin-enforces}
+
+Sous un rattachement faisant autorité, `/connect/authorize` et `POST /connect/par` (et aucun autre point de terminaison) sont limités à l'organisation rattachée :
+
+- À une requête qui ne désigne aucune organisation (`organization`, `org_slug` ou `org_id`), on ajoute `organization=<id rattaché>` : à la query, ou, pour PAR, au corps du formulaire. Une demande d'autorisation qui porte un `request_uri` est laissée telle quelle.
+- Une requête qui désigne l'organisation rattachée, par slug ou par id, passe.
+- Une requête qui désigne toute autre organisation, ou une organisation inexistante, est refusée, jamais redirigée :
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR n'est lu que si son corps est `application/x-www-form-urlencoded` ; tout autre corps est refusé. Une longueur déclarée supérieure à 32 KiB est laissée au point de terminaison, qui répond 413 ; un corps sans longueur déclarée est lu jusqu'à 32 KiB et refusé au-delà. Le corps est restauré après lecture.
+
+Les refus que les points de terminaison opposaient déjà une fois l'organisation choisie (pas d'appartenance, restriction de client, organisation désactivée) ne changent pas.
+
+### Personnalisation par organisation {#organization-branding}
+
+`OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` fusionne champ par champ `Organization.BrandingJson` avec la personnalisation du locataire. Elle renvoie un nouveau `JsonObject` et ne modifie pas son entrée. Les règles :
+
+- Une clé nulle ou absente hérite de la valeur du locataire.
+- Les clés inconnues sont ignorées. Les clés sont comparées sans distinction de casse.
+- Une valeur d'un type JSON incorrect pour sa clé conserve la valeur du locataire pour cette seule clé.
+- `languages` remplace la liste du locataire ; elle n'est pas fusionnée.
+- Un `BrandingJson` mal formé, ou qui n'est pas un objet JSON, donne la personnalisation du locataire.
+- Une organisation ne peut pas définir `showRegistration` ; il conserve toujours la valeur du locataire.
+
+Les clés qu'une organisation peut définir sont les options de personnalisation de l'application de connexion (voir [Personnalisation](branding)) et les cinq couleurs d'e-mail (`emailBg`, `emailHeaderColor`, `emailCardBg`, `emailFooterColor`, `emailLogoBg`).
+
+### La charge utile d'amorçage de la connexion {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` effectue une résolution pour la page de connexion et renvoie `{ branding, providers, organization }` : la personnalisation fusionnée (celle du locataire si aucune organisation n'a été résolue), la liste des fournisseurs de cette organisation, et `organization` sous la forme `{ id, slug, name }` ou `null`. `MapAuthagonalLoginFallback()` sert l'`index.html` de l'application de connexion avec cette charge utile intégrée sous la forme `<script type="application/json" id="authagonal-boot">` juste avant `</head>` ; le serveur autonome l'appelle. Voir [Personnalisation](branding#organisation-name).
 
 ## Les revendications {#the-claims}
 

@@ -26,7 +26,6 @@ An `Organization` gives it a record: an immutable opaque id, an immutable tenant
 - **No organization-scoped groups.** The `groups` claim and SCIM group membership stay tenant-wide; only roles are organization-scoped.
 - **No organization webhook events, and no organization-scoped audit.** `IAuthHook` has no organization lifecycle events (created, membership granted or revoked), existing hook payloads carry no `organizationId`, and there is no organization column or index on the audit log.
 - **Role-gated scopes are filtered against tenant roles at authorize.** `Scope.AllowedRoles` is applied on `/connect/authorize` against the account's directly-assigned roles, before the organization is resolved, so a scope whose `AllowedRoles` is satisfied only by an organization-scoped role is dropped at authorize, or refused with `access_denied` if no requested scope survives. On refresh the same gate runs against the resolved subject's roles, which do include the organization's. Until the two agree, gate scopes on tenant roles.
-- **No organization branding in this library.** `Organization.BrandingJson` is stored for the host to merge over the tenant's branding; this library reads it in one place only, the invitation email ([Branding](branding#organisation-branding-in-invitation-emails)). The login app shows the organization's name ("Signing in to {name}") when the host's boot payload carries an `organization` (`{ id, slug, name }`); the library itself resolves no organization before authentication except through the `organization` parameter, a single-entry client restriction, an organization-scoped connection, or a host's `ITenantContext.OrganizationId`.
 
 ## Creating an organization
 
@@ -239,6 +238,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 Each entry must match the organization id shape `^[A-Za-z0-9._~-]{1,200}$`; the admin API answers `400 invalid_request` for an empty or malformed one, because a restriction listing an id no `organization` parameter can send matches nothing, and a restriction that matches nothing refuses every request. A `null` list is normalized to empty.
 
 Empty (what every existing client has) means unrestricted. A request whose organization is not on the list is refused with `access_denied`. A list of one also selects, per rule 4 above. A list of several restricts but does not select: the request must still name one, or it is refused with `account_selection_required`.
+
+## Organizations on the login page
+
+Before anyone has signed in there is no user, so the login page has to learn which organization it is for from the request itself. `PreAuthOrganizationResolver` does this for the login page in the order below; the first rule that names an organization wins.
+
+1. **An authoritative host pin.** The host has pinned the request's domain to one organization and marked the pin authoritative (see [Pinning a host to an organization](#pinning-a-host-to-an-organization)). A pin that names no organization (one that was deleted) is no pin: a warning is logged and resolution carries on.
+2. **`organization` on `/accept-invite` only.**
+3. **The authorization request's organization**: `organization`, `org_slug` or `org_id` in the query of `returnUrl`, or inside the pushed request that its `request_uri` names, in which case that request's parameters and client replace the outer ones.
+4. **The single entry of an enabled client's `RestrictedToOrganizationIds`.**
+5. **A pin that is not authoritative**, last.
+
+Every name is resolved as a slug first and then as an id, as in [Selecting an organization on an authorization request](#selecting-an-organization-on-an-authorization-request). This resolution does not test whether the organization is enabled, so the login page of a disabled organization still shows its branding; the authorization endpoint still refuses it. Any failure resolves to no organization, never to an error page.
+
+### Pinning a host to an organization
+
+A host marks the organization it resolved for a request as authoritative by returning `true` from `ITenantContext.OrganizationIdIsAuthoritative`, a default interface member that is `false`. A pin is authoritative only when that is `true` and `OrganizationId` is non-empty. A host that sets neither behaves as it always did: the pin ranks last, as rule 5 above.
+
+The standalone server needs no code. Map each host name to an organization **id** (not a slug) under `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+or, without a file:
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+The host is compared case-insensitively with the request's host name, and the port is ignored. A matching entry sets `OrganizationId` and makes it authoritative; no entry, or no section, changes nothing. An id that names no organization is a dangling pin, treated as above.
+
+### What an authoritative pin enforces
+
+Under an authoritative pin, `/connect/authorize` and `POST /connect/par` (and no other endpoint) are held to the pinned organization:
+
+- A request that names no organization (`organization`, `org_slug` or `org_id`) has `organization=<pinned id>` added: to the query, or for PAR to the form body. An authorization request that carries a `request_uri` is left alone.
+- A request that names the pinned organization, by slug or id, goes through.
+- A request that names any other organization, or one that does not exist, is refused, never redirected:
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR is read only when its body is `application/x-www-form-urlencoded`; any other body is refused. A declared length over 32 KiB is left to the endpoint, which answers 413; a body with no declared length is read up to 32 KiB and refused past that. The body is restored after it is read.
+
+Refusals the endpoints already made once the organization is chosen (no membership, a client restriction, a disabled organization) are unchanged.
+
+### Organization branding
+
+`Organization.BrandingJson` is merged field by field over the tenant's branding by `OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)`. It returns a new `JsonObject` and does not change its input. The rules:
+
+- A key that is null or absent inherits the tenant's value.
+- Unknown keys are ignored. Keys match case-insensitively.
+- A value of the wrong JSON kind for its key keeps the tenant's value for that key only.
+- `languages` replaces the tenant's list; it is not merged.
+- A `BrandingJson` that is malformed, or is not a JSON object, gives the tenant's branding.
+- `showRegistration` cannot be set by an organization; it always keeps the tenant's value.
+
+The keys an organization may set are the login app's branding options (see [Branding](branding)) and the five email colours (`emailBg`, `emailHeaderColor`, `emailCardBg`, `emailFooterColor`, `emailLogoBg`).
+
+### The login boot payload
+
+`LoginBootPayloadBuilder` makes one login-page resolution and returns `{ branding, providers, organization }`: the merged branding (the tenant's when no organization resolved), the provider list for that organization, and `organization` as `{ id, slug, name }` or `null`. `MapAuthagonalLoginFallback()` serves the login app's `index.html` with that payload inlined as `<script type="application/json" id="authagonal-boot">` just before `</head>`; the standalone server calls it. See [Branding](branding#organisation-name).
 
 ## The claims
 

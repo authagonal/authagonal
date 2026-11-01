@@ -27,7 +27,6 @@ Eine `Organization` gibt ihr einen Datensatz: eine unveränderliche, opake ID, e
 - **Keine organisationsbezogenen Gruppen.** Der Claim `groups` und die SCIM-Gruppenmitgliedschaft bleiben mandantenweit; nur Rollen sind organisationsbezogen.
 - **Keine Webhook-Ereignisse für Organisationen und kein organisationsbezogenes Audit.** `IAuthHook` kennt keine Lebenszyklusereignisse von Organisationen (angelegt, Mitgliedschaft gewährt oder entzogen), bestehende Hook-Nutzlasten tragen kein `organizationId`, und das Audit-Log hat weder eine Organisationsspalte noch einen Organisationsindex.
 - **Rollengebundene Scopes werden bei der Autorisierung gegen Mandantenrollen gefiltert.** `Scope.AllowedRoles` wird an `/connect/authorize` gegen die dem Konto direkt zugewiesenen Rollen angewendet, bevor die Organisation aufgelöst ist. Ein Scope, dessen `AllowedRoles` nur durch eine organisationsbezogene Rolle erfüllt wird, wird bei der Autorisierung daher verworfen, oder mit `access_denied` abgelehnt, falls kein angeforderter Scope übrig bleibt. Beim Refresh läuft dieselbe Prüfung gegen die Rollen des aufgelösten Subjekts, die die der Organisation durchaus enthalten. Solange beide nicht übereinstimmen, binden Sie Scopes an Mandantenrollen.
-- **Kein Organisations-Branding in dieser Bibliothek.** `Organization.BrandingJson` wird gespeichert, damit der Host es über das Branding des Mandanten legen kann; diese Bibliothek liest es nur an einer einzigen Stelle, in der Einladungs-E-Mail ([Branding](branding#organisation-branding-in-invitation-emails)). Die Login-App zeigt den Namen der Organisation („Anmeldung bei {name}“) an, wenn die Boot-Nutzlast des Hosts eine `organization` (`{ id, slug, name }`) enthält; die Bibliothek selbst löst vor der Authentifizierung keine Organisation auf, außer über den Parameter `organization`, eine Client-Beschränkung mit einem einzigen Eintrag, eine organisationsbezogene Verbindung oder das `ITenantContext.OrganizationId` eines Hosts.
 
 ## Eine Organisation anlegen {#creating-an-organization}
 
@@ -240,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 Jeder Eintrag muss der Form einer Organisations-ID `^[A-Za-z0-9._~-]{1,200}$` entsprechen; die Admin-API antwortet auf einen leeren oder fehlerhaften Eintrag mit `400 invalid_request`, denn eine Beschränkung, die eine ID auflistet, die kein `organization`-Parameter senden kann, passt auf nichts, und eine Beschränkung, die auf nichts passt, lehnt jede Anfrage ab. Eine `null`-Liste wird zu einer leeren normalisiert.
 
 Leer (was jeder bestehende Client hat) bedeutet uneingeschränkt. Eine Anfrage, deren Organisation nicht auf der Liste steht, wird mit `access_denied` abgelehnt. Eine Liste mit einem Eintrag wählt zusätzlich aus, gemäß Regel 4 oben. Eine Liste mit mehreren Einträgen beschränkt, wählt aber nicht aus: Die Anfrage muss dennoch eine benennen, sonst wird sie mit `account_selection_required` abgelehnt.
+
+## Organisationen auf der Anmeldeseite {#organizations-on-the-login-page}
+
+Bevor sich jemand angemeldet hat, gibt es keinen Benutzer; die Anmeldeseite muss daher aus dem Request selbst erfahren, für welche Organisation sie gilt. `PreAuthOrganizationResolver` tut das für die Anmeldeseite in der folgenden Reihenfolge; die erste Regel, die eine Organisation nennt, gewinnt.
+
+1. **Eine maßgebliche Host-Zuordnung.** Der Host hat die Domain des Requests an eine Organisation gebunden und die Zuordnung als maßgeblich gekennzeichnet (siehe [Einen Host an eine Organisation binden](#pinning-a-host-to-an-organization)). Eine Zuordnung, die keine existierende Organisation nennt (eine gelöschte), gilt als keine Zuordnung: Es wird eine Warnung protokolliert und die Auflösung läuft weiter.
+2. **`organization` nur auf `/accept-invite`.**
+3. **Die Organisation der Autorisierungsanfrage**: `organization`, `org_slug` oder `org_id` in der Query von `returnUrl` oder innerhalb der gepushten Anfrage, die ihr `request_uri` benennt; deren Parameter und Client ersetzen dann die äußeren.
+4. **Der einzelne Eintrag in `RestrictedToOrganizationIds` eines aktivierten Clients.**
+5. **Eine nicht maßgebliche Zuordnung**, zuletzt.
+
+Jeder Name wird zuerst als Slug und dann als Id aufgelöst, wie unter [Eine Organisation in einer Autorisierungsanfrage auswählen](#selecting-an-organization-on-an-authorization-request). Diese Auflösung prüft nicht, ob die Organisation aktiviert ist; die Anmeldeseite einer deaktivierten Organisation zeigt also weiterhin ihr Branding, während der Autorisierungsendpunkt sie weiterhin ablehnt. Jeder Fehler führt zu „keine Organisation“, nie zu einer Fehlerseite.
+
+### Einen Host an eine Organisation binden {#pinning-a-host-to-an-organization}
+
+Ein Host kennzeichnet die für einen Request aufgelöste Organisation als maßgeblich, indem er aus `ITenantContext.OrganizationIdIsAuthoritative` (ein Default-Interface-Member, standardmäßig `false`) `true` zurückgibt. Eine Zuordnung ist nur maßgeblich, wenn dieser Wert `true` und `OrganizationId` nicht leer ist. Ein Host, der keines von beidem setzt, verhält sich wie bisher: Die Zuordnung steht an letzter Stelle (Regel 5 oben).
+
+Der eigenständige Server braucht keinen Code. Ordnen Sie unter `Organizations:PinnedHosts` jedem Hostnamen eine Organisations-**Id** (keinen Slug) zu:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+oder ohne Datei:
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+Der Host wird ohne Beachtung der Groß-/Kleinschreibung mit dem Hostnamen des Requests verglichen; der Port wird ignoriert. Ein passender Eintrag setzt `OrganizationId` und macht sie maßgeblich; ohne Eintrag oder ohne Abschnitt ändert sich nichts. Eine Id, die keine Organisation benennt, ist eine hängende Zuordnung und wird wie oben behandelt.
+
+### Was eine maßgebliche Zuordnung durchsetzt {#what-an-authoritative-pin-enforces}
+
+Unter einer maßgeblichen Zuordnung sind `/connect/authorize` und `POST /connect/par` (und kein anderer Endpunkt) an die zugeordnete Organisation gebunden:
+
+- Bei einem Request, der keine Organisation nennt (`organization`, `org_slug` oder `org_id`), wird `organization=<zugeordnete Id>` ergänzt: in der Query, bei PAR im Formularkörper. Eine Autorisierungsanfrage mit `request_uri` bleibt unverändert.
+- Ein Request, der die zugeordnete Organisation nennt (per Slug oder Id), wird durchgelassen.
+- Ein Request, der eine andere oder eine nicht existierende Organisation nennt, wird abgelehnt und nie umgeleitet:
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR wird nur gelesen, wenn der Körper `application/x-www-form-urlencoded` ist; jeder andere Körper wird abgelehnt. Eine angegebene Länge über 32 KiB überlässt man dem Endpunkt, der 413 antwortet; ein Körper ohne angegebene Länge wird bis 32 KiB gelesen und darüber abgelehnt. Nach dem Lesen wird der Körper wiederhergestellt.
+
+Ablehnungen, die die Endpunkte nach der Wahl der Organisation ohnehin aussprachen (keine Mitgliedschaft, eine Client-Beschränkung, eine deaktivierte Organisation), bleiben unverändert.
+
+### Organisations-Branding {#organization-branding}
+
+`Organization.BrandingJson` wird von `OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` Feld für Feld über das Branding des Mandanten gelegt. Die Methode gibt ein neues `JsonObject` zurück und verändert ihre Eingabe nicht. Die Regeln:
+
+- Ein Schlüssel, der null ist oder fehlt, erbt den Wert des Mandanten.
+- Unbekannte Schlüssel werden ignoriert. Schlüssel werden ohne Beachtung der Groß-/Kleinschreibung zugeordnet.
+- Ein Wert mit der falschen JSON-Art für seinen Schlüssel behält nur für diesen Schlüssel den Wert des Mandanten.
+- `languages` ersetzt die Liste des Mandanten; sie wird nicht zusammengeführt.
+- Ein `BrandingJson`, das fehlerhaft oder kein JSON-Objekt ist, ergibt das Branding des Mandanten.
+- `showRegistration` kann von einer Organisation nicht gesetzt werden; es behält immer den Wert des Mandanten.
+
+Eine Organisation darf die Branding-Optionen der Login-App setzen (siehe [Branding](branding)) sowie die fünf E-Mail-Farben (`emailBg`, `emailHeaderColor`, `emailCardBg`, `emailFooterColor`, `emailLogoBg`).
+
+### Die Boot-Nutzlast der Anmeldeseite {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` führt eine Auflösung für die Anmeldeseite durch und liefert `{ branding, providers, organization }`: das zusammengeführte Branding (das des Mandanten, wenn keine Organisation aufgelöst wurde), die Anbieterliste dieser Organisation und `organization` als `{ id, slug, name }` oder `null`. `MapAuthagonalLoginFallback()` liefert die `index.html` der Login-App mit dieser Nutzlast aus, eingebettet als `<script type="application/json" id="authagonal-boot">` unmittelbar vor `</head>`; der eigenständige Server ruft sie auf. Siehe [Branding](branding#organisation-name).
 
 ## Die Claims {#the-claims}
 

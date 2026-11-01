@@ -27,7 +27,6 @@ nav_order: 14
 - **没有组织范围的组。**`groups` 声明和 SCIM 组成员资格仍是租户范围的；只有角色是组织范围的。
 - **没有组织 Webhook 事件，也没有组织范围的审计。**`IAuthHook` 没有组织生命周期事件（创建、授予或撤销成员资格），现有的钩子载荷不携带 `organizationId`，审计日志上也没有组织列或索引。
 - **受角色限制的作用域在授权时依据租户角色进行过滤。**`Scope.AllowedRoles` 在 `/connect/authorize` 上依据账户直接分配的角色进行检查，这发生在组织解析之前，因此一个只有组织范围角色才能满足其 `AllowedRoles` 的作用域会在授权时被丢弃；如果所请求的作用域无一保留，则以 `access_denied` 拒绝。刷新时，同样的检查依据已解析主体的角色运行，而这些角色确实包含组织的角色。在两者达成一致之前，请让作用域依据租户角色进行限制。
-- **本库中没有组织品牌定制。**`Organization.BrandingJson` 被存储下来，供宿主将其合并到租户的品牌配置之上；本库仅在一处读取它,即邀请邮件([品牌定制](branding#organisation-branding-in-invitation-emails))。当宿主的启动载荷携带 `organization`（`{ id, slug, name }`）时，登录应用会显示组织名称（“正在登录 {name}”）；除了通过 `organization` 参数、只含一个条目的客户端限制、组织范围的连接，或宿主的 `ITenantContext.OrganizationId` 之外，本库本身在身份验证之前不会解析任何组织。
 
 ## 创建组织 {#creating-an-organization}
 
@@ -240,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 每个条目都必须匹配组织 ID 的形式 `^[A-Za-z0-9._~-]{1,200}$`；对于空的或格式错误的条目，管理 API 会返回 `400 invalid_request`，因为一个列出了任何 `organization` 参数都无法发送的 ID 的限制什么也匹配不到，而什么也匹配不到的限制会拒绝每一个请求。`null` 列表会被规范化为空列表。
 
 空列表（所有现有客户端都是如此）表示不受限制。组织不在列表中的请求会以 `access_denied` 拒绝。只含一个条目的列表同时也会进行选择，即上文的规则 4。含有多个条目的列表只进行限制而不进行选择：请求仍必须指定其中一个，否则会以 `account_selection_required` 拒绝。
+
+## 登录页面上的组织 {#organizations-on-the-login-page}
+
+在任何人登录之前不存在用户，因此登录页面必须从请求本身得知它属于哪个组织。`PreAuthOrganizationResolver` 按下列顺序为登录页面完成这一解析；第一条指明组织的规则生效。
+
+1. **具有权威性的宿主绑定。** 宿主已将请求的域名绑定到某个组织，并将该绑定标记为具有权威性（参见[将宿主绑定到组织](#pinning-a-host-to-an-organization)）。指向不存在的组织（例如已被删除）的绑定不算绑定：系统会记录一条警告，解析继续进行。
+2. **仅在 `/accept-invite` 上的 `organization`。**
+3. **授权请求的组织**：`returnUrl` 查询字符串中的 `organization`、`org_slug` 或 `org_id`，或其 `request_uri` 所指向的已推送请求内部的这些参数；此时该请求的参数和客户端会取代外层的参数和客户端。
+4. **已启用客户端的 `RestrictedToOrganizationIds` 中唯一的条目。**
+5. **不具有权威性的绑定**，排在最后。
+
+每个名称都先按 slug 解析，再按 id 解析，与[在授权请求中选择组织](#selecting-an-organization-on-an-authorization-request)相同。此解析不会检查组织是否已启用，因此已禁用组织的登录页面仍会显示其品牌配置；授权端点仍会拒绝该组织。任何失败都解析为没有组织，绝不会变成错误页面。
+
+### 将宿主绑定到组织 {#pinning-a-host-to-an-organization}
+
+宿主通过让 `ITenantContext.OrganizationIdIsAuthoritative`（默认接口成员，默认值为 `false`）返回 `true`，将它为请求解析出的组织标记为具有权威性。只有当该值为 `true` 且 `OrganizationId` 非空时，绑定才具有权威性。两者都未设置的宿主行为与以往一致：绑定排在最后，即上面的规则 5。
+
+独立服务器无需编写代码。在 `Organizations:PinnedHosts` 下将每个主机名映射到组织的 **id**（不是 slug）：
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+或者不使用文件：
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+主机名与请求的主机名比较时不区分大小写，端口会被忽略。匹配的条目会设置 `OrganizationId` 并使其具有权威性；没有条目或没有该配置节则不产生任何变化。不指向任何组织的 id 是悬空绑定，按上述方式处理。
+
+### 具有权威性的绑定会强制执行什么 {#what-an-authoritative-pin-enforces}
+
+在具有权威性的绑定下，`/connect/authorize` 和 `POST /connect/par`（不包括其他端点）被限定在所绑定的组织：
+
+- 未指明组织（`organization`、`org_slug` 或 `org_id`）的请求会被加上 `organization=<所绑定的 id>`：加到查询字符串中；对于 PAR，则加到表单正文中。携带 `request_uri` 的授权请求保持不变。
+- 通过 slug 或 id 指明所绑定组织的请求予以放行。
+- 指明任何其他组织或不存在的组织的请求会被拒绝，且绝不会被重定向：
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- 仅当 PAR 的正文为 `application/x-www-form-urlencoded` 时才会读取；任何其他正文都会被拒绝。声明的长度超过 32 KiB 时交由端点处理，端点返回 413；未声明长度的正文最多读取 32 KiB，超过则拒绝。读取后会恢复正文。
+
+在选定组织之后端点原本就会做出的拒绝（不是成员、客户端限制、组织已禁用）保持不变。
+
+### 组织品牌配置 {#organization-branding}
+
+`OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` 将 `Organization.BrandingJson` 逐字段合并到租户的品牌配置之上。它返回一个新的 `JsonObject`，不会修改其输入。规则如下：
+
+- 为 null 或缺失的键继承租户的值。
+- 未知的键会被忽略。键的匹配不区分大小写。
+- 某个键的值 JSON 类型错误时，仅该键保留租户的值。
+- `languages` 会替换租户的列表，而不是合并。
+- 格式错误或不是 JSON 对象的 `BrandingJson` 会得到租户的品牌配置。
+- 组织无法设置 `showRegistration`；它始终保留租户的值。
+
+组织可以设置的键是登录应用的品牌配置选项（参见[品牌定制](branding)）以及五个电子邮件颜色（`emailBg`、`emailHeaderColor`、`emailCardBg`、`emailFooterColor`、`emailLogoBg`）。
+
+### 登录启动载荷 {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` 为登录页面执行一次解析并返回 `{ branding, providers, organization }`：合并后的品牌配置（未解析出组织时为租户的品牌配置）、该组织的提供商列表，以及形如 `{ id, slug, name }` 或 `null` 的 `organization`。`MapAuthagonalLoginFallback()` 提供登录应用的 `index.html`，并将该载荷以 `<script type="application/json" id="authagonal-boot">` 的形式内联在 `</head>` 之前；独立服务器会调用它。参见[品牌定制](branding#organisation-name)。
 
 ## 声明 {#the-claims}
 

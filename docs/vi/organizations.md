@@ -27,7 +27,6 @@ Một `Organization` cho nó một bản ghi: một id mờ bất biến, một 
 - **Không có nhóm theo phạm vi tổ chức.** Claim `groups` và tư cách thành viên nhóm SCIM vẫn áp dụng trên toàn tenant; chỉ vai trò mới theo phạm vi tổ chức.
 - **Không có sự kiện webhook cho tổ chức, và không có audit theo phạm vi tổ chức.** `IAuthHook` không có sự kiện vòng đời tổ chức (tạo, cấp hoặc thu hồi tư cách thành viên), các payload hook hiện có không mang `organizationId`, và audit log không có cột hay chỉ mục nào cho tổ chức.
 - **Các scope giới hạn theo vai trò được lọc theo vai trò của tenant tại authorize.** `Scope.AllowedRoles` được áp dụng trên `/connect/authorize` dựa vào các vai trò được gán trực tiếp cho tài khoản, trước khi tổ chức được phân giải, nên một scope mà `AllowedRoles` chỉ được thỏa mãn bởi một vai trò theo phạm vi tổ chức sẽ bị loại bỏ tại authorize, hoặc bị từ chối với `access_denied` nếu không còn scope được yêu cầu nào. Khi refresh, cùng phép kiểm tra đó chạy với các vai trò của chủ thể đã phân giải, vốn có bao gồm vai trò của tổ chức. Cho tới khi hai bên thống nhất, hãy giới hạn scope theo vai trò của tenant.
-- **Không có thương hiệu tổ chức trong thư viện này.** `Organization.BrandingJson` được lưu để host trộn đè lên thương hiệu của tenant; thư viện này chỉ đọc nó ở một nơi, email lời mời ([Thương hiệu](branding#organisation-branding-in-invitation-emails)). Ứng dụng đăng nhập hiển thị tên tổ chức ("Đang đăng nhập vào {name}") khi boot payload của host mang một `organization` (`{ id, slug, name }`); bản thân thư viện không phân giải tổ chức nào trước khi xác thực, ngoại trừ qua tham số `organization`, một giới hạn client chỉ có một mục, một kết nối theo phạm vi tổ chức, hoặc `ITenantContext.OrganizationId` của host.
 
 ## Tạo một tổ chức {#creating-an-organization}
 
@@ -240,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 Mỗi mục phải khớp dạng id tổ chức `^[A-Za-z0-9._~-]{1,200}$`; admin API trả `400 invalid_request` cho một mục rỗng hoặc sai định dạng, vì một giới hạn liệt kê id mà không tham số `organization` nào gửi được sẽ không khớp gì cả, và một giới hạn không khớp gì cả sẽ từ chối mọi request. Một danh sách `null` được chuẩn hóa thành rỗng.
 
 Rỗng (điều mà mọi client hiện có đều đang có) nghĩa là không giới hạn. Một request có tổ chức không nằm trong danh sách sẽ bị từ chối với `access_denied`. Một danh sách một mục cũng đồng thời chọn tổ chức, theo quy tắc 4 ở trên. Một danh sách nhiều mục thì giới hạn nhưng không chọn: request vẫn phải nêu một tổ chức, nếu không sẽ bị từ chối với `account_selection_required`.
+
+## Tổ chức trên trang đăng nhập {#organizations-on-the-login-page}
+
+Trước khi có ai đăng nhập thì chưa có người dùng, nên trang đăng nhập phải tự biết từ chính request rằng nó dành cho tổ chức nào. `PreAuthOrganizationResolver` làm việc này cho trang đăng nhập theo thứ tự dưới đây; quy tắc đầu tiên chỉ ra một tổ chức sẽ thắng.
+
+1. **Ghim host có thẩm quyền.** Host đã ghim tên miền của request vào một tổ chức và đánh dấu ghim đó là có thẩm quyền (xem [Ghim một host vào một tổ chức](#pinning-a-host-to-an-organization)). Một ghim không chỉ tới tổ chức nào tồn tại (đã bị xóa) thì không được tính là ghim: một cảnh báo được ghi log và việc phân giải tiếp tục.
+2. **`organization` chỉ trên `/accept-invite`.**
+3. **Tổ chức của request ủy quyền**: `organization`, `org_slug` hoặc `org_id` trong query của `returnUrl`, hoặc bên trong request đã được đẩy (push) mà `request_uri` của nó chỉ tới; khi đó tham số và client của request ấy thay thế các giá trị bên ngoài.
+4. **Mục duy nhất trong `RestrictedToOrganizationIds` của một client đang được bật.**
+5. **Một ghim không có thẩm quyền**, xét sau cùng.
+
+Mỗi tên được phân giải trước như slug, rồi như id, giống như trong [Chọn một tổ chức trong request ủy quyền](#selecting-an-organization-on-an-authorization-request). Việc phân giải này không kiểm tra tổ chức có đang được bật hay không, nên trang đăng nhập của một tổ chức đã bị vô hiệu hóa vẫn hiển thị thương hiệu của nó; endpoint ủy quyền vẫn từ chối tổ chức đó. Mọi lỗi đều cho kết quả là không có tổ chức, không bao giờ là một trang lỗi.
+
+### Ghim một host vào một tổ chức {#pinning-a-host-to-an-organization}
+
+Host đánh dấu tổ chức mà nó đã phân giải cho một request là có thẩm quyền bằng cách trả về `true` từ `ITenantContext.OrganizationIdIsAuthoritative`, một default interface member có giá trị mặc định `false`. Một ghim chỉ có thẩm quyền khi giá trị đó là `true` và `OrganizationId` không rỗng. Host không đặt cả hai thì hoạt động như trước: ghim xếp sau cùng, như quy tắc 5 ở trên.
+
+Máy chủ độc lập không cần viết mã. Ánh xạ mỗi tên host tới **id** của tổ chức (không phải slug) trong `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+hoặc, không dùng tệp:
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+Host được so sánh không phân biệt hoa thường với tên host của request, và cổng bị bỏ qua. Một mục khớp sẽ đặt `OrganizationId` và biến nó thành có thẩm quyền; không có mục, hoặc không có section, thì không có gì thay đổi. Một id không chỉ tới tổ chức nào là ghim treo và được xử lý như ở trên.
+
+### Ghim có thẩm quyền áp đặt điều gì {#what-an-authoritative-pin-enforces}
+
+Dưới một ghim có thẩm quyền, `/connect/authorize` và `POST /connect/par` (và không endpoint nào khác) bị ràng buộc vào tổ chức đã ghim:
+
+- Request không chỉ định tổ chức nào (`organization`, `org_slug` hoặc `org_id`) sẽ được thêm `organization=<id đã ghim>`: vào query, hoặc với PAR là vào form body. Request ủy quyền mang `request_uri` được giữ nguyên.
+- Request chỉ định tổ chức đã ghim, bằng slug hoặc id, được cho qua.
+- Request chỉ định bất kỳ tổ chức nào khác, hoặc một tổ chức không tồn tại, bị từ chối và không bao giờ được chuyển hướng:
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR chỉ được đọc khi body của nó là `application/x-www-form-urlencoded`; mọi body khác đều bị từ chối. Độ dài khai báo vượt quá 32 KiB được để cho endpoint xử lý, endpoint này trả 413; body không khai báo độ dài được đọc tối đa 32 KiB và bị từ chối nếu vượt quá. Body được khôi phục sau khi đọc.
+
+Những từ chối mà các endpoint vốn đã đưa ra sau khi tổ chức được chọn (không là thành viên, hạn chế client, tổ chức bị vô hiệu hóa) không thay đổi.
+
+### Thương hiệu tổ chức {#organization-branding}
+
+`Organization.BrandingJson` được `OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` trộn theo từng trường đè lên thương hiệu của tenant. Hàm trả về một `JsonObject` mới và không thay đổi đầu vào. Các quy tắc:
+
+- Khóa null hoặc không có sẽ kế thừa giá trị của tenant.
+- Khóa không xác định bị bỏ qua. Khóa được so khớp không phân biệt hoa thường.
+- Giá trị sai kiểu JSON cho khóa của nó giữ giá trị của tenant, chỉ cho khóa đó.
+- `languages` thay thế danh sách của tenant; nó không được trộn.
+- `BrandingJson` sai định dạng, hoặc không phải một đối tượng JSON, cho ra thương hiệu của tenant.
+- Tổ chức không thể đặt `showRegistration`; nó luôn giữ giá trị của tenant.
+
+Các khóa mà tổ chức có thể đặt là các tùy chọn thương hiệu của ứng dụng đăng nhập (xem [Thương hiệu](branding)) và năm màu email (`emailBg`, `emailHeaderColor`, `emailCardBg`, `emailFooterColor`, `emailLogoBg`).
+
+### Boot payload của trang đăng nhập {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` thực hiện một lần phân giải cho trang đăng nhập và trả về `{ branding, providers, organization }`: thương hiệu đã trộn (của tenant nếu không phân giải được tổ chức nào), danh sách nhà cung cấp của tổ chức đó, và `organization` dưới dạng `{ id, slug, name }` hoặc `null`. `MapAuthagonalLoginFallback()` phục vụ `index.html` của ứng dụng đăng nhập với payload đó được nhúng dưới dạng `<script type="application/json" id="authagonal-boot">` ngay trước `</head>`; máy chủ độc lập gọi hàm này. Xem [Thương hiệu](branding#organisation-name).
 
 ## Các claim {#the-claims}
 

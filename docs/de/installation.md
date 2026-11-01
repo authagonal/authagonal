@@ -188,6 +188,30 @@ Das Paket enthält kompiliertes JS und CSS; importieren Sie Komponenten und Styl
 
 Wenn Ihre SPA APIs mit einem Bearer Token aufruft, verwahren Sie das Token in einem BFF statt im Browser. Das BFF wird als NuGet-Paket (`Authagonal.Bff`) und als npm-Paket (`@authagonal/bff`) veröffentlicht; keines von beiden ist Teil des Server-Images. Siehe [Backend-for-Frontend](bff).
 
+## Einen Host an eine Organisation binden {#pinning-a-host-to-an-organization}
+
+Um auf jeder Domain eine andere Organisation zu bedienen, ordnen Sie mit `Organizations:PinnedHosts` Hostnamen Organisations-**Ids** zu:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+Der Host wird ohne Beachtung der Groß-/Kleinschreibung verglichen; der Port wird ignoriert. Ein zugeordneter Host ist auf `/connect/authorize` und `/connect/par` an seine Organisation gebunden, und seine Anmeldeseite zeigt Namen und Branding dieser Organisation. Siehe [Organisationen](organizations#pinning-a-host-to-an-organization).
+
 ## Sicherheitscheckliste für die Produktion {#production-security-checklist}
 
 Bevor Sie Authagonal echtem Datenverkehr aussetzen, stellen Sie Folgendes sicher. Jeder Punkt wird auf der Seite [Konfiguration](configuration) im Detail beschrieben.

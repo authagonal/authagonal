@@ -27,7 +27,6 @@ locale: ja
 - **組織スコープのグループはありません。** `groups` クレームと SCIM グループのメンバーシップはテナント全体のままです。組織スコープになるのはロールだけです。
 - **組織の Webhook イベントも、組織スコープの監査もありません。** `IAuthHook` には組織のライフサイクルのイベント (作成、メンバーシップの付与や取り消し) がなく、既存のフックのペイロードは `organizationId` を含まず、監査ログには組織の列もインデックスもありません。
 - **ロールで制限されたスコープは、認可時にテナントのロールに対してフィルタリングされます。** `Scope.AllowedRoles` は `/connect/authorize` で、組織が解決される前に、アカウントに直接割り当てられたロールに対して適用されます。そのため、`AllowedRoles` が組織スコープのロールでしか満たされないスコープは認可時に除外され、要求したスコープが 1 つも残らなければ `access_denied` で拒否されます。リフレッシュ時には同じ制限が、解決されたサブジェクトのロール (組織のロールを含みます) に対して実行されます。この 2 つが一致するまでは、スコープの制限はテナントのロールに基づいて行ってください。
-- **このライブラリには組織のブランディングはありません。** `Organization.BrandingJson` は、ホストがテナントのブランディングに重ねてマージするために保存されます。このライブラリはそれを招待メールの 1 か所だけで読み取ります([ブランディング](branding#organisation-branding-in-invitation-emails))。ホストのブートペイロードが `organization` (`{ id, slug, name }`) を含む場合、ログインアプリは組織の名前 (「{name}にサインインしています」) を表示します。ライブラリ自体が認証前に組織を解決するのは、`organization` パラメーター、エントリが 1 つだけのクライアント制限、組織スコープの接続、またはホストの `ITenantContext.OrganizationId` による場合だけです。
 
 ## 組織の作成 {#creating-an-organization}
 
@@ -240,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 各エントリは組織 ID の形式 `^[A-Za-z0-9._~-]{1,200}$` に一致しなければなりません。空または不正な形式のエントリに対して、管理 API は `400 invalid_request` を返します。どの `organization` パラメーターでも送信できない ID を列挙した制限は何にも一致せず、何にも一致しない制限はすべてのリクエストを拒否するからです。`null` のリストは空に正規化されます。
 
 空 (既存のすべてのクライアントがこれです) は制限なしを意味します。組織がリストにないリクエストは `access_denied` で拒否されます。エントリが 1 つのリストは、前述のルール 4 により選択も兼ねます。複数のエントリを持つリストは制限はしますが選択はしません。リクエストはそのうちの 1 つを指定しなければならず、指定しなければ `account_selection_required` で拒否されます。
+
+## ログインページでの組織 {#organizations-on-the-login-page}
+
+誰もサインインしていない段階ではユーザーが存在しないため、ログインページは、どの組織向けのページかをリクエストそのものから判断する必要があります。`PreAuthOrganizationResolver` は、ログインページについて次の順序でこれを行い、組織を特定した最初のルールが採用されます。
+
+1. **権威あるホストの固定。** ホストがリクエストのドメインを 1 つの組織に固定し、その固定を権威あるものとして示している場合です ([ホストを組織に固定する](#pinning-a-host-to-an-organization)を参照)。存在する組織を指さない固定 (削除された組織など) は固定として扱われません。警告がログに記録され、解決は次のルールへ進みます。
+2. **`/accept-invite` の場合に限り、`organization`。**
+3. **認可リクエストの組織**: `returnUrl` のクエリにある `organization`、`org_slug`、`org_id`、またはその `request_uri` が指すプッシュ済みリクエストの内部にあるもの。後者の場合、そのリクエストのパラメーターとクライアントが外側のものに置き換わります。
+4. **有効なクライアントの `RestrictedToOrganizationIds` にある唯一のエントリ。**
+5. **権威のない固定**。最後に評価されます。
+
+すべての名前は、[認可リクエストで組織を選択する](#selecting-an-organization-on-an-authorization-request)と同様に、まずスラッグとして、次に ID として解決されます。この解決では組織が有効かどうかは確認しません。そのため、無効化された組織のログインページもブランディングを表示しますが、認可エンドポイントは引き続きその組織を拒否します。失敗はすべて「組織なし」として扱われ、エラーページになることはありません。
+
+### ホストを組織に固定する {#pinning-a-host-to-an-organization}
+
+ホストは、`ITenantContext.OrganizationIdIsAuthoritative` (既定値が `false` の既定インターフェイスメンバー) から `true` を返すことで、リクエストに対して解決した組織を権威あるものとして示します。固定が権威あるものになるのは、これが `true` で、かつ `OrganizationId` が空でない場合に限られます。どちらも設定しないホストはこれまでどおり動作し、固定は上記のルール 5 のとおり最後に評価されます。
+
+スタンドアロンサーバーにコードは不要です。`Organizations:PinnedHosts` の下で、各ホスト名を組織の **ID** (スラッグではありません) に対応付けます。
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+ファイルを使わない場合:
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+ホストはリクエストのホスト名と大文字小文字を区別せずに比較され、ポートは無視されます。一致するエントリは `OrganizationId` を設定し、それを権威あるものにします。エントリもセクションもない場合は何も変わりません。どの組織も指さない ID は宙に浮いた固定であり、上記のとおり扱われます。
+
+### 権威ある固定が強制すること {#what-an-authoritative-pin-enforces}
+
+権威ある固定の下では、`/connect/authorize` と `POST /connect/par` (他のエンドポイントは対象外) が固定された組織に制限されます。
+
+- 組織を指定しないリクエスト (`organization`、`org_slug`、`org_id` のいずれもない) には、`organization=<固定された ID>` が追加されます。通常はクエリに、PAR ではフォーム本文に追加されます。`request_uri` を含む認可リクエストはそのままです。
+- 固定された組織を (スラッグまたは ID で) 指定するリクエストは通ります。
+- それ以外の組織、または存在しない組織を指定するリクエストは拒否され、リダイレクトされることはありません。
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR は、本文が `application/x-www-form-urlencoded` の場合にのみ読み取られ、それ以外の本文は拒否されます。宣言された長さが 32 KiB を超える場合はエンドポイントに任され、413 が返ります。長さが宣言されていない本文は 32 KiB まで読み取られ、それを超えると拒否されます。本文は読み取り後に元に戻されます。
+
+組織が選ばれた後にエンドポイントがすでに行っていた拒否 (メンバーシップがない、クライアント制限、無効化された組織) は変わりません。
+
+### 組織のブランディング {#organization-branding}
+
+`Organization.BrandingJson` は、`OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` によって、テナントのブランディングの上にフィールド単位でマージされます。新しい `JsonObject` を返し、入力は変更しません。ルールは次のとおりです。
+
+- null または存在しないキーは、テナントの値を継承します。
+- 不明なキーは無視されます。キーは大文字小文字を区別せずに照合されます。
+- キーに対して JSON の種類が誤っている値は、そのキーに限ってテナントの値が維持されます。
+- `languages` はテナントのリストを置き換えます。マージはされません。
+- 不正な形式、または JSON オブジェクトではない `BrandingJson` は、テナントのブランディングになります。
+- `showRegistration` は組織では設定できません。常にテナントの値が維持されます。
+
+組織が設定できるキーは、ログインアプリのブランディングオプション ([ブランディング](branding)を参照) と、5 つのメールの色 (`emailBg`、`emailHeaderColor`、`emailCardBg`、`emailFooterColor`、`emailLogoBg`) です。
+
+### ログインのブートペイロード {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` はログインページ向けの解決を 1 回行い、`{ branding, providers, organization }` を返します。マージ済みのブランディング (組織が解決されなかった場合はテナントのもの)、その組織のプロバイダー一覧、そして `{ id, slug, name }` または `null` としての `organization` です。`MapAuthagonalLoginFallback()` は、このペイロードを `<script type="application/json" id="authagonal-boot">` として `</head>` の直前にインラインで埋め込んだログインアプリの `index.html` を返します。スタンドアロンサーバーはこれを呼び出します。[ブランディング](branding#organisation-name)を参照してください。
 
 ## クレーム {#the-claims}
 

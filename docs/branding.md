@@ -36,10 +36,7 @@ to one customer), the `authagonal-boot` payload can carry a third member alongsi
 ```
 
 `organization` is `null` (or the member is absent) when the request resolved to no organisation:
-a single-tenant deployment, or one with no custom-domain pin for this host. This library does not
-resolve an organisation for an anonymous, pre-authentication request itself (`OrganizationSelector`
-needs a signed-in `AuthUser`); a host that has its own pre-auth resolution (Authagonal Cloud pins
-one per custom domain) sets `organization` when it assembles the boot payload.
+a single-tenant deployment, or one with no custom-domain pin for this host. The library resolves the organisation for an anonymous, pre-authentication request itself, in the order set out in [Organizations](organizations#organizations-on-the-login-page): an authoritative host pin first, then the authorize request's organisation, then a single-entry client restriction. A host with its own pre-auth resolution (Authagonal Cloud pins one per custom domain) can instead set `organization` when it assembles the boot payload with `LoginBootPayloadBuilder`.
 
 When `organization.name` is present and differs from `branding.appName` (case-insensitive, trimmed,
 so an organisation named the same as the tenant does not produce "Acme / Signing in to Acme"),
@@ -50,13 +47,19 @@ password, the MFA challenge and setup pages, the device page, consent and agent-
 and account) shows it identically. Nothing renders, and the header keeps its normal spacing, when
 `organization` is absent, `null`, or its name matches `branding.appName`.
 
+## Organisation Branding
+
+When the request resolves to an organisation, that organisation's `BrandingJson` is merged field by field over the tenant's branding, and the result is the `branding` member of the boot payload. A null or absent field inherits the tenant's value, unknown keys are ignored, a value of the wrong kind keeps the tenant's value for that key, `languages` replaces the tenant's list, and a malformed document gives the tenant's branding unchanged. An organisation cannot set `showRegistration`. The rules are in [Organizations](organizations#organization-branding) (`OrganizationBranding.Merge`).
+
+The standalone server builds the boot payload for every request to the login page with `LoginBootPayloadBuilder`, and `MapAuthagonalLoginFallback()` inlines it as `<script type="application/json" id="authagonal-boot">` just before `</head>`. `branding.json` is re-read on every request, so an edit to the mounted file applies at once; an absent or malformed file is treated as `{}` (with a warning for a malformed one). If anything fails, the plain `index.html` is served and the SPA fetches `/branding.json` as before.
+
 ## Organisation Branding in Invitation Emails
 
-`Organization.BrandingJson` is a JSON object the host owns. The library reads it in one place, the invitation email (`IEmailService.SendUserInviteEmailAsync`, see [Organizations](organizations#inviting-people)). For an invite into an organization, the built-in sender takes `appName`, `logoUrl` and `primaryColor` from it, field by field, over the email's own defaults: `Authagonal`, no logo and `#2563eb` (the login app's defaults). A field that is missing, empty or not a string is unset; a logo must be an absolute `https` URL and a colour a simple CSS colour (hex, `rgb()`/`hsl()` or a keyword), otherwise it is unset too. Malformed JSON is ignored: an invitation is never refused for an organization's branding.
+`Organization.BrandingJson` is a JSON object the host owns. Besides the login page ([above](#organisation-branding)), the library reads it in the invitation email (`IEmailService.SendUserInviteEmailAsync`, see [Organizations](organizations#inviting-people)). For an invite into an organization, the built-in sender takes `appName`, `logoUrl` and `primaryColor` from it, field by field, over the email's own defaults: `Authagonal`, no logo and `#2563eb` (the login app's defaults). A field that is missing, empty or not a string is unset; a logo must be an absolute `https` URL and a colour a simple CSS colour (hex, `rgb()`/`hsl()` or a keyword), otherwise it is unset too. Malformed JSON is ignored: an invitation is never refused for an organization's branding.
 
-The subject is the localized invite title and the app name, the body names the organization, and every value is HTML-encoded. A plain invite (no organization) uses the defaults and names the sender (`Email:SenderName`, else `Authagonal`). The sign-in page does not read `BrandingJson`: merging it over `branding.json` for the login UI is the host's job.
+The subject is the localized invite title and the app name, the body names the organization, and every value is HTML-encoded. A plain invite (no organization) uses the defaults and names the sender (`Email:SenderName`, else `Authagonal`).
 
-A host with its own `IEmailService` is unaffected. The interface's default `SendUserInviteEmailAsync` sends the password-reset email with the accept link; override it to send an invitation that wears your own branding. The page the link opens, `/accept-invite`, is part of the login app and takes the tenant's `branding.json` like every other page.
+A host with its own `IEmailService` is unaffected. The interface's default `SendUserInviteEmailAsync` sends the password-reset email with the accept link; override it to send an invitation that wears your own branding. The page the link opens, `/accept-invite`, is part of the login app and takes the tenant's `branding.json` like every other page, with the organization named by its `organization` parameter merged over it ([above](#organisation-branding)).
 
 ## Configuration
 

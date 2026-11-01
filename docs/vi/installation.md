@@ -188,6 +188,30 @@ Gói này đi kèm JS và CSS đã biên dịch, hãy import trực tiếp các 
 
 Nếu SPA của bạn gọi API bằng bearer token, hãy giữ token trong một BFF thay vì trong trình duyệt. BFF được phát hành dưới dạng gói NuGet (`Authagonal.Bff`) và gói npm (`@authagonal/bff`); không gói nào thuộc server image. Xem [Backend-for-Frontend](bff).
 
+## Ghim một host vào một tổ chức {#pinning-a-host-to-an-organization}
+
+Để phục vụ một tổ chức khác nhau trên mỗi tên miền, hãy ánh xạ tên host tới **id** của tổ chức bằng `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+Host được so sánh không phân biệt hoa thường và cổng bị bỏ qua. Host đã ghim bị ràng buộc vào tổ chức của nó trên `/connect/authorize` và `/connect/par`, và trang đăng nhập của nó hiển thị tên và thương hiệu của tổ chức đó. Xem [Tổ chức](organizations#pinning-a-host-to-an-organization).
+
 ## Danh sách kiểm tra bảo mật cho production {#production-security-checklist}
 
 Trước khi để Authagonal tiếp nhận lưu lượng thật, hãy xác nhận các mục sau. Mỗi mục được trình bày chi tiết trên trang [Cấu hình](configuration).

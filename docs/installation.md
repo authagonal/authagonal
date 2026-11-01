@@ -187,6 +187,30 @@ The package ships compiled JS and CSS, import components and styles directly in 
 
 If your SPA calls APIs with a bearer token, host the token in a BFF instead of the browser. The BFF is published as a NuGet package (`Authagonal.Bff`) and an npm package (`@authagonal/bff`); neither is part of the server image. See [Backend-for-Frontend](bff).
 
+## Pinning a Host to an Organization
+
+To serve a different organization on each domain, map host names to organization **ids** with `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+The host is compared case-insensitively and the port is ignored. A pinned host is held to its organization on `/connect/authorize` and `/connect/par`, and its login page shows that organization's name and branding. See [Organizations](organizations#pinning-a-host-to-an-organization).
+
 ## Production security checklist
 
 Before exposing Authagonal to real traffic, confirm the following. Each item is detailed on the [Configuration](configuration) page.

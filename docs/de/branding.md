@@ -38,10 +38,7 @@ neben `branding` und `providers` ein drittes Element enthalten:
 
 `organization` ist `null` (oder das Element fehlt), wenn der Request zu keiner Organisation aufgelöst
 wurde: bei einer Bereitstellung mit nur einem Mandanten oder wenn für diesen Host keine benutzerdefinierte
-Domain einer Organisation zugeordnet ist. Diese Bibliothek ermittelt für einen anonymen Request vor der
-Authentifizierung selbst keine Organisation (`OrganizationSelector` benötigt einen angemeldeten
-`AuthUser`); ein Host mit eigener Auflösung vor der Authentifizierung (Authagonal Cloud ordnet je
-benutzerdefinierter Domain eine zu) setzt `organization`, wenn er die Boot-Payload zusammenstellt.
+Domain einer Organisation zugeordnet ist. Die Bibliothek ermittelt die Organisation für einen anonymen Request vor der Authentifizierung selbst, in der Reihenfolge, die unter [Organisationen](organizations#organizations-on-the-login-page) beschrieben ist: zuerst eine maßgebliche Host-Zuordnung, dann die Organisation der Autorisierungsanfrage, dann eine Client-Beschränkung mit einem einzigen Eintrag. Ein Host mit eigener Auflösung vor der Authentifizierung (Authagonal Cloud ordnet je benutzerdefinierter Domain eine zu) kann stattdessen `organization` setzen, wenn er die Boot-Payload mit `LoginBootPayloadBuilder` zusammenstellt.
 
 Ist `organization.name` vorhanden und weicht es von `branding.appName` ab (ohne Beachtung von Groß- und
 Kleinschreibung und nach Entfernen von Leerzeichen am Rand, damit eine Organisation mit demselben Namen wie
@@ -53,13 +50,19 @@ MFA-Abfrage und MFA-Einrichtung, die Geräteseite, Zustimmung und Agenten-Zustim
 identisch anzeigt. Nichts wird gerendert, und die Kopfzeile behält ihre normalen Abstände, wenn
 `organization` fehlt, `null` ist oder der Name mit `branding.appName` übereinstimmt.
 
+## Organisations-Branding {#organisation-branding}
+
+Wird der Request einer Organisation zugeordnet, wird deren `BrandingJson` Feld für Feld über das Branding des Mandanten gelegt; das Ergebnis ist das Element `branding` der Boot-Payload. Ein Feld, das null ist oder fehlt, erbt den Wert des Mandanten, unbekannte Schlüssel werden ignoriert, ein Wert der falschen Art behält für diesen Schlüssel den Wert des Mandanten, `languages` ersetzt die Liste des Mandanten, und ein fehlerhaftes Dokument ergibt unverändert das Branding des Mandanten. Eine Organisation kann `showRegistration` nicht setzen. Die Regeln stehen unter [Organisationen](organizations#organization-branding) (`OrganizationBranding.Merge`).
+
+Der eigenständige Server erstellt die Boot-Payload für jeden Request an die Anmeldeseite mit `LoginBootPayloadBuilder`, und `MapAuthagonalLoginFallback()` bettet sie als `<script type="application/json" id="authagonal-boot">` unmittelbar vor `</head>` ein. `branding.json` wird bei jedem Request neu gelesen; eine Änderung an der eingebundenen Datei wirkt also sofort. Eine fehlende oder fehlerhafte Datei wird wie `{}` behandelt (bei einer fehlerhaften mit einer Warnung). Schlägt irgendetwas fehl, wird die einfache `index.html` ausgeliefert, und die SPA lädt `/branding.json` wie bisher.
+
 ## Organisations-Branding in Einladungs-E-Mails {#organisation-branding-in-invitation-emails}
 
-`Organization.BrandingJson` ist ein JSON-Objekt, das dem Host gehört. Die Bibliothek liest es an einer einzigen Stelle, in der Einladungs-E-Mail (`IEmailService.SendUserInviteEmailAsync`, siehe [Organisationen](organizations#inviting-people)). Bei einer Einladung in eine Organisation übernimmt der eingebaute Versand `appName`, `logoUrl` und `primaryColor` daraus, Feld für Feld, über den eigenen Standardwerten der E-Mail: `Authagonal`, kein Logo und `#2563eb` (die Standardwerte der Login-App). Ein fehlendes, leeres oder nicht als Zeichenkette angegebenes Feld gilt als nicht gesetzt; ein Logo muss eine absolute `https`-URL sein und eine Farbe eine einfache CSS-Farbe (Hex, `rgb()`/`hsl()` oder ein Schlüsselwort), sonst gilt sie ebenfalls als nicht gesetzt. Fehlerhaftes JSON wird ignoriert: Eine Einladung wird nie wegen des Brandings einer Organisation abgelehnt.
+`Organization.BrandingJson` ist ein JSON-Objekt, das dem Host gehört. Neben der Anmeldeseite ([oben](#organisation-branding)) liest die Bibliothek es in der Einladungs-E-Mail (`IEmailService.SendUserInviteEmailAsync`, siehe [Organisationen](organizations#inviting-people)). Bei einer Einladung in eine Organisation übernimmt der eingebaute Versand `appName`, `logoUrl` und `primaryColor` daraus, Feld für Feld, über den eigenen Standardwerten der E-Mail: `Authagonal`, kein Logo und `#2563eb` (die Standardwerte der Login-App). Ein fehlendes, leeres oder nicht als Zeichenkette angegebenes Feld gilt als nicht gesetzt; ein Logo muss eine absolute `https`-URL sein und eine Farbe eine einfache CSS-Farbe (Hex, `rgb()`/`hsl()` oder ein Schlüsselwort), sonst gilt sie ebenfalls als nicht gesetzt. Fehlerhaftes JSON wird ignoriert: Eine Einladung wird nie wegen des Brandings einer Organisation abgelehnt.
 
-Der Betreff besteht aus dem lokalisierten Einladungstitel und dem Anwendungsnamen, der Text nennt die Organisation, und jeder Wert wird HTML-kodiert. Eine einfache Einladung (ohne Organisation) verwendet die Standardwerte und nennt den Absender (`Email:SenderName`, sonst `Authagonal`). Die Anmeldeseite liest `BrandingJson` nicht: Es über `branding.json` für die Login-Oberfläche zu legen, ist Aufgabe des Hosts.
+Der Betreff besteht aus dem lokalisierten Einladungstitel und dem Anwendungsnamen, der Text nennt die Organisation, und jeder Wert wird HTML-kodiert. Eine einfache Einladung (ohne Organisation) verwendet die Standardwerte und nennt den Absender (`Email:SenderName`, sonst `Authagonal`).
 
-Ein Host mit eigenem `IEmailService` ist nicht betroffen. Das standardmäßige `SendUserInviteEmailAsync` der Schnittstelle sendet die Passwort-zurücksetzen-E-Mail mit dem Annahme-Link; überschreiben Sie es, um eine Einladung mit eigenem Branding zu versenden. Die Seite, die der Link öffnet, `/accept-invite`, gehört zur Login-App und übernimmt das `branding.json` des Mandanten wie jede andere Seite.
+Ein Host mit eigenem `IEmailService` ist nicht betroffen. Das standardmäßige `SendUserInviteEmailAsync` der Schnittstelle sendet die Passwort-zurücksetzen-E-Mail mit dem Annahme-Link; überschreiben Sie es, um eine Einladung mit eigenem Branding zu versenden. Die Seite, die der Link öffnet, `/accept-invite`, gehört zur Login-App und übernimmt das `branding.json` des Mandanten wie jede andere Seite, mit dem Branding der Organisation, die ihr Parameter `organization` nennt, darübergelegt ([oben](#organisation-branding)).
 
 ## Konfiguration {#configuration}
 

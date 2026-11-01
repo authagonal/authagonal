@@ -188,6 +188,30 @@ npm install @authagonal/login react react-dom react-router
 
 如果你的 SPA 使用持有者令牌调用 API，请把令牌放在 BFF 中，而不是浏览器里。BFF 以 NuGet 包（`Authagonal.Bff`）和 npm 包（`@authagonal/bff`）的形式发布；两者都不包含在服务器镜像中。参见 [Backend-for-Frontend](bff)。
 
+## 将宿主绑定到组织 {#pinning-a-host-to-an-organization}
+
+若要让每个域名服务于不同的组织，请用 `Organizations:PinnedHosts` 将主机名映射到组织的 **id**：
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+主机名比较时不区分大小写，端口会被忽略。被绑定的宿主在 `/connect/authorize` 和 `/connect/par` 上被限定在其组织内，其登录页面显示该组织的名称和品牌配置。参见[组织](organizations#pinning-a-host-to-an-organization)。
+
 ## 生产环境安全检查清单 {#production-security-checklist}
 
 在让 Authagonal 承接真实流量之前，请确认以下各项。每一项都在[配置](configuration)页面中有详细说明。

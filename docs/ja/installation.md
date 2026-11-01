@@ -188,6 +188,30 @@ npm install @authagonal/login react react-dom react-router
 
 SPA がベアラートークンで API を呼び出す場合は、トークンをブラウザーではなく BFF に保持してください。BFF は NuGet パッケージ (`Authagonal.Bff`) と npm パッケージ (`@authagonal/bff`) として公開されており、どちらもサーバーイメージには含まれていません。[Backend-for-Frontend](bff) を参照してください。
 
+## ホストを組織に固定する {#pinning-a-host-to-an-organization}
+
+ドメインごとに異なる組織を提供するには、`Organizations:PinnedHosts` でホスト名を組織の **ID** に対応付けます。
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+ホストは大文字小文字を区別せずに比較され、ポートは無視されます。固定されたホストは、`/connect/authorize` と `/connect/par` でその組織に制限され、ログインページにはその組織の名前とブランディングが表示されます。[組織](organizations#pinning-a-host-to-an-organization)を参照してください。
+
 ## 本番環境のセキュリティチェックリスト {#production-security-checklist}
 
 Authagonal を実際のトラフィックに公開する前に、次の点を確認してください。各項目の詳細は [構成](configuration) ページにあります。

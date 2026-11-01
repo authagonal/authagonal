@@ -27,7 +27,6 @@ Un `Organization` le da un registro: un id opaco inmutable, un slug inmutable y 
 - **No hay grupos con alcance de organización.** El claim `groups` y la pertenencia a grupos SCIM siguen siendo de todo el inquilino; solo los roles tienen alcance de organización.
 - **No hay eventos de webhook de organización ni auditoría con alcance de organización.** `IAuthHook` no tiene eventos del ciclo de vida de las organizaciones (creación, concesión o revocación de pertenencia), las cargas existentes de los hooks no llevan `organizationId`, y el registro de auditoría no tiene ninguna columna ni índice de organización.
 - **Los ámbitos restringidos por rol se filtran con los roles del inquilino en la autorización.** `Scope.AllowedRoles` se aplica en `/connect/authorize` contra los roles asignados directamente a la cuenta, antes de que se resuelva la organización, de modo que un ámbito cuyo `AllowedRoles` solo satisface un rol con alcance de organización se descarta en la autorización, o se rechaza con `access_denied` si no sobrevive ningún ámbito solicitado. En la actualización, el mismo control se ejecuta contra los roles del sujeto resuelto, que sí incluyen los de la organización. Hasta que ambos coincidan, restrinja los ámbitos con roles del inquilino.
-- **No hay personalización de marca por organización en esta biblioteca.** `Organization.BrandingJson` se almacena para que el host lo combine sobre la personalización de marca del inquilino; esta biblioteca lo lee en un solo lugar, el correo de invitación ([Personalización de marca](branding#organisation-branding-in-invitation-emails)). La aplicación de inicio de sesión muestra el nombre de la organización ("Signing in to {name}") cuando la carga de arranque del host lleva un `organization` (`{ id, slug, name }`); la propia biblioteca no resuelve ninguna organización antes de la autenticación, salvo mediante el parámetro `organization`, una restricción de cliente con una sola entrada, una conexión limitada a una organización o el `ITenantContext.OrganizationId` de un host.
 
 ## Crear una organización {#creating-an-organization}
 
@@ -240,6 +239,82 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 Cada entrada debe coincidir con la forma de id de organización `^[A-Za-z0-9._~-]{1,200}$`; la API de administración responde `400 invalid_request` ante una entrada vacía o mal formada, porque una restricción que lista un id que ningún parámetro `organization` puede enviar no coincide con nada, y una restricción que no coincide con nada rechaza todas las solicitudes. Una lista `null` se normaliza a vacía.
 
 Vacía (lo que tienen todos los clientes existentes) significa sin restricción. Una solicitud cuya organización no está en la lista se rechaza con `access_denied`. Una lista de un elemento también selecciona, según la regla 4 anterior. Una lista de varios restringe pero no selecciona: la solicitud debe seguir nombrando una, o se rechaza con `account_selection_required`.
+
+## Organizaciones en la página de inicio de sesión {#organizations-on-the-login-page}
+
+Antes de que nadie haya iniciado sesión no hay usuario, así que la página de inicio de sesión debe averiguar a partir de la propia solicitud para qué organización es. `PreAuthOrganizationResolver` lo hace para la página de inicio de sesión en el orden siguiente; gana la primera regla que nombra una organización.
+
+1. **Una fijación de host autoritativa.** El host ha fijado el dominio de la solicitud a una organización y ha marcado la fijación como autoritativa (véase [Fijar un host a una organización](#pinning-a-host-to-an-organization)). Una fijación que no nombra ninguna organización existente (una eliminada) no cuenta como fijación: se registra una advertencia y la resolución continúa.
+2. **`organization` solo en `/accept-invite`.**
+3. **La organización de la solicitud de autorización**: `organization`, `org_slug` u `org_id` en la consulta de `returnUrl`, o dentro de la solicitud enviada por push que nombra su `request_uri`; en ese caso, los parámetros y el cliente de esa solicitud sustituyen a los externos.
+4. **La única entrada de `RestrictedToOrganizationIds` de un cliente habilitado.**
+5. **Una fijación no autoritativa**, en último lugar.
+
+Cada nombre se resuelve primero como slug y después como id, como en [Seleccionar una organización en una solicitud de autorización](#selecting-an-organization-on-an-authorization-request). Esta resolución no comprueba si la organización está habilitada, por lo que la página de inicio de sesión de una organización deshabilitada sigue mostrando su personalización de marca; el endpoint de autorización sigue rechazándola. Cualquier fallo se resuelve como ninguna organización, nunca como una página de error.
+
+### Fijar un host a una organización {#pinning-a-host-to-an-organization}
+
+Un host marca como autoritativa la organización que ha resuelto para una solicitud devolviendo `true` en `ITenantContext.OrganizationIdIsAuthoritative`, un miembro de interfaz con implementación predeterminada que vale `false`. Una fijación es autoritativa solo cuando eso es `true` y `OrganizationId` no está vacío. Un host que no establece ninguno de los dos se comporta como siempre: la fijación queda en último lugar, como la regla 5 anterior.
+
+El servidor independiente no necesita código. Asigne cada nombre de host a un **id** de organización (no a un slug) en `Organizations:PinnedHosts`:
+
+```json
+{
+  "Organizations": {
+    "PinnedHosts": {
+      "login.acme.example": "org_7f3a"
+    }
+  }
+}
+```
+
+o, sin archivo:
+
+```bash
+# environment
+Organizations__PinnedHosts__login.acme.example=org_7f3a
+
+# command line
+--Organizations:PinnedHosts:login.acme.example=org_7f3a
+```
+
+El host se compara sin distinguir mayúsculas de minúsculas con el nombre de host de la solicitud, y el puerto se ignora. Una entrada coincidente establece `OrganizationId` y la hace autoritativa; sin entrada, o sin sección, no cambia nada. Un id que no nombra ninguna organización es una fijación colgante y se trata como se ha descrito.
+
+### Qué impone una fijación autoritativa {#what-an-authoritative-pin-enforces}
+
+Bajo una fijación autoritativa, `/connect/authorize` y `POST /connect/par` (y ningún otro endpoint) quedan limitados a la organización fijada:
+
+- A una solicitud que no nombra ninguna organización (`organization`, `org_slug` u `org_id`) se le añade `organization=<id fijado>`: a la consulta o, en PAR, al cuerpo del formulario. Una solicitud de autorización que lleva `request_uri` no se toca.
+- Una solicitud que nombra la organización fijada, por slug o por id, pasa.
+- Una solicitud que nombra cualquier otra organización, o una que no existe, se rechaza y nunca se redirige:
+
+```http
+HTTP/1.1 400 Bad Request
+Cache-Control: no-store
+
+{"error":"access_denied","error_description":"The requested organization is not available on this domain."}
+```
+
+- PAR solo se lee cuando su cuerpo es `application/x-www-form-urlencoded`; cualquier otro cuerpo se rechaza. Una longitud declarada superior a 32 KiB se deja al endpoint, que responde 413; un cuerpo sin longitud declarada se lee hasta 32 KiB y se rechaza si la supera. El cuerpo se restaura tras leerlo.
+
+Los rechazos que los endpoints ya hacían una vez elegida la organización (sin pertenencia, una restricción de cliente, una organización deshabilitada) no cambian.
+
+### Personalización de marca de la organización {#organization-branding}
+
+`OrganizationBranding.Merge(JsonObject tenantBranding, Organization organization, ILogger logger)` combina campo a campo `Organization.BrandingJson` sobre la personalización de marca del inquilino. Devuelve un nuevo `JsonObject` y no modifica su entrada. Las reglas:
+
+- Una clave nula o ausente hereda el valor del inquilino.
+- Las claves desconocidas se ignoran. Las claves se comparan sin distinguir mayúsculas de minúsculas.
+- Un valor del tipo JSON equivocado para su clave conserva el valor del inquilino solo para esa clave.
+- `languages` sustituye la lista del inquilino; no se combina.
+- Un `BrandingJson` mal formado, o que no es un objeto JSON, da la personalización de marca del inquilino.
+- Una organización no puede establecer `showRegistration`; conserva siempre el valor del inquilino.
+
+Las claves que una organización puede establecer son las opciones de personalización de la aplicación de inicio de sesión (véase [Personalización de marca](branding)) y los cinco colores de correo (`emailBg`, `emailHeaderColor`, `emailCardBg`, `emailFooterColor`, `emailLogoBg`).
+
+### La carga de arranque del inicio de sesión {#the-login-boot-payload}
+
+`LoginBootPayloadBuilder` hace una resolución para la página de inicio de sesión y devuelve `{ branding, providers, organization }`: la personalización de marca combinada (la del inquilino si no se resolvió ninguna organización), la lista de proveedores de esa organización y `organization` como `{ id, slug, name }` o `null`. `MapAuthagonalLoginFallback()` sirve el `index.html` de la aplicación de inicio de sesión con esa carga incorporada como `<script type="application/json" id="authagonal-boot">` justo antes de `</head>`; el servidor independiente la invoca. Véase [Personalización de marca](branding#organisation-name).
 
 ## Los claims {#the-claims}
 
