@@ -23,6 +23,9 @@ const defaultRules: PasswordPolicyRule[] = [
   { rule: 'specialChar', value: null, label: 'Special character' },
 ];
 
+/** The shape of an organisation identifier (Organization.cs `OrganizationIdentifier`). */
+const ORGANIZATION_IDENTIFIER = /^[A-Za-z0-9._~-]{1,200}$/;
+
 /**
  * What to call the organisation an invite link names, or null for an invite that names none.
  *
@@ -33,7 +36,9 @@ const defaultRules: PasswordPolicyRule[] = [
  * and otherwise the page names the organisation by its slug.
  */
 function organizationLabel(slug: string): string | null {
-  if (!slug) return null;
+  // Only a value of the organisation identifier's shape is shown; anything else on the query string is
+  // arbitrary text on the auth host's own origin, so the page falls back to the generic invite copy.
+  if (!ORGANIZATION_IDENTIFIER.test(slug)) return null;
   const inlined = getOrganization();
   if (inlined?.name && (inlined.slug === slug || inlined.id === slug)) return inlined.name;
   return slug;

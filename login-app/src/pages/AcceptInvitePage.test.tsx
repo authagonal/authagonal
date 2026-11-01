@@ -57,6 +57,14 @@ describe('AcceptInvitePage', () => {
     expect(screen.getByText('invite.titleOrganization:acme')).toBeTruthy();
   });
 
+  it('is generic, and renders none of the text, when the organization value is not a slug', async () => {
+    const text = 'PayPal Security. Your account is locked; call 1-800-555-0100';
+    await renderAt(`?p=tok&organization=${encodeURIComponent(text)}`);
+    expect(screen.getByText('invite.title')).toBeTruthy();
+    expect(screen.getByText('invite.intro')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('PayPal');
+  });
+
   it('is generic when the link names no organisation', async () => {
     await renderAt('?p=tok');
     expect(screen.getByText('invite.title')).toBeTruthy();
