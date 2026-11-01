@@ -327,6 +327,19 @@ public sealed class OrganizationDomainRoutingTests : IAsyncLifetime
         Assert.False(stored.ContainsKey("org_id"));
     }
 
+    /// <summary>A trailing dot on the Host names the same host, so the pin still applies.</summary>
+    [Fact]
+    public async Task Authorize_OnAPinnedDomainWithATrailingDotHost_IsStillPinned()
+    {
+        Seed("Org_7fA2", "acme-eu");
+        Seed("Org_9zB4", "acme-us");
+        await StartAsync(("eu.acme.com", "Org_7fA2"));
+
+        var response = await GetAsync("eu.acme.com.", AuthorizeUrl("/connect/authorize", "&organization=acme-us"));
+
+        await AssertRefusedAsync(response);
+    }
+
     [Fact]
     public async Task Authorize_OnATenantLevelDomain_IsNotTouched()
     {

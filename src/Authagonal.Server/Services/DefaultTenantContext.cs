@@ -55,12 +55,12 @@ public sealed class DefaultTenantContext : ITenantContext
     {
         get
         {
-            var host = _httpContextAccessor?.HttpContext?.Request.Host.Host;
+            var host = _httpContextAccessor?.HttpContext?.Request.Host.Host?.TrimEnd('.');
             if (string.IsNullOrEmpty(host)) return null;
 
             foreach (var entry in _configuration.GetSection(PinnedHostsSection).GetChildren())
             {
-                if (!string.Equals(entry.Key, host, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(entry.Key.TrimEnd('.'), host, StringComparison.OrdinalIgnoreCase)) continue;
 
                 var id = entry.Value?.Trim();
                 return string.IsNullOrEmpty(id) ? null : id;

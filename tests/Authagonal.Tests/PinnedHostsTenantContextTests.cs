@@ -32,6 +32,25 @@ public sealed class PinnedHostsTenantContextTests
                 .Select(v => new KeyValuePair<string, string?>(v.Item1, v.Item2)))
             .Build();
 
+    [Theory]
+    [InlineData("login.acme.example.")]
+    [InlineData("LOGIN.ACME.EXAMPLE.:8443")]
+    public void ATrailingDotOnTheRequestHost_StillPinsTheHost(string hostHeader)
+    {
+        var tenant = ContextFor(Memory(($"Organizations:PinnedHosts:{Host}", "Org_Dot")), hostHeader);
+
+        Assert.Equal("Org_Dot", tenant.OrganizationId);
+        Assert.True(tenant.OrganizationIdIsAuthoritative);
+    }
+
+    [Fact]
+    public void ATrailingDotOnTheConfiguredKey_StillPinsTheHost()
+    {
+        var tenant = ContextFor(Memory(($"Organizations:PinnedHosts:{Host}.", "Org_Dot")), Host);
+
+        Assert.Equal("Org_Dot", tenant.OrganizationId);
+    }
+
     [Fact]
     public void CommandLineForm_PinsTheHost()
     {
