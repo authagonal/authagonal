@@ -581,6 +581,10 @@ public static class AuthagonalExtensions
         // The same question asked BEFORE anyone has signed in — home-realm discovery, the login page's
         // provider list and /sso-check. Scoped for the same reason, and because it reads ITenantContext.
         services.AddScoped<PreAuthOrganizationResolver>();
+        // The login document's boot payload: branding, providers and organisation from one resolution of
+        // the question above. Registered here with the resolver, not in AddAuthagonal, so a host that calls
+        // AddAuthagonalCore alone (the multi-tenant host does) can serve the same payload.
+        services.AddScoped<LoginBootPayloadBuilder>();
         // Subject resolver — maps ClaimsPrincipal / OidcSubject back to AuthUser via the user store.
         services.AddScoped<UserStoreOidcSubjectResolver>();
         services.AddScoped<IOidcSubjectResolver>(sp => sp.GetRequiredService<UserStoreOidcSubjectResolver>());

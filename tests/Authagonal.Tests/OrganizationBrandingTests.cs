@@ -986,4 +986,324 @@ public class OrganizationBrandingTests
         Assert.Null(resolved.Organization);
         Assert.Equal("Acme", Text(resolved.Branding, "appName"));
     }
+
+    // ── The boot payload ───────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Backs <see cref="IOidcProviderStore"/>/<see cref="ISamlProviderStore"/> with a plain list: enough
+    /// for <c>GetAllAsync</c>, which is all <c>AuthEndpoints.BuildProvidersResponseAsync</c> reads.
+    /// </summary>
+    private sealed class StubOidcProviderStore : IOidcProviderStore
+    {
+        private readonly List<OidcProviderConfig> _connections = [];
+        public StubOidcProviderStore Add(OidcProviderConfig config) { _connections.Add(config); return this; }
+        public Task<OidcProviderConfig?> GetAsync(string connectionId, CancellationToken ct = default) =>
+            Task.FromResult(_connections.FirstOrDefault(c => c.ConnectionId == connectionId));
+        public Task<IReadOnlyList<OidcProviderConfig>> GetAllAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<OidcProviderConfig>>(_connections);
+        public Task<IReadOnlyList<OidcProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<OidcProviderConfig>>(
+                _connections.Where(c => c.OrganizationId == organizationId).ToList());
+        public Task UpsertAsync(OidcProviderConfig config, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task DeleteAsync(string connectionId, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class StubSamlProviderStore : ISamlProviderStore
+    {
+        private readonly List<SamlProviderConfig> _connections = [];
+        public StubSamlProviderStore Add(SamlProviderConfig config) { _connections.Add(config); return this; }
+        public Task<SamlProviderConfig?> GetAsync(string connectionId, CancellationToken ct = default) =>
+            Task.FromResult(_connections.FirstOrDefault(c => c.ConnectionId == connectionId));
+        public Task<IReadOnlyList<SamlProviderConfig>> GetAllAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SamlProviderConfig>>(_connections);
+        public Task<IReadOnlyList<SamlProviderConfig>> ListByOrganizationAsync(string organizationId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SamlProviderConfig>>(
+                _connections.Where(c => c.OrganizationId == organizationId).ToList());
+        public Task UpsertAsync(SamlProviderConfig config, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task DeleteAsync(string connectionId, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private const string Shell = "<!doctype html><html><head><title>login</title></head><body></body></html>";
+
+    /// <summary>
+    /// Builds the payload the way the standalone server's login document does: the pin is whatever
+    /// <c>Organizations:PinnedHosts</c> holds for the request's host, the tenant's branding is
+    /// <see cref="TenantBranding"/>, one resolution serves <see cref="LoginBootPayloadBuilder.BuildAsync"/>,
+    /// and the result is inlined with <see cref="LoginBootPayloadBuilder.InjectIntoShell"/> and read back
+    /// out of the document, so what is asserted is what the login document actually carries.
+    /// </summary>
+    private static async Task<JsonElement> BootPayloadAsync(
+        string host, string pathAndQuery, IOrganizationStore organizations, string? pinnedOrganizationId = null,
+        StubOidcProviderStore? oidc = null, StubSamlProviderStore? saml = null,
+        IGrantStore? grants = null, IClientStore? clients = null)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Host = new HostString(host);
+        var split = pathAndQuery.IndexOf('?');
+        context.Request.Path = split < 0 ? pathAndQuery : pathAndQuery[..split];
+        if (split >= 0)
+            context.Request.QueryString = new QueryString(pathAndQuery[split..]);
+
+        var configuration = new Dictionary<string, string?> { ["Issuer"] = $"https://{host}" };
+        if (pinnedOrganizationId is not null)
+            configuration[$"{DefaultTenantContext.PinnedHostsSection}:{host}"] = pinnedOrganizationId;
+        var tenant = new DefaultTenantContext(
+            new ConfigurationBuilder().AddInMemoryCollection(configuration).Build(),
+            new HttpContextAccessor { HttpContext = context });
+
+        var builder = new LoginBootPayloadBuilder(
+            new PreAuthOrganizationResolver(
+                organizations, tenant, NullLogger<PreAuthOrganizationResolver>.Instance, grants, clients),
+            oidc ?? new StubOidcProviderStore(),
+            saml ?? new StubSamlProviderStore(),
+            NullLogger<LoginBootPayloadBuilder>.Instance);
+
+        var payload = await builder.BuildAsync(context.Request, TenantBranding(), turnstileSiteKey: null, CancellationToken.None);
+        var html = LoginBootPayloadBuilder.InjectIntoShell(Shell, payload);
+        Assert.NotNull(html);
+
+        const string open = """<script type="application/json" id="authagonal-boot">""";
+        var start = html.IndexOf(open, StringComparison.Ordinal) + open.Length;
+        var end = html.IndexOf("</script>", start, StringComparison.Ordinal);
+        return JsonDocument.Parse(html[start..end]).RootElement.Clone();
+    }
+
+    private static string AuthorizeReturn(string query) =>
+        "/login?returnUrl=" + Uri.EscapeDataString("/connect/authorize?" + query);
+
+    private static Organization SeededOrganization(string? brandingJson, string id = "Org_7fA2", string slug = "acme-eu") => new()
+    {
+        Id = id,
+        Slug = slug,
+        DisplayName = $"{slug} display",
+        BrandingJson = brandingJson,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+
+    [Fact]
+    public async Task BootPayload_WithAnOrganizationOnTheAuthorizeRequest_CarriesTheMergedBranding()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization("""{"appName":"Acme Europe"}"""));
+
+        var boot = await BootPayloadAsync(
+            "acme.authagonal.test", AuthorizeReturn("client_id=app&organization=acme-eu"), organizations);
+
+        var branding = boot.GetProperty("branding");
+        Assert.Equal("Acme Europe", branding.GetProperty("appName").GetString());
+        // Not overridden, so still the tenant's.
+        Assert.Equal("#111111", branding.GetProperty("primaryColor").GetString());
+    }
+
+    [Fact]
+    public async Task BootPayload_WithoutAnOrganization_CarriesTheTenantBranding()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization("""{"appName":"Acme Europe"}"""));
+
+        var boot = await BootPayloadAsync(
+            "acme.authagonal.test", AuthorizeReturn("client_id=app"), organizations);
+
+        Assert.Equal("Acme", boot.GetProperty("branding").GetProperty("appName").GetString());
+        Assert.Equal(JsonValueKind.Null, boot.GetProperty("organization").ValueKind);
+    }
+
+    /// <summary>
+    /// The organisation block is additive: the SPA parses the boot payload with a bare JSON.parse and
+    /// reads only the keys it knows, so an older login-app build ignores it.
+    /// </summary>
+    [Fact]
+    public async Task BootPayload_WithAnOrganization_CarriesItsIdSlugAndName()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization(brandingJson: null));
+
+        var boot = await BootPayloadAsync(
+            "acme.authagonal.test", AuthorizeReturn("client_id=app&organization=acme-eu"), organizations);
+
+        var organization = boot.GetProperty("organization");
+        Assert.Equal("Org_7fA2", organization.GetProperty("id").GetString());
+        Assert.Equal("acme-eu", organization.GetProperty("slug").GetString());
+        Assert.Equal("acme-eu display", organization.GetProperty("name").GetString());
+        // No brandingJson, so nothing is overridden.
+        Assert.Equal("Acme", boot.GetProperty("branding").GetProperty("appName").GetString());
+    }
+
+    /// <summary>
+    /// A host pinned to an organisation (an <c>Organizations:PinnedHosts</c> entry) brands its login page
+    /// without the relying party having to name the organisation at all, which is the whole point of
+    /// pinning one.
+    /// </summary>
+    [Fact]
+    public async Task BootPayload_OnADomainPinnedToAnOrganization_CarriesThatOrganizationsBranding()
+    {
+        var organizations = new StubOrganizationStore().Add(
+            SeededOrganization("""{"appName":"Acme Europe","primaryColor":"#22cc88"}"""));
+
+        var boot = await BootPayloadAsync("eu.acme.com", "/login", organizations, pinnedOrganizationId: "Org_7fA2");
+
+        Assert.Equal("Acme Europe", boot.GetProperty("branding").GetProperty("appName").GetString());
+        Assert.Equal("#22cc88", boot.GetProperty("branding").GetProperty("primaryColor").GetString());
+        Assert.Equal("Org_7fA2", boot.GetProperty("organization").GetProperty("id").GetString());
+    }
+
+    /// <summary>
+    /// The lookup runs through the tenant's own organisation store, so an organisation of tenant A cannot
+    /// be reached from tenant B's host: for the library, an id the tenant's store does not hold. The same
+    /// id and the same returnUrl are used against both stores, so the difference can only be the tenant.
+    /// </summary>
+    [Fact]
+    public async Task BootPayload_WithAnOrganizationIdFromAnotherTenant_FallsBackToTenantBranding()
+    {
+        // Exists in ALPHA only.
+        var alpha = new StubOrganizationStore().Add(
+            SeededOrganization("""{"appName":"Alpha Division"}""", id: "Org_Shared", slug: "shared"));
+        var beta = new StubOrganizationStore();
+
+        var returnUrl = AuthorizeReturn("client_id=app&org_id=Org_Shared");
+
+        var onAlpha = await BootPayloadAsync("alpha.authagonal.test", returnUrl, alpha);
+        var onBeta = await BootPayloadAsync("beta.authagonal.test", returnUrl, beta);
+
+        Assert.Equal("Alpha Division", onAlpha.GetProperty("branding").GetProperty("appName").GetString());
+        Assert.Equal("Org_Shared", onAlpha.GetProperty("organization").GetProperty("id").GetString());
+
+        Assert.Equal("Acme", onBeta.GetProperty("branding").GetProperty("appName").GetString());
+        Assert.Equal(JsonValueKind.Null, onBeta.GetProperty("organization").ValueKind);
+    }
+
+    // ── Organisation-scoped connections / autoChallenge ───────────────────────────────────────────────
+
+    /// <summary>
+    /// The boot's `providers` block is the library's own <c>SsoProviderListResponse</c>, so it always has
+    /// `providers`/`turnstileSiteKey`, and `autoChallenge` only when present (it is serialised with
+    /// <c>JsonIgnoreCondition.WhenWritingNull</c>).
+    /// </summary>
+    private static bool HasAutoChallenge(JsonElement boot, out JsonElement autoChallenge) =>
+        boot.GetProperty("providers").TryGetProperty("autoChallenge", out autoChallenge);
+
+    /// <summary>(a) Pinned host: the organisation's one connection auto-challenges without the relying
+    /// party naming anything at all, the same pin mechanism the branding tests cover, asserted for the
+    /// providers/autoChallenge half of the same boot payload.</summary>
+    [Fact]
+    public async Task BootPayload_OnADomainPinnedToAnOrganization_AutoChallengesItsSoleConnection()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization(brandingJson: null));
+        var oidc = new StubOidcProviderStore().Add(new OidcProviderConfig
+        {
+            ConnectionId = "conn-eu-okta",
+            ConnectionName = "Acme EU Okta",
+            OrganizationId = "Org_7fA2",
+        });
+
+        var boot = await BootPayloadAsync(
+            "eu.acme.com", "/login", organizations, pinnedOrganizationId: "Org_7fA2", oidc: oidc);
+
+        Assert.True(HasAutoChallenge(boot, out var autoChallenge));
+        Assert.Equal("conn-eu-okta", autoChallenge.GetProperty("connectionId").GetString());
+        // The organisation's own connection is also the first (only) button offered.
+        var providers = boot.GetProperty("providers").GetProperty("providers");
+        Assert.Single(providers.EnumerateArray());
+    }
+
+    /// <summary>(b) `organization=` on the returnUrl: the relying party names the organisation on the
+    /// authorize request that led here, and the login page auto-challenges its sole connection exactly
+    /// as the pin does.</summary>
+    [Fact]
+    public async Task BootPayload_WithAnOrganizationOnTheAuthorizeRequest_AutoChallengesItsSoleConnection()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization(brandingJson: null));
+        var saml = new StubSamlProviderStore().Add(new SamlProviderConfig
+        {
+            ConnectionId = "conn-eu-adfs",
+            ConnectionName = "Acme EU ADFS",
+            EntityId = "urn:acme-eu:sp",
+            MetadataLocation = "https://idp.example/metadata",
+            OrganizationId = "Org_7fA2",
+        });
+
+        var boot = await BootPayloadAsync(
+            "acme.authagonal.test", AuthorizeReturn("client_id=app&organization=acme-eu"), organizations, saml: saml);
+
+        Assert.True(HasAutoChallenge(boot, out var autoChallenge));
+        Assert.Equal("conn-eu-adfs", autoChallenge.GetProperty("connectionId").GetString());
+        Assert.Equal("saml", autoChallenge.GetProperty("type").GetString());
+    }
+
+    /// <summary>(c) A client restricted to exactly one organisation selects it for a request that names
+    /// none at all, proven at the boot-payload/providers level rather than only against the resolver
+    /// directly.</summary>
+    [Fact]
+    public async Task BootPayload_WithAClientRestrictedToOneOrganization_AutoChallengesItsSoleConnection()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization(brandingJson: null));
+        var clients = new StubClientStore().Add(
+            new OAuthClient { ClientId = "restricted-app", RestrictedToOrganizationIds = ["Org_7fA2"] });
+        var oidc = new StubOidcProviderStore().Add(new OidcProviderConfig
+        {
+            ConnectionId = "conn-eu-google",
+            ConnectionName = "Acme EU Google",
+            OrganizationId = "Org_7fA2",
+        });
+
+        var boot = await BootPayloadAsync(
+            "acme.authagonal.test", AuthorizeReturn("client_id=restricted-app"), organizations,
+            oidc: oidc, clients: clients);
+
+        Assert.Equal("Org_7fA2", boot.GetProperty("organization").GetProperty("id").GetString());
+        Assert.True(HasAutoChallenge(boot, out var autoChallenge));
+        Assert.Equal("conn-eu-google", autoChallenge.GetProperty("connectionId").GetString());
+    }
+
+    /// <summary>(d) A pushed authorization request (RFC 9126): the organisation rides behind the opaque
+    /// `request_uri` rather than on the query string, and resolution must still reach it, the same
+    /// pushed-record path <see cref="Resolve_WithAPushedRequestNamingAnOrganization_ResolvesIt"/> proves
+    /// for branding, now proven for autoChallenge.</summary>
+    [Fact]
+    public async Task BootPayload_WithAPushedAuthorizationRequestNamingAnOrganization_AutoChallengesItsSoleConnection()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization(brandingJson: null));
+        var saml = new StubSamlProviderStore().Add(new SamlProviderConfig
+        {
+            ConnectionId = "conn-eu-adfs",
+            ConnectionName = "Acme EU ADFS",
+            EntityId = "urn:acme-eu:sp",
+            MetadataLocation = "https://idp.example/metadata",
+            OrganizationId = "Org_7fA2",
+        });
+        var grants = new StubGrantStore().Add(PushedAuthorizationGrant(
+            PushedRequestUri, "app", new Dictionary<string, string[]> { ["organization"] = ["acme-eu"] }));
+
+        var boot = await BootPayloadAsync(
+            "acme.authagonal.test",
+            AuthorizeReturn($"client_id=app&request_uri={Uri.EscapeDataString(PushedRequestUri)}"),
+            organizations, saml: saml, grants: grants);
+
+        Assert.Equal("Org_7fA2", boot.GetProperty("organization").GetProperty("id").GetString());
+        Assert.True(HasAutoChallenge(boot, out var autoChallenge));
+        Assert.Equal("conn-eu-adfs", autoChallenge.GetProperty("connectionId").GetString());
+    }
+
+    /// <summary>Negative case for all four: a plain login (no pin, no organization parameter, no
+    /// restriction, no PAR) never auto-challenges an organisation's connection. It is offered only once
+    /// that organisation has actually been selected.</summary>
+    [Fact]
+    public async Task BootPayload_WithNoOrganization_NeverAutoChallengesAnOrganizationsConnection()
+    {
+        var organizations = new StubOrganizationStore().Add(SeededOrganization(brandingJson: null));
+        var oidc = new StubOidcProviderStore()
+            .Add(new OidcProviderConfig
+            {
+                ConnectionId = "conn-eu-google",
+                ConnectionName = "Acme EU Google",
+                OrganizationId = "Org_7fA2",
+            })
+            // A tenant-level connection with the SAME shape: this one SHOULD show up on a plain login.
+            .Add(new OidcProviderConfig { ConnectionId = "conn-tenant-google", ConnectionName = "Acme Google" });
+
+        var boot = await BootPayloadAsync(
+            "acme.authagonal.test", AuthorizeReturn("client_id=app"), organizations, oidc: oidc);
+
+        Assert.False(HasAutoChallenge(boot, out _));
+        var providers = boot.GetProperty("providers").GetProperty("providers").EnumerateArray().ToList();
+        Assert.Single(providers);
+        Assert.Equal("conn-tenant-google", providers[0].GetProperty("connectionId").GetString());
+    }
 }

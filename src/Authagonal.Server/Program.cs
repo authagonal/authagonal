@@ -8,6 +8,6 @@ var app = builder.Build();
 
 app.UseAuthagonal();
 app.MapAuthagonalEndpoints();
-app.MapFallbackToFile("index.html");
+app.MapAuthagonalLoginFallback();
 
 app.Run();
