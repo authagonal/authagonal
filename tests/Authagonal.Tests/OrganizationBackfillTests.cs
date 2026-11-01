@@ -129,6 +129,21 @@ public sealed class OrganizationBackfillTests
     }
 
     [Fact]
+    public async Task ALegacyValueEqualToAnExistingOrganizationsId_TakesTheNextSuffix_AndTheRunCompletes()
+    {
+        const string bareGuidId = "0123456789abcdef0123456789abcdef";
+        await _orgs.UpsertAsync(new Organization { Id = bareGuidId, Slug = "legacy-slug", DisplayName = "Legacy" });
+        await SeedAsync("u1", bareGuidId);
+
+        var result = await _ops.BackfillAsync(false, Actor, Ct);
+
+        Assert.Equal(1, result.OrganizationsCreated);
+        Assert.Equal(1, result.MembershipsCreated);
+        Assert.NotNull(await _orgs.GetBySlugAsync(bareGuidId + "-2"));
+        Assert.True(_audit.Has("organization.backfill"));
+    }
+
+    [Fact]
     public async Task ScanStopsAtMaxUsersScanned_AndReportsTruncated()
     {
         var total = OrganizationOperations.MaxUsersScanned + 400;

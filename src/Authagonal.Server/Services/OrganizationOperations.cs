@@ -666,7 +666,13 @@ public sealed partial class OrganizationOperations(
             if (!slugsClaimedThisRun.ContainsKey(candidate))
             {
                 var existing = await orgStore.GetBySlugAsync(candidate, ct);
-                if (existing is null)
+
+                // Ids and slugs share one namespace: a candidate equal to some organisation's id is as
+                // taken as one equal to a slug, and the store refuses to write it (as CreateAsync's check
+                // does), so move to the next suffix rather than let the run die midway.
+                var takenAsId = existing is null && await orgStore.GetAsync(candidate, ct) is not null;
+
+                if (existing is null && !takenAsId)
                 {
                     slugsClaimedThisRun[candidate] = legacyValue;
                     var org = new Organization
@@ -688,7 +694,7 @@ public sealed partial class OrganizationOperations(
                     return (candidate, org, true);
                 }
 
-                if (MatchesLegacyValue(existing, legacyValue))
+                if (existing is not null && MatchesLegacyValue(existing, legacyValue))
                 {
                     slugsClaimedThisRun[candidate] = legacyValue;
                     return (candidate, existing, false);
