@@ -61,6 +61,21 @@ public class OrganizationBrandingTests
 
     // ── Merge ──────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>A lone surrogate escape parses but cannot be decoded; that field fails alone.</summary>
+    [Theory]
+    [InlineData("""{"appName":"\ud800","primaryColor":"#123456"}""")]
+    [InlineData("""{"\ud800":"x","primaryColor":"#123456"}""")]
+    [InlineData("""{"welcomeTitle":{"en":"\udc00"},"primaryColor":"#123456"}""")]
+    public void Merge_WithAnUndecodableKeyOrValue_KeepsTheTenantsAndTheRest(string brandingJson)
+    {
+        var tenant = TenantBranding();
+        var merged = Merge(tenant, brandingJson);
+
+        Assert.Equal("#123456", merged["primaryColor"]!.GetValue<string>());
+        Assert.Equal(tenant["appName"]?.ToJsonString(), merged["appName"]?.ToJsonString());
+        Assert.Equal(tenant["welcomeTitle"]?.ToJsonString(), merged["welcomeTitle"]?.ToJsonString());
+    }
+
     /// <summary>
     /// The whole contract in one test: what the organisation sets wins, what it leaves out is still the
     /// tenant's.

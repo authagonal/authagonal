@@ -116,30 +116,47 @@ public static class OrganizationBranding
 
             foreach (var field in document.RootElement.EnumerateObject())
             {
-                if (field.Value.ValueKind == JsonValueKind.Null) continue;
-                if (!AllowedKeys.TryGetValue(field.Name, out var key)) continue;
-
-                if (ToNode(field.Value, key.Kind) is not { } value)
+                try
                 {
-                    logger.LogWarning(
-                        "Organization {OrganizationId} has an unusable brandingJson value for {Field}; keeping the tenant's",
-                        organization.Id, field.Name);
-                    continue;
+                    MergeField(merged, field, organization, logger);
                 }
-
-                // The tenant's document may carry the key under another casing; leaving it would
-                // leave two keys the SPA would read as one.
-                foreach (var existing in merged.Select(p => p.Key)
-                             .Where(k => !string.Equals(k, key.Name, StringComparison.Ordinal)
-                                         && string.Equals(k, key.Name, StringComparison.OrdinalIgnoreCase))
-                             .ToList())
-                    merged.Remove(existing);
-
-                merged[key.Name] = value;
+                catch (InvalidOperationException)
+                {
+                    // A key or string value holding a lone surrogate escape parses but cannot be decoded;
+                    // that field fails alone and the tenant's value stays. The name is not logged, being
+                    // the thing that may be undecodable.
+                    logger.LogWarning(
+                        "Organization {OrganizationId} has an undecodable brandingJson key or value; keeping the tenant's",
+                        organization.Id);
+                }
             }
 
             return merged;
         }
+    }
+
+    private static void MergeField(JsonObject merged, JsonProperty field, Organization organization, ILogger logger)
+    {
+        if (field.Value.ValueKind == JsonValueKind.Null) return;
+        if (!AllowedKeys.TryGetValue(field.Name, out var key)) return;
+
+        if (ToNode(field.Value, key.Kind) is not { } value)
+        {
+            logger.LogWarning(
+                "Organization {OrganizationId} has an unusable brandingJson value for {Field}; keeping the tenant's",
+                organization.Id, field.Name);
+            return;
+        }
+
+        // The tenant's document may carry the key under another casing; leaving it would
+        // leave two keys the SPA would read as one.
+        foreach (var existing in merged.Select(p => p.Key)
+                     .Where(k => !string.Equals(k, key.Name, StringComparison.Ordinal)
+                                 && string.Equals(k, key.Name, StringComparison.OrdinalIgnoreCase))
+                     .ToList())
+            merged.Remove(existing);
+
+        merged[key.Name] = value;
     }
 
     /// <summary>The element as a node of the kind the key takes, or null when it is another kind.</summary>
