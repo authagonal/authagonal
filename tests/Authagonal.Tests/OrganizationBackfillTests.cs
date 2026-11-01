@@ -116,6 +116,24 @@ public sealed class OrganizationBackfillTests
     }
 
     [Fact]
+    public async Task SecondRun_AfterTheOrganizationWasUpdatedThroughUpdateAsync_StillCreatesNothing()
+    {
+        await SeedAsync("u1", "Acme Corp");
+        await _ops.BackfillAsync(false, Actor, Ct);
+        var org = (await _orgs.GetBySlugAsync("acme-corp"))!;
+
+        var updated = await _ops.UpdateAsync(org.Id, "Acme Corporation", null, null, null, null, null,
+            new Dictionary<string, string> { ["tier"] = "gold" }, Actor, Ct);
+        Assert.Equal(OperationOutcome.Ok, updated.Outcome);
+
+        var again = await _ops.BackfillAsync(false, Actor, Ct);
+
+        Assert.Equal(0, again.OrganizationsCreated);
+        Assert.Equal(0, again.MembershipsCreated);
+        Assert.Single(await _orgs.ListAsync());
+    }
+
+    [Fact]
     public async Task LegacyValuesThatDeriveTheSameSlug_GetNumberedSlugs()
     {
         await SeedAsync("u1", "Acme Corp");

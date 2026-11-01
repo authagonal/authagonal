@@ -157,7 +157,14 @@ public sealed partial class OrganizationOperations(
         if (allowAutoMembership.HasValue)
             org.AllowAutoMembership = allowAutoMembership.Value;
         if (metadata is not null)
-            org.Metadata = metadata;
+        {
+            // The backfill's legacy stamp outlives any replacement of the bag, so a re-run still matches
+            // the organisation after an admin edits its metadata (see LegacyOrganizationIdMetadataKey).
+            var replacement = new Dictionary<string, string>(metadata);
+            if (org.Metadata.TryGetValue(LegacyOrganizationIdMetadataKey, out var stamp))
+                replacement[LegacyOrganizationIdMetadataKey] = stamp;
+            org.Metadata = replacement;
+        }
         org.UpdatedAt = DateTimeOffset.UtcNow;
 
         await orgStore.UpsertAsync(org, ct);
@@ -632,7 +639,7 @@ public sealed partial class OrganizationOperations(
     /// organisation: <c>DisplayName</c> is deliberately editable (<see cref="UpdateAsync"/>), so matching
     /// on it would make a rename look, to the next backfill run, like the legacy value migrating nowhere
     /// yet, creating a duplicate <c>-2</c> organisation and duplicate memberships for every user. The
-    /// stamp is set once at creation and never touched by <see cref="UpdateAsync"/>.
+    /// stamp is set once at creation; <see cref="UpdateAsync"/> keeps it when it replaces the metadata.
     /// </remarks>
     private const string LegacyOrganizationIdMetadataKey = "legacyOrganizationId";
 
