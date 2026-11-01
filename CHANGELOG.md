@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.32.0], 2026-11-01
 
 ### Added
 - **Organization admin API.** `/api/v1/organizations` (list, create, get by id or slug, update, delete), its members
