@@ -50,6 +50,26 @@ public interface ITenantContext
     string? OrganizationId => null;
 
     /// <summary>
+    /// Whether <see cref="OrganizationId"/> is a pin the host insists on, rather than a default the
+    /// request may override. <c>false</c> (the default) keeps <see cref="OrganizationId"/> the
+    /// lowest-precedence source it has always been.
+    /// </summary>
+    /// <remarks>
+    /// A pin is authoritative only when this is <c>true</c> AND <see cref="OrganizationId"/> is
+    /// non-empty. An authoritative pin governs <c>/connect/authorize</c> and <c>POST /connect/par</c>: a
+    /// request naming no organisation has the pinned one added to it, and a request naming any other
+    /// organisation (by slug, by id, or through the <c>org_slug</c> and <c>org_id</c> aliases), or one
+    /// that does not exist, is refused with <c>400 access_denied</c> and is never redirected. A pin
+    /// naming an organisation the store no longer holds is no pin at all, so a host outliving the
+    /// organisation it was pinned to keeps working as a tenant-level host.
+    /// <para>
+    /// A default interface member for the same reason as <see cref="OrganizationId"/>: an existing
+    /// implementation keeps compiling untouched and behaves exactly as before.
+    /// </para>
+    /// </remarks>
+    bool OrganizationIdIsAuthoritative => false;
+
+    /// <summary>
     /// Per-tenant answer to whether anonymous dynamic client registration (RFC 7591) is open —
     /// what an MCP connector needs before it can start its OAuth flow. <c>null</c> (the default)
     /// means the tenant has no say and the host-wide <c>Auth:DynamicClientRegistrationEnabled</c>

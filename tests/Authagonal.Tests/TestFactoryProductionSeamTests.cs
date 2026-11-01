@@ -124,6 +124,10 @@ public class TestFactoryProductionSeamTests
             "Microsoft.Extensions.Hosting.IHostedService",
             "Microsoft.Extensions.Options.IPostConfigureOptions`1[[Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions",
             "Authagonal.Server.Services.TableStorageHealthCheck",
+            // The live partitioner GrantReconciliationService takes from the container. That service is
+            // itself in the gap (IHostedService above) and the factory calls Core, so nothing in the test
+            // host takes the partitioner; OrganizationPinMiddlewareTests asserts the registration.
+            "Authagonal.Core.Services.EnvPartitioner",
             "Microsoft.Extensions.Diagnostics.HealthChecks.",
             "Microsoft.Extensions.Options.IConfigureOptions`1[[Microsoft.Extensions.Diagnostics.HealthChecks.",
         ];

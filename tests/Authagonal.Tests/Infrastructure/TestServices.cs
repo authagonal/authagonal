@@ -14,6 +14,12 @@ public sealed class TestTenantContext(string issuer) : ITenantContext
     /// reports and what keeps every pre-existing test on the tenant-wide path.
     /// </summary>
     public string? OrganizationId { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="OrganizationId"/> is a pin the host insists on. False by default, which is
+    /// what every pre-existing test (and every host that sets only <see cref="OrganizationId"/>) gets.
+    /// </summary>
+    public bool OrganizationIdIsAuthoritative { get; set; }
 }
 
 

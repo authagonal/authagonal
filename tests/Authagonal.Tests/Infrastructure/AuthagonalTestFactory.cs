@@ -147,6 +147,14 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
     /// </summary>
     public Dictionary<string, string?> Configuration { get; } = [];
 
+    /// <summary>
+    /// Leave <see cref="Authagonal.Core.Services.ITenantContext"/> to the production registration
+    /// (<c>DefaultTenantContext</c>, which pins hosts from <c>Organizations:PinnedHosts</c>) instead of
+    /// registering <see cref="TenantContext"/>. Set it before the host starts; set the pins through
+    /// <see cref="Configuration"/>.
+    /// </summary>
+    public bool UseDefaultTenantContext { get; set; }
+
     private WebApplication? _app;
     private bool _started;
 
@@ -375,8 +383,9 @@ public sealed class AuthagonalTestFactory : IAsyncDisposable
         services.AddSingleton<IOrganizationStore>(OrganizationStore);
         services.AddSingleton<IOrganizationMembershipStore>(OrganizationMembershipStore);
 
-        // Tenant context
-        services.AddSingleton<Authagonal.Core.Services.ITenantContext>(TenantContext);
+        // Tenant context. Left to AddAuthagonalCore's TryAdd when the test wants the production one.
+        if (!UseDefaultTenantContext)
+            services.AddSingleton<Authagonal.Core.Services.ITenantContext>(TenantContext);
 
         // Extensibility test doubles. Every one of these is a TryAdd or a gate in the real registration.
         // The recorder, unless a test names a Resend endpoint of its own (Email:ResendApiUrl): then the real

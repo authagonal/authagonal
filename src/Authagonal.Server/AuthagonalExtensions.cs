@@ -123,6 +123,13 @@ public static class AuthagonalExtensions
     {
         services.AddAuthagonalCore(configuration, configureClustering);
 
+        // The partitioner the Azure provider's stores already use (AzureProvider/ServiceCollectionExtensions.cs),
+        // registered for the services that take it from the container as well: GrantReconciliationService is
+        // added below whenever the Azure backend supplies its keyed clients, and without a registration here
+        // the standalone server failed at start on Table storage. A single-tenant host serves the live env
+        // only. TryAdd, so a host that registered its own partitioner first keeps it.
+        services.TryAddSingleton(EnvPartitioner.Live);
+
         // ---------------------------------------------------------------------------
         // Single-tenant storage. Two configuration paths:
         //   - Storage:ConnectionString — connection string with AccountKey (dev / Azurite)
@@ -333,7 +340,8 @@ public static class AuthagonalExtensions
         // before calling AddAuthagonal; TryAdd ensures it is not overwritten.
         // ---------------------------------------------------------------------------
         services.TryAddSingleton<Authagonal.Core.Services.ITenantContext>(
-            sp => new DefaultTenantContext(sp.GetRequiredService<IConfiguration>()));
+            sp => new DefaultTenantContext(
+                sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<IHttpContextAccessor>()));
 
         // ---------------------------------------------------------------------------
         // Password policy
@@ -1387,6 +1395,12 @@ public static class AuthagonalExtensions
         });
 
         app.UseCors();
+
+        // An authoritative organisation pin (ITenantContext.OrganizationIdIsAuthoritative) governs
+        // /connect/authorize and POST /connect/par. After anything the host registered before this call
+        // (a multi-tenant host's own resolution middleware sets the pin), and before the endpoints.
+        app.UseOrganizationPin();
+
         app.UseAuthentication();
         app.UseAuthorization();
 
