@@ -243,11 +243,12 @@ public sealed class EmailService(
     }
 
     /// <summary>Near-black on a light background, white otherwise, so the invite button stays readable
-    /// whatever primary colour an organisation picks. Only a 6 digit hex can be measured; anything else
-    /// (shorthand, rgb(), a keyword) keeps white.</summary>
+    /// whatever primary colour an organisation picks. Only a hex colour of at least 6 digits can be
+    /// measured (the first six, so <c>#rrggbbaa</c> is read as <c>#rrggbb</c>); anything else (shorthand,
+    /// rgb(), a keyword) keeps white.</summary>
     private static string ReadableText(string background)
     {
-        if (background.Length != 7 || background[0] != '#'
+        if (background.Length < 7 || background[0] != '#'
             || !int.TryParse(background.AsSpan(1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r)
             || !int.TryParse(background.AsSpan(3, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g)
             || !int.TryParse(background.AsSpan(5, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
