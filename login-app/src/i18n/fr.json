@@ -171,5 +171,15 @@
   "account.saving": "Enregistrement…",
   "emailVerified": "L’adresse e-mail a été vérifiée ; connectez-vous pour continuer.",
   "accountCreated": "Un compte a été créé ; connectez-vous pour continuer.",
-  "oidcErrorGeneric": "La connexion n'a pas pu être effectuée. Veuillez réessayer."
+  "oidcErrorGeneric": "La connexion n'a pas pu être effectuée. Veuillez réessayer.",
+  "invite.title": "Configurez votre compte",
+  "invite.titleOrganization": "Rejoindre {{organization}}",
+  "invite.intro": "Choisissez un mot de passe pour finaliser la configuration de votre compte.",
+  "invite.introOrganization": "Vous avez été invité à rejoindre {{organization}}. Choisissez un mot de passe pour finaliser la configuration de votre compte.",
+  "invite.button": "Créer le compte",
+  "invite.creating": "Configuration en cours…",
+  "invite.successTitle": "Tout est prêt",
+  "invite.successMessage": "Votre mot de passe est défini. Vous pouvez vous connecter dès maintenant.",
+  "invite.invalidTitle": "Invitation non valide",
+  "invite.invalidMessage": "Ce lien d'invitation est invalide ou a expiré. Demandez à la personne qui vous a invité de vous en envoyer un nouveau."
 }

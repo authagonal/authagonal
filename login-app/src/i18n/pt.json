@@ -171,5 +171,15 @@
   "account.saving": "A guardar…",
   "emailVerified": "O e-mail foi verificado; faça login para continuar.",
   "accountCreated": "Conta criada — faça login para continuar.",
-  "oidcErrorGeneric": "Não foi possível concluir o início de sessão. Tente novamente."
+  "oidcErrorGeneric": "Não foi possível concluir o início de sessão. Tente novamente.",
+  "invite.title": "Configure sua conta",
+  "invite.titleOrganization": "Participar de {{organization}}",
+  "invite.intro": "Escolha uma senha para concluir a configuração da sua conta.",
+  "invite.introOrganization": "Você foi convidado a participar de {{organization}}. Escolha uma senha para concluir a configuração da sua conta.",
+  "invite.button": "Criar conta",
+  "invite.creating": "Configurando…",
+  "invite.successTitle": "Tudo pronto",
+  "invite.successMessage": "Sua senha foi definida. Você já pode entrar.",
+  "invite.invalidTitle": "Convite inválido",
+  "invite.invalidMessage": "Este link de convite é inválido ou expirou. Peça a quem o convidou para enviar um novo."
 }

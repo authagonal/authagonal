@@ -171,5 +171,15 @@
   "account.saving": "جارٍ الحفظ…",
   "emailVerified": "تم التحقق من البريد الإلكتروني؛ قم بتسجيل الدخول لمواصلة العملية.",
   "accountCreated": "تم إنشاء الحساب؛ قم بتسجيل الدخول لمواصلة العملية.",
-  "oidcErrorGeneric": "تعذّر إكمال تسجيل الدخول. يُرجى المحاولة مرة أخرى."
+  "oidcErrorGeneric": "تعذّر إكمال تسجيل الدخول. يُرجى المحاولة مرة أخرى.",
+  "invite.title": "أعدّ حسابك",
+  "invite.titleOrganization": "الانضمام إلى {{organization}}",
+  "invite.intro": "اختر كلمة مرور لإكمال إعداد حسابك.",
+  "invite.introOrganization": "تمت دعوتك للانضمام إلى {{organization}}. اختر كلمة مرور لإكمال إعداد حسابك.",
+  "invite.button": "إنشاء الحساب",
+  "invite.creating": "جارٍ الإعداد…",
+  "invite.successTitle": "كل شيء جاهز",
+  "invite.successMessage": "تم تعيين كلمة مرورك. يمكنك تسجيل الدخول الآن.",
+  "invite.invalidTitle": "الدعوة غير صالحة",
+  "invite.invalidMessage": "رابط الدعوة هذا غير صالح أو انتهت صلاحيته. اطلب ممّن دعاك أن يرسل رابطًا جديدًا."
 }

@@ -171,5 +171,15 @@
   "account.saving": "Saving…",
   "emailVerified": "Email verified — sign in to continue.",
   "accountCreated": "Account created — sign in to continue.",
-  "oidcErrorGeneric": "Sign-in could not be completed. Please try again."
+  "oidcErrorGeneric": "Sign-in could not be completed. Please try again.",
+  "invite.title": "Set up your account",
+  "invite.titleOrganization": "Join {{organization}}",
+  "invite.intro": "Choose a password to finish setting up your account.",
+  "invite.introOrganization": "You have been invited to join {{organization}}. Choose a password to finish setting up your account.",
+  "invite.button": "Create account",
+  "invite.creating": "Setting up…",
+  "invite.successTitle": "You're all set",
+  "invite.successMessage": "Your password is set. You can sign in now.",
+  "invite.invalidTitle": "Invalid invitation",
+  "invite.invalidMessage": "This invitation link is invalid or has expired. Ask the person who invited you to send a new one."
 }

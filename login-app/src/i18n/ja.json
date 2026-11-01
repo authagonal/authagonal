@@ -171,5 +171,15 @@
   "account.saving": "保存しています…",
   "emailVerified": "メールアドレスを認証しました。サインインして続行してください。",
   "accountCreated": "アカウントを作成しました。サインインして続行してください。",
-  "oidcErrorGeneric": "サインインを完了できませんでした。もう一度お試しください。"
+  "oidcErrorGeneric": "サインインを完了できませんでした。もう一度お試しください。",
+  "invite.title": "アカウントを設定してください",
+  "invite.titleOrganization": "{{organization}} に参加",
+  "invite.intro": "パスワードを設定して、アカウントの設定を完了してください。",
+  "invite.introOrganization": "{{organization}} に招待されています。パスワードを設定して、アカウントの設定を完了してください。",
+  "invite.button": "アカウントを作成",
+  "invite.creating": "設定しています…",
+  "invite.successTitle": "設定が完了しました",
+  "invite.successMessage": "パスワードを設定しました。サインインできます。",
+  "invite.invalidTitle": "招待が無効です",
+  "invite.invalidMessage": "この招待リンクは無効か、有効期限が切れています。招待した方に新しいリンクの送信を依頼してください。"
 }

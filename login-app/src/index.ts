@@ -35,6 +35,7 @@ export { default as LoginPage } from './pages/LoginPage';
 export { default as RegisterPage } from './pages/RegisterPage';
 export { default as ForgotPasswordPage } from './pages/ForgotPasswordPage';
 export { default as ResetPasswordPage } from './pages/ResetPasswordPage';
+export { default as AcceptInvite } from './pages/AcceptInvitePage';
 export { default as MfaChallengePage } from './pages/MfaChallengePage';
 export { default as MfaSetupPage } from './pages/MfaSetupPage';
 export { default as ConsentPage } from './pages/ConsentPage';
