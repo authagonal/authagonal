@@ -29,12 +29,18 @@ locale: zh-Hans
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
-当请求没有解析出任何组织时（单租户部署，或该主机名没有绑定自定义域名的部署），`organization` 为 `null`（或该成员不存在）。本库自身会为匿名的、认证前的请求解析组织，顺序见[组织](organizations#organizations-on-the-login-page)：先是具有权威性的宿主绑定，然后是授权请求的组织，再然后是只含一个条目的客户端限制。拥有自己的认证前解析机制的宿主（Authagonal Cloud 按自定义域名绑定组织）也可以改为在用 `LoginBootPayloadBuilder` 组装启动载荷时设置 `organization`。
+当请求没有解析出任何组织时（单租户部署，或该主机名没有绑定自定义域名的部署），`organization` 为 `null`（或该成员不存在）。本库自身会为匿名的、认证前的请求解析组织，顺序见[组织](organizations#organizations-on-the-login-page)：先是具有权威性的宿主绑定，然后是授权请求的组织，再然后是只含一个条目的客户端限制。拥有自己的认证前解析机制的宿主（Authagonal Cloud 按自定义域名绑定组织）可以通过 `ITenantContext`（`OrganizationId` 加上 `OrganizationIdIsAuthoritative`）设置该绑定，`LoginBootPayloadBuilder.BuildAsync` 会通过 `PreAuthOrganizationResolver` 解析它；或者自行构建一个 `LoginBootPayload` 记录，并将其传给 `LoginBootPayloadBuilder.InjectIntoShell`。`BuildAsync` 不接受组织参数。
 
 当 `organization.name` 存在且与 `branding.appName` 不同时（比较时忽略大小写并去除首尾空白，因此与租户同名的组织不会显示成“Acme / 正在登录 Acme”），登录卡片会在标题下方渲染一行副标题：“正在登录 {name}”（`data-testid="login-org-name"`，i18n 键 `login.signingInTo`）。它只由共享的 `AuthLayout` 页眉渲染一次，因此所有通过它挂载的路由（登录、注册、忘记/重置密码、MFA 质询和设置页面、设备页面、同意和智能体同意、授权以及账户页面）都会以相同方式显示它。当 `organization` 不存在、为 `null` 或其名称与 `branding.appName` 相同时，不会渲染任何内容，页眉保持正常间距。
 
@@ -42,7 +48,7 @@ locale: zh-Hans
 
 当请求解析到某个组织时，该组织的 `BrandingJson` 会逐字段合并到租户的品牌配置之上，结果就是启动载荷的 `branding` 成员。为 null 或缺失的字段继承租户的值，未知的键被忽略，类型错误的值对该键保留租户的值，`languages` 替换租户的列表，格式错误的文档则原样得到租户的品牌配置。组织无法设置 `showRegistration`。规则见[组织](organizations#organization-branding)（`OrganizationBranding.Merge`）。
 
-独立服务器对登录页面的每个请求都用 `LoginBootPayloadBuilder` 构建启动载荷，并由 `MapAuthagonalLoginFallback()` 将其以 `<script type="application/json" id="authagonal-boot">` 的形式内联在 `</head>` 之前。`branding.json` 在每个请求时都会重新读取，因此对已挂载文件的修改会立即生效；缺失或格式错误的文件按 `{}` 处理（格式错误时会有一条警告）。任何环节失败时，都会提供普通的 `index.html`，SPA 与以往一样获取 `/branding.json`。
+独立服务器为登录路由（`/login`、`/accept-invite` 以及其他 SPA 路由）用 `LoginBootPayloadBuilder` 构建启动载荷（裸根路径 `/` 以不带载荷的普通 `index.html` 提供，因此不显示组织），并由 `MapAuthagonalLoginFallback()` 将其以 `<script type="application/json" id="authagonal-boot">` 的形式内联在 `</head>` 之前。`branding.json` 在每个请求时都会重新读取，因此对已挂载文件的修改会立即生效；缺失或格式错误的文件按 `{}` 处理（格式错误时会有一条警告）。任何环节失败时，都会提供普通的 `index.html`，SPA 与以往一样获取 `/branding.json`。
 
 ## 邀请邮件中的组织品牌 {#organisation-branding-in-invitation-emails}
 

@@ -210,7 +210,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-Host được so sánh không phân biệt hoa thường và cổng bị bỏ qua. Host đã ghim bị ràng buộc vào tổ chức của nó trên `/connect/authorize` và `/connect/par`, và trang đăng nhập của nó hiển thị tên và thương hiệu của tổ chức đó. Xem [Tổ chức](organizations#pinning-a-host-to-an-organization).
+Host được so sánh không phân biệt hoa thường và cổng bị bỏ qua. Host đã ghim bị ràng buộc vào tổ chức của nó trên `/connect/authorize` và `/connect/par`, và các route đăng nhập của nó (ví dụ `/login`, nhưng không phải đường dẫn gốc `/`, vốn được phục vụ dưới dạng `index.html` thuần) hiển thị tên và thương hiệu của tổ chức đó. Xem [Tổ chức](organizations#pinning-a-host-to-an-organization).
 
 ## Danh sách kiểm tra bảo mật cho production {#production-security-checklist}
 

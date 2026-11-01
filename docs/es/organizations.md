@@ -244,7 +244,7 @@ Vacía (lo que tienen todos los clientes existentes) significa sin restricción.
 
 Antes de que nadie haya iniciado sesión no hay usuario, así que la página de inicio de sesión debe averiguar a partir de la propia solicitud para qué organización es. `PreAuthOrganizationResolver` lo hace para la página de inicio de sesión en el orden siguiente; gana la primera regla que nombra una organización.
 
-1. **Una fijación de host autoritativa.** El host ha fijado el dominio de la solicitud a una organización y ha marcado la fijación como autoritativa (véase [Fijar un host a una organización](#pinning-a-host-to-an-organization)). Una fijación que no nombra ninguna organización existente (una eliminada) no cuenta como fijación: se registra una advertencia y la resolución continúa.
+1. **Una fijación de host autoritativa.** El host ha fijado el dominio de la solicitud a una organización y ha marcado la fijación como autoritativa (véase [Fijar un host a una organización](#pinning-a-host-to-an-organization)). Una fijación que no nombra ninguna organización existente (una eliminada) no cuenta como fijación: la resolución continúa. La página de inicio de sesión lo hace en silencio; solo la aplicación de la restricción en `/connect/authorize` y `/connect/par` registra una advertencia.
 2. **`organization` solo en `/accept-invite`.**
 3. **La organización de la solicitud de autorización**: `organization`, `org_slug` u `org_id` en la consulta de `returnUrl`, o dentro de la solicitud enviada por push que nombra su `request_uri`; en ese caso, los parámetros y el cliente de esa solicitud sustituyen a los externos.
 4. **La única entrada de `RestrictedToOrganizationIds` de un cliente habilitado.**

@@ -209,7 +209,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-The host is compared case-insensitively and the port is ignored. A pinned host is held to its organization on `/connect/authorize` and `/connect/par`, and its login page shows that organization's name and branding. See [Organizations](organizations#pinning-a-host-to-an-organization).
+The host is compared case-insensitively and the port is ignored. A pinned host is held to its organization on `/connect/authorize` and `/connect/par`, and its login routes (for example `/login`, but not the bare `/`, which is served as the plain `index.html`) show that organization's name and branding. See [Organizations](organizations#pinning-a-host-to-an-organization).
 
 ## Production security checklist
 

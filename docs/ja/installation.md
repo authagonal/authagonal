@@ -210,7 +210,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-ホストは大文字小文字を区別せずに比較され、ポートは無視されます。固定されたホストは、`/connect/authorize` と `/connect/par` でその組織に制限され、ログインページにはその組織の名前とブランディングが表示されます。[組織](organizations#pinning-a-host-to-an-organization)を参照してください。
+ホストは大文字小文字を区別せずに比較され、ポートは無視されます。固定されたホストは、`/connect/authorize` と `/connect/par` でその組織に制限され、ログインのルート (たとえば `/login`。プレーンな `index.html` として返されるルートそのもの `/` は含みません) にはその組織の名前とブランディングが表示されます。[組織](organizations#pinning-a-host-to-an-organization)を参照してください。
 
 ## 本番環境のセキュリティチェックリスト {#production-security-checklist}
 

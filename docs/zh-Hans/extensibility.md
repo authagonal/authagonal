@@ -23,6 +23,8 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
+自定义宿主可以调用 `app.MapAuthagonalLoginFallback()` 代替 `app.MapFallbackToFile("index.html")`，像独立服务器一样将组织启动载荷内联到登录页面中。裸根路径 `/` 仍以普通 `index.html` 提供。
+
 ### 多租户托管 {#multi-tenant-hosting}
 
 对于多租户部署，请改用 `AddAuthagonalCore()`。它会注册端点、中间件和核心服务，但跳过存储和后台服务；这些由你按租户提供。签名密钥管理默认使用 `Authagonal.Protocol` 的 `ProtocolKeyManager` 单例；如果宿主在 `AddAuthagonalCore()` 之前注册了自己的 `IKeyManager`，则保留宿主的注册：
@@ -389,6 +391,8 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 
 app.MapFallbackToFile("index.html");
 ```
+
+自定义宿主可以调用 `app.MapAuthagonalLoginFallback()` 代替 `app.MapFallbackToFile("index.html")`，像独立服务器一样将组织启动载荷内联到登录页面中。裸根路径 `/` 仍以普通 `index.html` 提供。
 
 ## HashiCorp Vault Transit 集成 {#hashicorp-vault-transit-integration}
 

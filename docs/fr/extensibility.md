@@ -23,6 +23,8 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
+Un hôte personnalisé peut appeler `app.MapAuthagonalLoginFallback()` à la place de `app.MapFallbackToFile("index.html")` pour intégrer la charge utile d'amorçage de l'organisation dans les pages de connexion, comme le fait le serveur autonome. La racine `/` reste servie sous la forme de l'`index.html` simple.
+
 ### Hébergement multi-locataire {#multi-tenant-hosting}
 
 Pour les déploiements multi-locataires, utilisez plutôt `AddAuthagonalCore()`. Elle enregistre les endpoints, les middlewares et les services de base, mais ignore le stockage et les services d'arrière-plan : c'est à vous de les fournir par locataire. La gestion des clés de signature utilise par défaut le singleton `ProtocolKeyManager` de `Authagonal.Protocol`, et un hôte qui enregistre son propre `IKeyManager` avant `AddAuthagonalCore()` le conserve :
@@ -389,6 +391,8 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 
 app.MapFallbackToFile("index.html");
 ```
+
+Un hôte personnalisé peut appeler `app.MapAuthagonalLoginFallback()` à la place de `app.MapFallbackToFile("index.html")` pour intégrer la charge utile d'amorçage de l'organisation dans les pages de connexion, comme le fait le serveur autonome. La racine `/` reste servie sous la forme de l'`index.html` simple.
 
 ## Intégration de HashiCorp Vault Transit {#hashicorp-vault-transit-integration}
 

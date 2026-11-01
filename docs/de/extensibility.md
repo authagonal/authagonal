@@ -23,6 +23,8 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
+Ein eigener Host kann `app.MapAuthagonalLoginFallback()` anstelle von `app.MapFallbackToFile("index.html")` aufrufen, um die Organisations-Boot-Payload wie der eigenständige Server in die Anmeldeseiten einzubetten. Das nackte `/` wird weiterhin als einfache `index.html` ausgeliefert.
+
 ### Mandantenfähiges Hosting {#multi-tenant-hosting}
 
 Verwenden Sie für mandantenfähige Deployments stattdessen `AddAuthagonalCore()`. Es registriert Endpunkte, Middleware und die Kern-Services, lässt aber Speicher und Hintergrunddienste weg; diese stellen Sie pro Mandant bereit. Für die Verwaltung der Signaturschlüssel wird standardmäßig das Singleton `ProtocolKeyManager` aus `Authagonal.Protocol` verwendet, und ein Host, der vor `AddAuthagonalCore()` sein eigenes `IKeyManager` registriert, behält es:
@@ -389,6 +391,8 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 
 app.MapFallbackToFile("index.html");
 ```
+
+Ein eigener Host kann `app.MapAuthagonalLoginFallback()` anstelle von `app.MapFallbackToFile("index.html")` aufrufen, um die Organisations-Boot-Payload wie der eigenständige Server in die Anmeldeseiten einzubetten. Das nackte `/` wird weiterhin als einfache `index.html` ausgeliefert.
 
 ## Integration von HashiCorp Vault Transit {#hashicorp-vault-transit-integration}
 

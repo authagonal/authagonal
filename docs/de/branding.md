@@ -31,14 +31,20 @@ neben `branding` und `providers` ein drittes Element enthalten:
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
 `organization` ist `null` (oder das Element fehlt), wenn der Request zu keiner Organisation aufgelöst
 wurde: bei einer Bereitstellung mit nur einem Mandanten oder wenn für diesen Host keine benutzerdefinierte
-Domain einer Organisation zugeordnet ist. Die Bibliothek ermittelt die Organisation für einen anonymen Request vor der Authentifizierung selbst, in der Reihenfolge, die unter [Organisationen](organizations#organizations-on-the-login-page) beschrieben ist: zuerst eine maßgebliche Host-Zuordnung, dann die Organisation der Autorisierungsanfrage, dann eine Client-Beschränkung mit einem einzigen Eintrag. Ein Host mit eigener Auflösung vor der Authentifizierung (Authagonal Cloud ordnet je benutzerdefinierter Domain eine zu) kann stattdessen `organization` setzen, wenn er die Boot-Payload mit `LoginBootPayloadBuilder` zusammenstellt.
+Domain einer Organisation zugeordnet ist. Die Bibliothek ermittelt die Organisation für einen anonymen Request vor der Authentifizierung selbst, in der Reihenfolge, die unter [Organisationen](organizations#organizations-on-the-login-page) beschrieben ist: zuerst eine maßgebliche Host-Zuordnung, dann die Organisation der Autorisierungsanfrage, dann eine Client-Beschränkung mit einem einzigen Eintrag. Ein Host mit eigener Auflösung vor der Authentifizierung (Authagonal Cloud ordnet je benutzerdefinierter Domain eine zu) setzt diese Zuordnung über `ITenantContext` (`OrganizationId` zusammen mit `OrganizationIdIsAuthoritative`), die `LoginBootPayloadBuilder.BuildAsync` über `PreAuthOrganizationResolver` auflöst, oder erstellt selbst einen `LoginBootPayload`-Record und übergibt ihn an `LoginBootPayloadBuilder.InjectIntoShell`. `BuildAsync` nimmt kein Organisationsargument entgegen.
 
 Ist `organization.name` vorhanden und weicht es von `branding.appName` ab (ohne Beachtung von Groß- und
 Kleinschreibung und nach Entfernen von Leerzeichen am Rand, damit eine Organisation mit demselben Namen wie
@@ -54,7 +60,7 @@ identisch anzeigt. Nichts wird gerendert, und die Kopfzeile behält ihre normale
 
 Wird der Request einer Organisation zugeordnet, wird deren `BrandingJson` Feld für Feld über das Branding des Mandanten gelegt; das Ergebnis ist das Element `branding` der Boot-Payload. Ein Feld, das null ist oder fehlt, erbt den Wert des Mandanten, unbekannte Schlüssel werden ignoriert, ein Wert der falschen Art behält für diesen Schlüssel den Wert des Mandanten, `languages` ersetzt die Liste des Mandanten, und ein fehlerhaftes Dokument ergibt unverändert das Branding des Mandanten. Eine Organisation kann `showRegistration` nicht setzen. Die Regeln stehen unter [Organisationen](organizations#organization-branding) (`OrganizationBranding.Merge`).
 
-Der eigenständige Server erstellt die Boot-Payload für jeden Request an die Anmeldeseite mit `LoginBootPayloadBuilder`, und `MapAuthagonalLoginFallback()` bettet sie als `<script type="application/json" id="authagonal-boot">` unmittelbar vor `</head>` ein. `branding.json` wird bei jedem Request neu gelesen; eine Änderung an der eingebundenen Datei wirkt also sofort. Eine fehlende oder fehlerhafte Datei wird wie `{}` behandelt (bei einer fehlerhaften mit einer Warnung). Schlägt irgendetwas fehl, wird die einfache `index.html` ausgeliefert, und die SPA lädt `/branding.json` wie bisher.
+Der eigenständige Server erstellt die Boot-Payload mit `LoginBootPayloadBuilder` für die Login-Routen (`/login`, `/accept-invite` und die übrigen SPA-Routen; das nackte `/` wird als einfache `index.html` ohne Payload ausgeliefert und zeigt daher keine Organisation), und `MapAuthagonalLoginFallback()` bettet sie als `<script type="application/json" id="authagonal-boot">` unmittelbar vor `</head>` ein. `branding.json` wird bei jedem Request neu gelesen; eine Änderung an der eingebundenen Datei wirkt also sofort. Eine fehlende oder fehlerhafte Datei wird wie `{}` behandelt (bei einer fehlerhaften mit einer Warnung). Schlägt irgendetwas fehl, wird die einfache `index.html` ausgeliefert, und die SPA lädt `/branding.json` wie bisher.
 
 ## Organisations-Branding in Einladungs-E-Mails {#organisation-branding-in-invitation-emails}
 

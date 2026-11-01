@@ -23,6 +23,8 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
+Một host tùy chỉnh có thể gọi `app.MapAuthagonalLoginFallback()` thay cho `app.MapFallbackToFile("index.html")` để nhúng boot payload của tổ chức vào các trang đăng nhập, giống như máy chủ độc lập. Đường dẫn gốc `/` vẫn được phục vụ dưới dạng `index.html` thuần.
+
 ### Host đa tenant {#multi-tenant-hosting}
 
 Với các bản triển khai đa tenant, hãy dùng `AddAuthagonalCore()` thay thế. Phương thức này đăng ký endpoint, middleware và các service lõi nhưng bỏ qua phần lưu trữ và các service chạy nền; bạn tự cung cấp chúng theo từng tenant. Việc quản lý khóa ký mặc định dùng singleton `ProtocolKeyManager` của `Authagonal.Protocol`, và host nào đăng ký `IKeyManager` của riêng mình trước `AddAuthagonalCore()` sẽ giữ được bản đó:
@@ -389,6 +391,8 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 
 app.MapFallbackToFile("index.html");
 ```
+
+Một host tùy chỉnh có thể gọi `app.MapAuthagonalLoginFallback()` thay cho `app.MapFallbackToFile("index.html")` để nhúng boot payload của tổ chức vào các trang đăng nhập, giống như máy chủ độc lập. Đường dẫn gốc `/` vẫn được phục vụ dưới dạng `index.html` thuần.
 
 ## Tích hợp HashiCorp Vault Transit {#hashicorp-vault-transit-integration}
 

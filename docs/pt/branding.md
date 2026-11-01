@@ -31,13 +31,19 @@ a um cliente), o payload `authagonal-boot` pode transportar um terceiro membro, 
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
 `organization` é `null` (ou o membro está ausente) quando o pedido não resolveu nenhuma organização:
-uma implementação de inquilino único, ou uma sem associação de domínio personalizado para este anfitrião. A biblioteca resolve, ela própria, a organização de um pedido anónimo anterior à autenticação, pela ordem descrita em [Organizações](organizations#organizations-on-the-login-page): primeiro uma associação de anfitrião com autoridade, depois a organização do pedido de autorização e, por fim, uma restrição de cliente com uma única entrada. Um anfitrião com a sua própria resolução anterior à autenticação (o Authagonal Cloud associa uma por domínio personalizado) pode, em alternativa, definir `organization` quando monta o payload de arranque com o `LoginBootPayloadBuilder`.
+uma implementação de inquilino único, ou uma sem associação de domínio personalizado para este anfitrião. A biblioteca resolve, ela própria, a organização de um pedido anónimo anterior à autenticação, pela ordem descrita em [Organizações](organizations#organizations-on-the-login-page): primeiro uma associação de anfitrião com autoridade, depois a organização do pedido de autorização e, por fim, uma restrição de cliente com uma única entrada. Um anfitrião com a sua própria resolução anterior à autenticação (o Authagonal Cloud associa uma por domínio personalizado) define essa associação através do `ITenantContext` (`OrganizationId` com `OrganizationIdIsAuthoritative`), que o `LoginBootPayloadBuilder.BuildAsync` resolve através do `PreAuthOrganizationResolver`, ou constrói ele próprio um registo `LoginBootPayload` e passa-o ao `LoginBootPayloadBuilder.InjectIntoShell`. O `BuildAsync` não recebe nenhum argumento de organização.
 
 Quando `organization.name` está presente e difere de `branding.appName` (sem distinção entre maiúsculas e minúsculas e
 ignorando espaços nas extremidades, para que uma organização com o mesmo nome do inquilino não produza "Acme / A entrar em Acme"), o cartão de início de sessão apresenta um subtítulo sob o título: "A entrar em {name}"
@@ -51,7 +57,7 @@ o espaçamento normal, quando `organization` está ausente, é `null` ou o seu n
 
 Quando o pedido se resolve numa organização, o `BrandingJson` dessa organização é fundido campo a campo sobre a personalização visual do inquilino, e o resultado é o membro `branding` do payload de arranque. Um campo nulo ou ausente herda o valor do inquilino, as chaves desconhecidas são ignoradas, um valor do tipo errado mantém o valor do inquilino para essa chave, `languages` substitui a lista do inquilino, e um documento malformado dá a personalização visual do inquilino sem alterações. Uma organização não pode definir `showRegistration`. As regras estão em [Organizações](organizations#organization-branding) (`OrganizationBranding.Merge`).
 
-O servidor autónomo constrói o payload de arranque em cada pedido à página de início de sessão com o `LoginBootPayloadBuilder`, e o `MapAuthagonalLoginFallback()` incorpora-o como `<script type="application/json" id="authagonal-boot">` mesmo antes de `</head>`. O `branding.json` é lido de novo em cada pedido, pelo que uma edição ao ficheiro montado se aplica de imediato; um ficheiro ausente ou malformado é tratado como `{}` (com um aviso se estiver malformado). Se algo falhar, é servido o `index.html` simples e a SPA obtém `/branding.json` como antes.
+O servidor autónomo constrói o payload de arranque com o `LoginBootPayloadBuilder` para as rotas de início de sessão (`/login`, `/accept-invite` e as restantes rotas da SPA; a raiz `/` é servida como o `index.html` simples, sem payload, pelo que não mostra nenhuma organização), e o `MapAuthagonalLoginFallback()` incorpora-o como `<script type="application/json" id="authagonal-boot">` mesmo antes de `</head>`. O `branding.json` é lido de novo em cada pedido, pelo que uma edição ao ficheiro montado se aplica de imediato; um ficheiro ausente ou malformado é tratado como `{}` (com um aviso se estiver malformado). Se algo falhar, é servido o `index.html` simples e a SPA obtém `/branding.json` como antes.
 
 ## Personalização de marca da organização nos e-mails de convite {#organisation-branding-in-invitation-emails}
 

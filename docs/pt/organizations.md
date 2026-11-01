@@ -244,7 +244,7 @@ Vazia (o que todos os clientes existentes têm) significa sem restrições. Um p
 
 Antes de alguém iniciar sessão não existe utilizador, pelo que a página de início de sessão tem de descobrir, a partir do próprio pedido, para que organização é. O `PreAuthOrganizationResolver` faz isso para a página de início de sessão pela ordem abaixo; ganha a primeira regra que indicar uma organização.
 
-1. **Uma associação de anfitrião com autoridade.** O anfitrião associou o domínio do pedido a uma organização e marcou essa associação como tendo autoridade (ver [Associar um anfitrião a uma organização](#pinning-a-host-to-an-organization)). Uma associação que não indica nenhuma organização existente (uma que foi eliminada) não conta como associação: é registado um aviso e a resolução prossegue.
+1. **Uma associação de anfitrião com autoridade.** O anfitrião associou o domínio do pedido a uma organização e marcou essa associação como tendo autoridade (ver [Associar um anfitrião a uma organização](#pinning-a-host-to-an-organization)). Uma associação que não indica nenhuma organização existente (uma que foi eliminada) não conta como associação: a resolução prossegue. A página de início de sessão fá-lo em silêncio; só a imposição em `/connect/authorize` e `/connect/par` regista um aviso.
 2. **`organization` apenas em `/accept-invite`.**
 3. **A organização do pedido de autorização**: `organization`, `org_slug` ou `org_id` na query de `returnUrl`, ou dentro do pedido enviado por push que o seu `request_uri` indica; nesse caso, os parâmetros e o cliente desse pedido substituem os do exterior.
 4. **A única entrada de `RestrictedToOrganizationIds` de um cliente ativado.**

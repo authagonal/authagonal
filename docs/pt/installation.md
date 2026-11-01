@@ -210,7 +210,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-O anfitrião é comparado sem distinguir maiúsculas de minúsculas e a porta é ignorada. Um anfitrião associado fica limitado à sua organização em `/connect/authorize` e `/connect/par`, e a sua página de início de sessão mostra o nome e a personalização visual dessa organização. Ver [Organizações](organizations#pinning-a-host-to-an-organization).
+O anfitrião é comparado sem distinguir maiúsculas de minúsculas e a porta é ignorada. Um anfitrião associado fica limitado à sua organização em `/connect/authorize` e `/connect/par`, e as suas rotas de início de sessão (por exemplo `/login`, mas não a raiz `/`, que é servida como o `index.html` simples) mostram o nome e a personalização visual dessa organização. Ver [Organizações](organizations#pinning-a-host-to-an-organization).
 
 ## Lista de verificação de segurança para produção {#production-security-checklist}
 

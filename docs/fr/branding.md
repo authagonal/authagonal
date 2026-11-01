@@ -29,12 +29,18 @@ Sur un hôte multi-locataire qui résout une organisation pour la requête (par 
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
-`organization` vaut `null` (ou le membre est absent) lorsque la requête n'a été résolue vers aucune organisation : un déploiement mono-locataire, ou un déploiement sans domaine personnalisé rattaché pour cet hôte. La bibliothèque résout elle-même l'organisation d'une requête anonyme, antérieure à l'authentification, dans l'ordre décrit dans [Organisations](organizations#organizations-on-the-login-page) : d'abord un rattachement d'hôte faisant autorité, puis l'organisation de la demande d'autorisation, puis une restriction de client à une seule entrée. Un hôte qui dispose de sa propre résolution avant authentification (Authagonal Cloud en rattache une par domaine personnalisé) peut à la place définir `organization` lorsqu'il assemble la charge utile d'amorçage avec `LoginBootPayloadBuilder`.
+`organization` vaut `null` (ou le membre est absent) lorsque la requête n'a été résolue vers aucune organisation : un déploiement mono-locataire, ou un déploiement sans domaine personnalisé rattaché pour cet hôte. La bibliothèque résout elle-même l'organisation d'une requête anonyme, antérieure à l'authentification, dans l'ordre décrit dans [Organisations](organizations#organizations-on-the-login-page) : d'abord un rattachement d'hôte faisant autorité, puis l'organisation de la demande d'autorisation, puis une restriction de client à une seule entrée. Un hôte qui dispose de sa propre résolution avant authentification (Authagonal Cloud en rattache une par domaine personnalisé) définit ce rattachement via `ITenantContext` (`OrganizationId` avec `OrganizationIdIsAuthoritative`), que `LoginBootPayloadBuilder.BuildAsync` résout par `PreAuthOrganizationResolver`, ou construit lui-même un enregistrement `LoginBootPayload` et le transmet à `LoginBootPayloadBuilder.InjectIntoShell`. `BuildAsync` ne prend aucun argument d'organisation.
 
 Lorsque `organization.name` est présent et diffère de `branding.appName` (comparaison insensible à la casse, après suppression des espaces en début et en fin, afin qu'une organisation portant le même nom que le locataire ne produise pas « Acme / Connexion à Acme »), la carte de connexion affiche un sous-titre sous le titre : « Connexion à {name} » (`data-testid="login-org-name"`, clé i18n `login.signingInTo`). Il est affiché une seule fois, par l'en-tête partagé `AuthLayout`, de sorte que chaque route montée par son intermédiaire (connexion, inscription, mot de passe oublié et réinitialisation, pages de défi et de configuration MFA, page d'appareil, consentement et consentement d'agent, octrois et compte) l'affiche de manière identique. Rien n'est affiché, et l'en-tête conserve son espacement normal, lorsque `organization` est absent, vaut `null` ou que son nom correspond à `branding.appName`.
 
@@ -42,7 +48,7 @@ Lorsque `organization.name` est présent et diffère de `branding.appName` (comp
 
 Lorsque la requête se résout en une organisation, son `BrandingJson` est fusionné champ par champ avec la personnalisation du locataire, et le résultat est le membre `branding` de la charge utile d'amorçage. Un champ nul ou absent hérite de la valeur du locataire, les clés inconnues sont ignorées, une valeur d'un type incorrect conserve la valeur du locataire pour cette clé, `languages` remplace la liste du locataire, et un document mal formé donne la personnalisation du locataire inchangée. Une organisation ne peut pas définir `showRegistration`. Les règles figurent dans [Organisations](organizations#organization-branding) (`OrganizationBranding.Merge`).
 
-Le serveur autonome construit la charge utile d'amorçage à chaque requête vers la page de connexion avec `LoginBootPayloadBuilder`, et `MapAuthagonalLoginFallback()` l'intègre sous la forme `<script type="application/json" id="authagonal-boot">` juste avant `</head>`. `branding.json` est relu à chaque requête : une modification du fichier monté s'applique donc immédiatement ; un fichier absent ou mal formé est traité comme `{}` (avec un avertissement s'il est mal formé). En cas d'échec, l'`index.html` simple est servi et la SPA récupère `/branding.json` comme avant.
+Le serveur autonome construit la charge utile d'amorçage avec `LoginBootPayloadBuilder` pour les routes de connexion (`/login`, `/accept-invite` et les autres routes de la SPA ; la racine `/` est servie sous la forme de l'`index.html` simple, sans charge utile, et n'affiche donc aucune organisation), et `MapAuthagonalLoginFallback()` l'intègre sous la forme `<script type="application/json" id="authagonal-boot">` juste avant `</head>`. `branding.json` est relu à chaque requête : une modification du fichier monté s'applique donc immédiatement ; un fichier absent ou mal formé est traité comme `{}` (avec un avertissement s'il est mal formé). En cas d'échec, l'`index.html` simple est servi et la SPA récupère `/branding.json` comme avant.
 
 ## Personnalisation de la marque de l'organisation dans les e-mails d'invitation {#organisation-branding-in-invitation-emails}
 

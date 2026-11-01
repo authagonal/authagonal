@@ -210,7 +210,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-Der Host wird ohne Beachtung der Groß-/Kleinschreibung verglichen; der Port wird ignoriert. Ein zugeordneter Host ist auf `/connect/authorize` und `/connect/par` an seine Organisation gebunden, und seine Anmeldeseite zeigt Namen und Branding dieser Organisation. Siehe [Organisationen](organizations#pinning-a-host-to-an-organization).
+Der Host wird ohne Beachtung der Groß-/Kleinschreibung verglichen; der Port wird ignoriert. Ein zugeordneter Host ist auf `/connect/authorize` und `/connect/par` an seine Organisation gebunden, und seine Login-Routen (zum Beispiel `/login`, nicht aber das nackte `/`, das als einfache `index.html` ausgeliefert wird) zeigen Namen und Branding dieser Organisation. Siehe [Organisationen](organizations#pinning-a-host-to-an-organization).
 
 ## Sicherheitscheckliste für die Produktion {#production-security-checklist}
 

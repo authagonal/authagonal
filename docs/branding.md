@@ -30,13 +30,19 @@ to one customer), the `authagonal-boot` payload can carry a third member alongsi
 ```json
 {
   "branding": { "appName": "Acme Corp", "...": "..." },
-  "providers": [],
+  "providers": {
+    "providers": [
+      { "connectionId": "acme-idp", "name": "Acme IdP", "loginUrl": "/oidc/acme-idp/login", "type": "oidc", "iconUrl": null }
+    ],
+    "autoChallenge": null,
+    "turnstileSiteKey": null
+  },
   "organization": { "id": "org_123", "slug": "widgets-inc", "name": "Widgets Inc" }
 }
 ```
 
 `organization` is `null` (or the member is absent) when the request resolved to no organisation:
-a single-tenant deployment, or one with no custom-domain pin for this host. The library resolves the organisation for an anonymous, pre-authentication request itself, in the order set out in [Organizations](organizations#organizations-on-the-login-page): an authoritative host pin first, then the authorize request's organisation, then a single-entry client restriction. A host with its own pre-auth resolution (Authagonal Cloud pins one per custom domain) can instead set `organization` when it assembles the boot payload with `LoginBootPayloadBuilder`.
+a single-tenant deployment, or one with no custom-domain pin for this host. The library resolves the organisation for an anonymous, pre-authentication request itself, in the order set out in [Organizations](organizations#organizations-on-the-login-page): an authoritative host pin first, then the authorize request's organisation, then a single-entry client restriction. A host with its own pre-auth resolution (Authagonal Cloud pins one per custom domain) sets that pin through `ITenantContext` (`OrganizationId` with `OrganizationIdIsAuthoritative`), which `LoginBootPayloadBuilder.BuildAsync` resolves through `PreAuthOrganizationResolver`, or builds a `LoginBootPayload` record itself and passes it to `LoginBootPayloadBuilder.InjectIntoShell`. `BuildAsync` takes no organization argument.
 
 When `organization.name` is present and differs from `branding.appName` (case-insensitive, trimmed,
 so an organisation named the same as the tenant does not produce "Acme / Signing in to Acme"),
@@ -51,7 +57,7 @@ and account) shows it identically. Nothing renders, and the header keeps its nor
 
 When the request resolves to an organisation, that organisation's `BrandingJson` is merged field by field over the tenant's branding, and the result is the `branding` member of the boot payload. A null or absent field inherits the tenant's value, unknown keys are ignored, a value of the wrong kind keeps the tenant's value for that key, `languages` replaces the tenant's list, and a malformed document gives the tenant's branding unchanged. An organisation cannot set `showRegistration`. The rules are in [Organizations](organizations#organization-branding) (`OrganizationBranding.Merge`).
 
-The standalone server builds the boot payload for every request to the login page with `LoginBootPayloadBuilder`, and `MapAuthagonalLoginFallback()` inlines it as `<script type="application/json" id="authagonal-boot">` just before `</head>`. `branding.json` is re-read on every request, so an edit to the mounted file applies at once; an absent or malformed file is treated as `{}` (with a warning for a malformed one). If anything fails, the plain `index.html` is served and the SPA fetches `/branding.json` as before.
+The standalone server builds the boot payload with `LoginBootPayloadBuilder` for the login routes (`/login`, `/accept-invite` and the other SPA routes; the bare `/` is served as the plain `index.html` with no payload, so it shows no organization), and `MapAuthagonalLoginFallback()` inlines it as `<script type="application/json" id="authagonal-boot">` just before `</head>`. `branding.json` is re-read on every request, so an edit to the mounted file applies at once; an absent or malformed file is treated as `{}` (with a warning for a malformed one). If anything fails, the plain `index.html` is served and the SPA fetches `/branding.json` as before.
 
 ## Organisation Branding in Invitation Emails
 

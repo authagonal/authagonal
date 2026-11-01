@@ -244,7 +244,7 @@ client.RestrictedToOrganizationIds = ["org_7f3a"];
 
 在任何人登录之前不存在用户，因此登录页面必须从请求本身得知它属于哪个组织。`PreAuthOrganizationResolver` 按下列顺序为登录页面完成这一解析；第一条指明组织的规则生效。
 
-1. **具有权威性的宿主绑定。** 宿主已将请求的域名绑定到某个组织，并将该绑定标记为具有权威性（参见[将宿主绑定到组织](#pinning-a-host-to-an-organization)）。指向不存在的组织（例如已被删除）的绑定不算绑定：系统会记录一条警告，解析继续进行。
+1. **具有权威性的宿主绑定。** 宿主已将请求的域名绑定到某个组织，并将该绑定标记为具有权威性（参见[将宿主绑定到组织](#pinning-a-host-to-an-organization)）。指向不存在的组织（例如已被删除）的绑定不算绑定：解析继续进行。登录页面对此保持静默；只有 `/connect/authorize` 和 `/connect/par` 上的强制检查才会记录警告。
 2. **仅在 `/accept-invite` 上的 `organization`。**
 3. **授权请求的组织**：`returnUrl` 查询字符串中的 `organization`、`org_slug` 或 `org_id`，或其 `request_uri` 所指向的已推送请求内部的这些参数；此时该请求的参数和客户端会取代外层的参数和客户端。
 4. **已启用客户端的 `RestrictedToOrganizationIds` 中唯一的条目。**

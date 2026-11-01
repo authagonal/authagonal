@@ -23,6 +23,8 @@ app.MapFallbackToFile("index.html");
 app.Run();
 ```
 
+カスタムホストは、`app.MapFallbackToFile("index.html")` の代わりに `app.MapAuthagonalLoginFallback()` を呼び出すと、スタンドアロンサーバーと同様に、組織のブートペイロードをログインページにインラインで埋め込めます。ルートそのもの `/` は引き続きプレーンな `index.html` として返されます。
+
 ### マルチテナントのホスティング {#multi-tenant-hosting}
 
 マルチテナントのデプロイメントでは、代わりに `AddAuthagonalCore()` を使用します。これはエンドポイント、ミドルウェア、コアサービスを登録しますが、ストレージとバックグラウンドサービスは登録しません。それらはテナントごとに自分で提供します。署名鍵の管理には既定で `Authagonal.Protocol` の `ProtocolKeyManager` シングルトンが使われ、`AddAuthagonalCore()` の前に独自の `IKeyManager` を登録したホストでは、その登録が維持されます。
@@ -389,6 +391,8 @@ app.MapGet("/custom/health", () => new { status = "healthy" });
 
 app.MapFallbackToFile("index.html");
 ```
+
+カスタムホストは、`app.MapFallbackToFile("index.html")` の代わりに `app.MapAuthagonalLoginFallback()` を呼び出すと、スタンドアロンサーバーと同様に、組織のブートペイロードをログインページにインラインで埋め込めます。ルートそのもの `/` は引き続きプレーンな `index.html` として返されます。
 
 ## HashiCorp Vault Transit との統合 {#hashicorp-vault-transit-integration}
 

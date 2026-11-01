@@ -244,7 +244,7 @@ Rỗng (điều mà mọi client hiện có đều đang có) nghĩa là không 
 
 Trước khi có ai đăng nhập thì chưa có người dùng, nên trang đăng nhập phải tự biết từ chính request rằng nó dành cho tổ chức nào. `PreAuthOrganizationResolver` làm việc này cho trang đăng nhập theo thứ tự dưới đây; quy tắc đầu tiên chỉ ra một tổ chức sẽ thắng.
 
-1. **Ghim host có thẩm quyền.** Host đã ghim tên miền của request vào một tổ chức và đánh dấu ghim đó là có thẩm quyền (xem [Ghim một host vào một tổ chức](#pinning-a-host-to-an-organization)). Một ghim không chỉ tới tổ chức nào tồn tại (đã bị xóa) thì không được tính là ghim: một cảnh báo được ghi log và việc phân giải tiếp tục.
+1. **Ghim host có thẩm quyền.** Host đã ghim tên miền của request vào một tổ chức và đánh dấu ghim đó là có thẩm quyền (xem [Ghim một host vào một tổ chức](#pinning-a-host-to-an-organization)). Một ghim không chỉ tới tổ chức nào tồn tại (đã bị xóa) thì không được tính là ghim: việc phân giải tiếp tục. Trang đăng nhập làm vậy một cách im lặng; chỉ việc thực thi trên `/connect/authorize` và `/connect/par` mới ghi log cảnh báo.
 2. **`organization` chỉ trên `/accept-invite`.**
 3. **Tổ chức của request ủy quyền**: `organization`, `org_slug` hoặc `org_id` trong query của `returnUrl`, hoặc bên trong request đã được đẩy (push) mà `request_uri` của nó chỉ tới; khi đó tham số và client của request ấy thay thế các giá trị bên ngoài.
 4. **Mục duy nhất trong `RestrictedToOrganizationIds` của một client đang được bật.**

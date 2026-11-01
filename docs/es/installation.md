@@ -210,7 +210,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-El host se compara sin distinguir mayúsculas de minúsculas y el puerto se ignora. Un host fijado queda limitado a su organización en `/connect/authorize` y `/connect/par`, y su página de inicio de sesión muestra el nombre y la personalización de marca de esa organización. Véase [Organizaciones](organizations#pinning-a-host-to-an-organization).
+El host se compara sin distinguir mayúsculas de minúsculas y el puerto se ignora. Un host fijado queda limitado a su organización en `/connect/authorize` y `/connect/par`, y sus rutas de inicio de sesión (por ejemplo `/login`, pero no la raíz `/`, que se sirve como el `index.html` simple) muestran el nombre y la personalización de marca de esa organización. Véase [Organizaciones](organizations#pinning-a-host-to-an-organization).
 
 ## Lista de comprobación de seguridad para producción {#production-security-checklist}
 

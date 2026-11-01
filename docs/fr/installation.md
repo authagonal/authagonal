@@ -210,7 +210,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-L'hôte est comparé sans distinction de casse et le port est ignoré. Un hôte rattaché est limité à son organisation sur `/connect/authorize` et `/connect/par`, et sa page de connexion affiche le nom et la personnalisation de cette organisation. Voir [Organisations](organizations#pinning-a-host-to-an-organization).
+L'hôte est comparé sans distinction de casse et le port est ignoré. Un hôte rattaché est limité à son organisation sur `/connect/authorize` et `/connect/par`, et ses routes de connexion (par exemple `/login`, mais pas la racine `/`, servie sous la forme de l'`index.html` simple) affichent le nom et la personnalisation de cette organisation. Voir [Organisations](organizations#pinning-a-host-to-an-organization).
 
 ## Checklist de sécurité pour la production {#production-security-checklist}
 

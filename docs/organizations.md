@@ -243,7 +243,7 @@ Empty (what every existing client has) means unrestricted. A request whose organ
 
 Before anyone has signed in there is no user, so the login page has to learn which organization it is for from the request itself. `PreAuthOrganizationResolver` does this for the login page in the order below; the first rule that names an organization wins.
 
-1. **An authoritative host pin.** The host has pinned the request's domain to one organization and marked the pin authoritative (see [Pinning a host to an organization](#pinning-a-host-to-an-organization)). A pin that names no organization (one that was deleted) is no pin: a warning is logged and resolution carries on.
+1. **An authoritative host pin.** The host has pinned the request's domain to one organization and marked the pin authoritative (see [Pinning a host to an organization](#pinning-a-host-to-an-organization)). A pin that names no organization (one that was deleted) is no pin: resolution carries on. The login page does this silently; only the enforcement on `/connect/authorize` and `/connect/par` logs a warning.
 2. **`organization` on `/accept-invite` only.**
 3. **The authorization request's organization**: `organization`, `org_slug` or `org_id` in the query of `returnUrl`, or inside the pushed request that its `request_uri` names, in which case that request's parameters and client replace the outer ones.
 4. **The single entry of an enabled client's `RestrictedToOrganizationIds`.**

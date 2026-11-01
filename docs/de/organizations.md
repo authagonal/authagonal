@@ -244,7 +244,7 @@ Leer (was jeder bestehende Client hat) bedeutet uneingeschränkt. Eine Anfrage, 
 
 Bevor sich jemand angemeldet hat, gibt es keinen Benutzer; die Anmeldeseite muss daher aus dem Request selbst erfahren, für welche Organisation sie gilt. `PreAuthOrganizationResolver` tut das für die Anmeldeseite in der folgenden Reihenfolge; die erste Regel, die eine Organisation nennt, gewinnt.
 
-1. **Eine maßgebliche Host-Zuordnung.** Der Host hat die Domain des Requests an eine Organisation gebunden und die Zuordnung als maßgeblich gekennzeichnet (siehe [Einen Host an eine Organisation binden](#pinning-a-host-to-an-organization)). Eine Zuordnung, die keine existierende Organisation nennt (eine gelöschte), gilt als keine Zuordnung: Es wird eine Warnung protokolliert und die Auflösung läuft weiter.
+1. **Eine maßgebliche Host-Zuordnung.** Der Host hat die Domain des Requests an eine Organisation gebunden und die Zuordnung als maßgeblich gekennzeichnet (siehe [Einen Host an eine Organisation binden](#pinning-a-host-to-an-organization)). Eine Zuordnung, die keine existierende Organisation nennt (eine gelöschte), gilt als keine Zuordnung: Die Auflösung läuft weiter. Die Anmeldeseite tut das stillschweigend; nur die Durchsetzung auf `/connect/authorize` und `/connect/par` protokolliert eine Warnung.
 2. **`organization` nur auf `/accept-invite`.**
 3. **Die Organisation der Autorisierungsanfrage**: `organization`, `org_slug` oder `org_id` in der Query von `returnUrl` oder innerhalb der gepushten Anfrage, die ihr `request_uri` benennt; deren Parameter und Client ersetzen dann die äußeren.
 4. **Der einzelne Eintrag in `RestrictedToOrganizationIds` eines aktivierten Clients.**

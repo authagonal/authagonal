@@ -210,7 +210,7 @@ Organizations__PinnedHosts__login.acme.example=org_7f3a
 --Organizations:PinnedHosts:login.acme.example=org_7f3a
 ```
 
-主机名比较时不区分大小写，端口会被忽略。被绑定的宿主在 `/connect/authorize` 和 `/connect/par` 上被限定在其组织内，其登录页面显示该组织的名称和品牌配置。参见[组织](organizations#pinning-a-host-to-an-organization)。
+主机名比较时不区分大小写，端口会被忽略。被绑定的宿主在 `/connect/authorize` 和 `/connect/par` 上被限定在其组织内，其登录路由（例如 `/login`，但不包括以普通 `index.html` 提供的裸根路径 `/`）显示该组织的名称和品牌配置。参见[组织](organizations#pinning-a-host-to-an-organization)。
 
 ## 生产环境安全检查清单 {#production-security-checklist}
 

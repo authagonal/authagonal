@@ -244,7 +244,7 @@ Une liste vide (ce qu'ont tous les clients existants) signifie aucune restrictio
 
 Tant que personne n'est connecté, il n'y a pas d'utilisateur : la page de connexion doit donc déduire de la requête elle-même pour quelle organisation elle est affichée. `PreAuthOrganizationResolver` le fait pour la page de connexion dans l'ordre ci-dessous ; la première règle qui désigne une organisation l'emporte.
 
-1. **Un rattachement d'hôte faisant autorité.** L'hôte a rattaché le domaine de la requête à une organisation et déclaré ce rattachement comme faisant autorité (voir [Rattacher un hôte à une organisation](#pinning-a-host-to-an-organization)). Un rattachement qui ne désigne aucune organisation existante (une organisation supprimée) n'en est pas un : un avertissement est journalisé et la résolution se poursuit.
+1. **Un rattachement d'hôte faisant autorité.** L'hôte a rattaché le domaine de la requête à une organisation et déclaré ce rattachement comme faisant autorité (voir [Rattacher un hôte à une organisation](#pinning-a-host-to-an-organization)). Un rattachement qui ne désigne aucune organisation existante (une organisation supprimée) n'en est pas un : la résolution se poursuit. La page de connexion le fait silencieusement ; seul le contrôle effectué sur `/connect/authorize` et `/connect/par` journalise un avertissement.
 2. **`organization` sur `/accept-invite` uniquement.**
 3. **L'organisation de la demande d'autorisation** : `organization`, `org_slug` ou `org_id` dans la query de `returnUrl`, ou dans la demande poussée que désigne son `request_uri` ; les paramètres et le client de cette demande remplacent alors ceux de la demande extérieure.
 4. **L'unique entrée de `RestrictedToOrganizationIds` d'un client activé.**
