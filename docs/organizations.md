@@ -143,7 +143,7 @@ Where the link points is `IInviteLinkBuilder` (`Authagonal.Core.Services`): `Tas
 
 ## The accept-invite page
 
-The login app serves `/accept-invite` at the host root, outside the `/login` basename, and the standalone server's SPA fallback serves it. It reads the token from `p`, names the organization when the link carries one, asks for a new password twice, checks it against the password policy and posts it to `/api/auth/reset-password`. A link with no token, or a token that is unknown or expired, shows an invalid-or-expired message and no form; a password the server refuses (`weak_password`) shows the server's message. The copy is in all eleven locales. A host built on the npm package imports `AcceptInvite` from `@authagonal/login` and mounts it at `/accept-invite`.
+The login app serves `/accept-invite` at the host root, outside the `/login` basename, and the standalone server's SPA fallback serves it. It reads the token from `p`, asks for a new password twice, checks it against the password policy and posts it to `/api/auth/reset-password`. When the link carries `organization`, the page names that organization: by its display name when the host's boot data (`getOrganization()`) carries the same organization, otherwise by the slug from the link, which is what the standalone server shows. A link with no token shows an invalid-or-expired message and no form; a token that is unknown or expired shows the same message when the password is submitted. A password the server refuses (`weak_password`) shows the server's message. The copy is in all eleven locales. A host built on the npm package imports `AcceptInvite` from `@authagonal/login` and mounts it at `/accept-invite`.
 
 ## Calling the services from code
 

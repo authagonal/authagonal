@@ -144,7 +144,7 @@ DNS 读取通过 `ITxtResolver`(`Authagonal.Core.Services`)进行:`ResolveTxtAsy
 
 ## 接受邀请页面 {#the-accept-invite-page}
 
-登录应用在主机根路径提供 `/accept-invite`,位于 `/login` 基础路径之外,独立服务器的 SPA 回退会提供它。页面从 `p` 读取令牌,在链接带有组织时显示组织名称,要求输入两次新密码,按密码策略校验后提交到 `/api/auth/reset-password`。没有令牌、或令牌未知或已过期的链接会显示“无效或已过期”的消息,且不显示表单;被服务器拒绝的密码(`weak_password`)会显示服务器返回的消息。文本提供全部十一种语言。基于 npm 包的主机从 `@authagonal/login` 导入 `AcceptInvite` 并将其挂载到 `/accept-invite`。
+登录应用在主机根路径提供 `/accept-invite`,位于 `/login` 基础路径之外,独立服务器的 SPA 回退会提供它。页面从 `p` 读取令牌,要求输入两次新密码,按密码策略校验后提交到 `/api/auth/reset-password`。链接带有 `organization` 时,页面会显示该组织:如果主机的启动数据(`getOrganization()`)包含同一个组织,就显示其显示名称,否则显示链接中的 slug,独立服务器显示的就是 slug。没有令牌的链接会显示“无效或已过期”的消息,且不显示表单;令牌未知或已过期时,提交密码后会显示同样的消息。被服务器拒绝的密码(`weak_password`)会显示服务器返回的消息。文本提供全部十一种语言。基于 npm 包的主机从 `@authagonal/login` 导入 `AcceptInvite` 并将其挂载到 `/accept-invite`。
 
 ## 在代码中调用服务 {#calling-the-services-from-code}
 

@@ -144,7 +144,7 @@ Email đi qua `IEmailService.SendUserInviteEmailAsync(toEmail, tenantName, accep
 
 ## Trang chấp nhận lời mời {#the-accept-invite-page}
 
-Ứng dụng đăng nhập phục vụ `/accept-invite` ở gốc của host, ngoài đường dẫn gốc `/login`, và SPA fallback của máy chủ độc lập phục vụ nó. Trang đọc token từ `p`, nêu tên tổ chức khi liên kết có, yêu cầu nhập mật khẩu mới hai lần, kiểm tra theo chính sách mật khẩu và gửi tới `/api/auth/reset-password`. Một liên kết không có token, hoặc có token không rõ hay đã hết hạn, hiển thị thông báo «không hợp lệ hoặc đã hết hạn» và không có biểu mẫu; một mật khẩu bị máy chủ từ chối (`weak_password`) hiển thị thông báo của máy chủ. Văn bản có đủ mười một ngôn ngữ. Host dựa trên gói npm nhập `AcceptInvite` từ `@authagonal/login` và gắn nó tại `/accept-invite`.
+Ứng dụng đăng nhập phục vụ `/accept-invite` ở gốc của host, ngoài đường dẫn gốc `/login`, và SPA fallback của máy chủ độc lập phục vụ nó. Trang đọc token từ `p`, yêu cầu nhập mật khẩu mới hai lần, kiểm tra theo chính sách mật khẩu và gửi tới `/api/auth/reset-password`. Khi liên kết có `organization`, trang nêu tên tổ chức đó: bằng tên hiển thị nếu dữ liệu khởi động của host (`getOrganization()`) có cùng tổ chức đó, nếu không thì bằng slug trong liên kết, đây là những gì máy chủ độc lập hiển thị. Một liên kết không có token hiển thị thông báo «không hợp lệ hoặc đã hết hạn» và không có biểu mẫu; một token không rõ hay đã hết hạn hiển thị cùng thông báo khi mật khẩu được gửi đi. Một mật khẩu bị máy chủ từ chối (`weak_password`) hiển thị thông báo của máy chủ. Văn bản có đủ mười một ngôn ngữ. Host dựa trên gói npm nhập `AcceptInvite` từ `@authagonal/login` và gắn nó tại `/accept-invite`.
 
 ## Gọi các dịch vụ từ mã {#calling-the-services-from-code}
 
