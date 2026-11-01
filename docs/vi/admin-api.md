@@ -598,7 +598,7 @@ Content-Type: application/json
 { "name": "Acme Corporation", "enabled": true }
 ```
 
-Mọi trường đều tùy chọn và chỉ thay đổi chính nó: `name`, `brandingJson`, `enabled`, `requireMembershipForTokens`, `allowAutoMembership` và `metadata` (được thay thế hoàn toàn; `{}` làm rỗng nó). `slug` chỉ được chấp nhận để từ chối khi khác giá trị hiện có. Trả về `200` cùng tổ chức. `404 organization_not_found`, `400 slug_immutable`, `400 invalid_branding_json`.
+Mọi trường đều tùy chọn và chỉ thay đổi chính nó: `name`, `brandingJson`, `enabled`, `requireMembershipForTokens`, `allowAutoMembership` và `metadata` (được thay thế hoàn toàn; `{}` xóa mọi khóa trừ `legacyOrganizationId`, khóa do backfill ghi và tồn tại sau mọi lần thay thế). `slug` chỉ được chấp nhận để từ chối khi khác giá trị hiện có. Trả về `200` cùng tổ chức. `404 organization_not_found`, `400 slug_immutable`, `400 invalid_branding_json`.
 
 ### Xóa tổ chức {#delete-organization}
 

@@ -598,7 +598,7 @@ Content-Type: application/json
 { "name": "Acme Corporation", "enabled": true }
 ```
 
-所有字段都是可选的,并且只更改自身:`name`、`brandingJson`、`enabled`、`requireMembershipForTokens`、`allowAutoMembership` 和 `metadata`(整体替换;`{}` 会清空它)。`slug` 仅为在其不同时拒绝而被接受。返回 `200` 和组织。`404 organization_not_found`、`400 slug_immutable`、`400 invalid_branding_json`。
+所有字段都是可选的,并且只更改自身:`name`、`brandingJson`、`enabled`、`requireMembershipForTokens`、`allowAutoMembership` 和 `metadata`(整体替换;`{}` 会清除除 `legacyOrganizationId` 之外的所有键,该键由回填写入,在任何替换后都会保留)。`slug` 仅为在其不同时拒绝而被接受。返回 `200` 和组织。`404 organization_not_found`、`400 slug_immutable`、`400 invalid_branding_json`。
 
 ### 删除组织 {#delete-organization}
 

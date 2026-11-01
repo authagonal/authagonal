@@ -598,7 +598,7 @@ Content-Type: application/json
 { "name": "Acme Corporation", "enabled": true }
 ```
 
-Todos los campos son opcionales y cambian solo a sí mismos: `name`, `brandingJson`, `enabled`, `requireMembershipForTokens`, `allowAutoMembership` y `metadata` (se sustituye por completo; `{}` lo vacía). `slug` se acepta solo para rechazarlo cuando difiere. Devuelve `200` con la organización. `404 organization_not_found`, `400 slug_immutable`, `400 invalid_branding_json`.
+Todos los campos son opcionales y cambian solo a sí mismos: `name`, `brandingJson`, `enabled`, `requireMembershipForTokens`, `allowAutoMembership` y `metadata` (se sustituye por completo; `{}` elimina todas las claves salvo `legacyOrganizationId`, que escribe el backfill y sobrevive a cualquier sustitución). `slug` se acepta solo para rechazarlo cuando difiere. Devuelve `200` con la organización. `404 organization_not_found`, `400 slug_immutable`, `400 invalid_branding_json`.
 
 ### Eliminar una organización {#delete-organization}
 

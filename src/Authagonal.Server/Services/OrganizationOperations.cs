@@ -128,8 +128,9 @@ public sealed partial class OrganizationOperations(
     /// <summary>
     /// Updates the name, branding, policy flags and metadata. <paramref name="slug"/> is accepted only to
     /// refuse a rename: a slug is immutable once created, because a relying party hard-codes it. Every
-    /// other parameter is optional and touches only its own field; a non-null but empty
-    /// <paramref name="metadata"/> is a deliberate clear.
+    /// other parameter is optional and touches only its own field; a non-null
+    /// <paramref name="metadata"/> replaces the bag whole, so an empty one clears every key except
+    /// <c>legacyOrganizationId</c>, the backfill's stamp, which survives any replacement.
     /// </summary>
     public async Task<OperationResult<OrganizationDto>> UpdateAsync(
         string id, string? name, string? brandingJson, string? slug, bool? enabled,

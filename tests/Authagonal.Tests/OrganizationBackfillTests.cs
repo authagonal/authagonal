@@ -116,6 +116,24 @@ public sealed class OrganizationBackfillTests
     }
 
     [Fact]
+    public async Task UpdateAsync_WithEmptyMetadata_ClearsEveryKeyExceptTheLegacyStamp()
+    {
+        await SeedAsync("u1", "Acme Corp");
+        await _ops.BackfillAsync(false, Actor, Ct);
+        var org = (await _orgs.GetBySlugAsync("acme-corp"))!;
+        await _ops.UpdateAsync(org.Id, null, null, null, null, null, null,
+            new Dictionary<string, string> { ["tier"] = "gold" }, Actor, Ct);
+
+        var cleared = await _ops.UpdateAsync(org.Id, null, null, null, null, null, null,
+            new Dictionary<string, string>(), Actor, Ct);
+
+        Assert.Equal(OperationOutcome.Ok, cleared.Outcome);
+        var stored = (await _orgs.GetBySlugAsync("acme-corp"))!;
+        var only = Assert.Single(stored.Metadata);
+        Assert.Equal("Acme Corp", only.Value);
+    }
+
+    [Fact]
     public async Task SecondRun_AfterTheOrganizationWasUpdatedThroughUpdateAsync_StillCreatesNothing()
     {
         await SeedAsync("u1", "Acme Corp");

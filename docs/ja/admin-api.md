@@ -572,7 +572,7 @@ Content-Type: application/json
 { "name": "Acme Corporation", "enabled": true }
 ```
 
-すべてのフィールドは任意で、指定したものだけが変更されます。`name`、`brandingJson`、`enabled`、`requireMembershipForTokens`、`allowAutoMembership`、`metadata`(全体が置き換えられ、`{}` で空になります)です。`slug` は、異なる場合に拒否するためだけに受け付けられます。`200` で組織を返します。`404 organization_not_found`、`400 slug_immutable`、`400 invalid_branding_json`。
+すべてのフィールドは任意で、指定したものだけが変更されます。`name`、`brandingJson`、`enabled`、`requireMembershipForTokens`、`allowAutoMembership`、`metadata`(全体が置き換えられ、`{}` は `legacyOrganizationId` 以外のすべてのキーを削除します。このキーはバックフィルが記録し、置き換えの後も残ります)です。`slug` は、異なる場合に拒否するためだけに受け付けられます。`200` で組織を返します。`404 organization_not_found`、`400 slug_immutable`、`400 invalid_branding_json`。
 
 ### 組織の削除 {#delete-organization}
 
