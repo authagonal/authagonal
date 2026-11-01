@@ -292,6 +292,41 @@ public sealed class OrganizationDomainRoutingTests : IAsyncLifetime
         Assert.Equal(RedirectUri, resumed["redirect_uri"]);
     }
 
+    /// <summary>A blank organisation parameter names none, so the pin replaces it rather than sitting beside it.</summary>
+    [Theory]
+    [InlineData("organization")]
+    [InlineData("org_slug")]
+    [InlineData("org_id")]
+    public async Task Authorize_OnAPinnedDomainCarryingABlankAlias_HasItReplacedByThePin(string alias)
+    {
+        Seed("Org_7fA2", "acme-eu");
+        await StartAsync(("eu.acme.com", "Org_7fA2"));
+
+        var response = await GetAsync("eu.acme.com", AuthorizeUrl("/connect/authorize", $"&{alias}="));
+        var resumed = ResumedRequest(response);
+
+        Assert.Equal(["Org_7fA2"], resumed.GetValues("organization"));
+        Assert.DoesNotContain("org_slug", resumed.AllKeys!);
+        Assert.DoesNotContain("org_id", resumed.AllKeys!);
+    }
+
+    [Theory]
+    [InlineData("organization")]
+    [InlineData("org_slug")]
+    [InlineData("org_id")]
+    public async Task PushedAuthorization_OnAPinnedDomainCarryingABlankAlias_HasItReplacedByThePin(string alias)
+    {
+        Seed("Org_7fA2", "acme-eu");
+        await StartAsync(("eu.acme.com", "Org_7fA2"));
+
+        var response = await PostFormAsync("eu.acme.com", "/connect/par", PushedForm + $"&{alias}=");
+        var (_, stored) = await StoredPushedRequestAsync(response);
+
+        Assert.Equal(["Org_7fA2"], stored["organization"]);
+        Assert.False(stored.ContainsKey("org_slug"));
+        Assert.False(stored.ContainsKey("org_id"));
+    }
+
     [Fact]
     public async Task Authorize_OnATenantLevelDomain_IsNotTouched()
     {

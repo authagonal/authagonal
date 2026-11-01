@@ -148,10 +148,12 @@ public sealed class OrganizationPinMiddleware(RequestDelegate next, ILogger<Orga
         if (!string.IsNullOrWhiteSpace(query["request_uri"].FirstOrDefault()))
             return false;
 
-        // Appending is safe only because the request carries none of the three aliases: the endpoint
-        // refuses a repeated organisation parameter as a duplicated single-valued parameter, and two
-        // different aliases as invalid_request.
-        context.Request.QueryString = context.Request.QueryString.Add("organization", pinned.Id);
+        // Any blank alias the request carries names no organisation, but the endpoint would still read
+        // it beside the pin as a repeated or conflicting parameter, so they are dropped first.
+        var kept = query
+            .Where(p => !OrganizationParameters.Contains(p.Key, StringComparer.OrdinalIgnoreCase))
+            .SelectMany(p => p.Value.Select(v => new KeyValuePair<string, string?>(p.Key, v)));
+        context.Request.QueryString = QueryString.Create(kept).Add("organization", pinned.Id);
         logger.LogDebug(
             "Pinned authorization request on {Host} to organization {OrganizationId}",
             context.Request.Host.Host, pinned.Id);
@@ -217,8 +219,13 @@ public sealed class OrganizationPinMiddleware(RequestDelegate next, ILogger<Orga
             return await RefuseUnlessPinnedAsync(context, organizations, pinned, requested);
         }
 
+        // Blank aliases are dropped for the same reason as on the query: beside the pin they would be
+        // stored as a repeated or conflicting organisation parameter.
+        var keptBody = string.Join("&", fields
+            .Where(f => !OrganizationParameters.Contains(f.Key, StringComparer.OrdinalIgnoreCase))
+            .SelectMany(f => f.Value.Select(v => Uri.EscapeDataString(f.Key) + "=" + Uri.EscapeDataString(v ?? ""))));
         var pinnedBody = System.Text.Encoding.UTF8.GetBytes(
-            (body.Length == 0 ? "" : body + "&") + "organization=" + Uri.EscapeDataString(pinned.Id));
+            (keptBody.Length == 0 ? "" : keptBody + "&") + "organization=" + Uri.EscapeDataString(pinned.Id));
         request.Body = new MemoryStream(pinnedBody);
         request.ContentLength = pinnedBody.Length;
         logger.LogDebug(
