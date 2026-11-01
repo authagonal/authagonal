@@ -24,7 +24,16 @@ public sealed class DefaultTenantContext : ITenantContext
     public string TenantId => "default";
     public string Issuer { get; }
 
-    public DefaultTenantContext(IConfiguration configuration, IHttpContextAccessor? httpContextAccessor = null)
+    /// <summary>
+    /// The constructor that existed before pins: a context with no request to read, so it never pins.
+    /// Kept as its own overload (rather than an optional parameter) so code that constructs it by
+    /// reflection or from a compiled caller keeps working.
+    /// </summary>
+    public DefaultTenantContext(IConfiguration configuration) : this(configuration, null)
+    {
+    }
+
+    public DefaultTenantContext(IConfiguration configuration, IHttpContextAccessor? httpContextAccessor)
     {
         _configuration = configuration;
         _httpContextAccessor = httpContextAccessor;
