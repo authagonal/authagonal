@@ -39,6 +39,12 @@
 - **The standalone server serves the login page through `MapAuthagonalLoginFallback()`** instead of a plain fallback to `index.html`. `branding.json` is re-read on every request; any failure serves the plain `index.html`.
 - The documentation (`organizations`, `branding`, `installation`, in every locale) no longer says the library resolves no organization before authentication or reads no organization branding.
 
+### Security
+- **ASP.NET Core 10.0.14 in the published images.** The server, migration and .NET demo images' `aspnet:10.0`
+  base-image digests move from the 10.0.11 build to the 10.0.14 one. The 10.0.11 shared framework fails the release
+  scan on CVE-2026-70188 and CVE-2026-88092 (CRITICAL) and ten HIGH findings, so a release from the old pin would
+  publish its NuGet and npm packages and no image, as 0.30.0 did. The SDK pin and lock files are unchanged.
+
 ## [0.31.1], 2026-10-04
 
 ### Changed

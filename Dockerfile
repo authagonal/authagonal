@@ -32,7 +32,7 @@ COPY src/ src/
 RUN dotnet publish src/Authagonal.Server/ -f net10.0 -c Release -o /app/publish --no-restore
 
 # Stage 3: Runtime
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:a4556ed033fa96f984bb7a8d348851cb2d36b1281dd2420070045f664fbb5f94
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee
 WORKDIR /app
 # Patch the OS layer at build time: a base image lagging its distro otherwise fails the blocking
 # Trivy gate with no source change (libssl3t64 CVE-2026-84782 on v0.30.0).
