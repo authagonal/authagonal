@@ -1,5 +1,5 @@
 # Stage 1: Build .NET API
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:e1fc6e423f543119c406d24e2e687d67c569f18f04a37a8b0005d80ad0dcee80 AS backend
+FROM mcr.microsoft.com/dotnet/sdk:11.0@sha256:65f3c7c6a25a239ab3e6719f2896147e7b68242ff2d8818dd70498bde6ef8bea AS backend
 WORKDIR /src
 COPY demos/sample-app/SampleApp.Api/*.csproj ./
 RUN dotnet restore
